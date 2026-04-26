@@ -1,0 +1,135 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Background & Surface */
+  --color-bg: #09090b;
+  --color-surface: rgba(250, 250, 250, 0.025);
+  --color-surface-2: rgba(250, 250, 250, 0.04);
+  --color-surface-3: rgba(250, 250, 250, 0.06);
+  --glass-bg: rgba(9, 9, 11, 0.8);
+
+  /* Text */
+  --color-text: #fafafa;
+  --color-text-2: rgba(250, 250, 250, 0.70);
+  --color-text-3: rgba(250, 250, 250, 0.35);
+
+  /* Borders */
+  --color-border: rgba(250, 250, 250, 0.07);
+  --color-border-strong: rgba(250, 250, 250, 0.14);
+
+  /* Accent */
+  --color-accent: #a78bfa;
+  --color-accent-bright: #c4b5fd;
+  --color-accent-deep: #6d28d9;
+  --color-on-accent: #0a0a0b;
+  --color-glow: rgba(167, 139, 250, 0.08);
+
+  /* Status */
+  --color-green: #34d399;
+  --color-amber: #f59e0b;
+  --color-red: #ef4444;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  color-scheme: dark;
+}
+
+body {
+  font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  color: var(--color-text-2);
+  background: var(--color-bg);
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Side panel scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(250, 250, 250, 0.08);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(250, 250, 250, 0.16);
+}
+
+/* Selection */
+::selection {
+  background: rgba(167, 139, 250, 0.25);
+}
+
+/* Section label -- matches Pranan app's // PREFIX style */
+.section-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--color-accent);
+}
+.section-label::before {
+  content: '// ';
+}
+
+/* Accent glow for primary actions */
+.btn-accent {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 0 0 0 rgba(167, 139, 250, 0);
+}
+.btn-accent:hover {
+  transform: translateY(-1px);
+  opacity: 0.95;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 0 12px rgba(167, 139, 250, 0.15);
+}
+.btn-accent:active {
+  transform: translateY(0);
+}
+.btn-accent:disabled {
+  opacity: 0.4;
+  transform: none;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* Glass surface cards */
+.glass-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(12px);
+}
+
+/* Subtle hover effect for interactive cards */
+.glass-card-interactive {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(12px);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.glass-card-interactive:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-2);
+}
+
+/* Focus ring for accessibility */
+*:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.5);
+  outline-offset: 2px;
+}
