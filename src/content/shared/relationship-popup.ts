@@ -51,7 +51,7 @@ export function showRelationshipPopup(
   shadow.innerHTML = `
     <style>
       :host {
-        font-family: 'Inter', -apple-system, system-ui, sans-serif;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
       }
       .popup {
         width: 280px;

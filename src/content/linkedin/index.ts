@@ -252,7 +252,7 @@ function injectMessagingPromptBar() {
     gap: 8px;
     padding: 6px 12px;
     margin: 4px 8px 6px 8px;
-    background: #faf8ff;
+    background: rgba(250,250,250,0.04);
     border: 1px solid rgba(167, 139, 250, 0.12);
     border-radius: 8px;
     cursor: text;
@@ -262,11 +262,11 @@ function injectMessagingPromptBar() {
 
   bar.addEventListener('mouseenter', () => {
     bar.style.borderColor = 'rgba(167, 139, 250, 0.3)';
-    bar.style.background = '#f5f0ff';
+    bar.style.background = 'rgba(250,250,250,0.06)';
   });
   bar.addEventListener('mouseleave', () => {
     bar.style.borderColor = 'rgba(167, 139, 250, 0.12)';
-    bar.style.background = '#faf8ff';
+    bar.style.background = 'rgba(250,250,250,0.04)';
   });
 
   // Pranan icon
@@ -275,7 +275,7 @@ function injectMessagingPromptBar() {
     width: 22px; height: 22px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
   `;
-  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
+  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="20" height="20" rx="4" stroke="#a78bfa" stroke-width="1.5" opacity="0.3"/><rect x="5" y="5" width="14" height="14" rx="3" stroke="#a78bfa" stroke-width="1.5" opacity="0.5"/><rect x="8" y="8" width="8" height="8" rx="2" stroke="#a78bfa" stroke-width="1.5" opacity="0.7"/><rect x="10" y="10" width="4" height="4" rx="1" fill="#a78bfa"/></svg>`;
 
   // Build placeholder text
   let placeholderText = 'Draft message with Pranan...';
@@ -408,7 +408,7 @@ function injectCommentPromptBars() {
       gap: 6px;
       padding: 4px 10px;
       margin: 4px 0 2px 0;
-      background: #faf8ff;
+      background: rgba(250,250,250,0.04);
       border: 1px solid rgba(167, 139, 250, 0.12);
       border-radius: 6px;
       cursor: text;
@@ -418,11 +418,11 @@ function injectCommentPromptBars() {
 
     bar.addEventListener('mouseenter', () => {
       bar.style.borderColor = 'rgba(167, 139, 250, 0.3)';
-      bar.style.background = '#f5f0ff';
+      bar.style.background = 'rgba(250,250,250,0.06)';
     });
     bar.addEventListener('mouseleave', () => {
       bar.style.borderColor = 'rgba(167, 139, 250, 0.12)';
-      bar.style.background = '#faf8ff';
+      bar.style.background = 'rgba(250,250,250,0.04)';
     });
 
     // Small Pranan icon
@@ -431,7 +431,7 @@ function injectCommentPromptBars() {
       width: 18px; height: 18px; flex-shrink: 0;
       display: flex; align-items: center; justify-content: center;
     `;
-    icon.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
+    icon.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="20" height="20" rx="4" stroke="#a78bfa" stroke-width="1.5" opacity="0.3"/><rect x="5" y="5" width="14" height="14" rx="3" stroke="#a78bfa" stroke-width="1.5" opacity="0.5"/><rect x="8" y="8" width="8" height="8" rx="2" stroke="#a78bfa" stroke-width="1.5" opacity="0.7"/><rect x="10" y="10" width="4" height="4" rx="1" fill="#a78bfa"/></svg>`;
 
     const input = document.createElement('input');
     input.type = 'text';
