@@ -134,7 +134,7 @@ export const TIER_CSS_COLORS: Record<string, { bg: string; text: string; border:
 };
 
 export const HEALTH_CSS_COLORS: Record<string, { color: string; label: string }> = {
-  warming: { color: '#4ade80', label: 'Warming' },
+  warming: { color: '#34d399', label: 'Warming' },
   steady:  { color: '#60a5fa', label: 'Steady' },
   cooling: { color: '#fbbf24', label: 'Cooling' },
   dormant: { color: '#94a3b8', label: 'Dormant' },

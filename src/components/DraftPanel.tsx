@@ -108,7 +108,7 @@ export function DraftPanel({
             <div
               className="w-1.5 h-1.5 rounded-full"
               style={{
-                background: draft.voiceMatch > 0.7 ? '#22c55e' : draft.voiceMatch > 0.4 ? '#eab308' : '#ef4444',
+                background: draft.voiceMatch > 0.7 ? '#34d399' : draft.voiceMatch > 0.4 ? '#fbbf24' : '#ef4444',
               }}
             />
             <span className="text-[10px] text-brand-text-3 font-mono">

@@ -243,15 +243,15 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.15s ease;
-    font-family: -apple-system, system-ui, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   `;
 
   bar.addEventListener('mouseenter', () => {
-    bar.style.borderColor = 'rgba(109, 40, 217, 0.3)';
+    bar.style.borderColor = 'rgba(167, 139, 250, 0.3)';
     bar.style.background = '#f5f0ff';
   });
   bar.addEventListener('mouseleave', () => {
-    bar.style.borderColor = 'rgba(109, 40, 217, 0.12)';
+    bar.style.borderColor = 'rgba(167, 139, 250, 0.12)';
     bar.style.background = '#faf8ff';
   });
 
@@ -265,13 +265,13 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
     align-items: center;
     justify-content: center;
   `;
-  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
+  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
 
   // Prompt text
   const text = document.createElement('span');
   text.style.cssText = `
     font-size: 13px;
-    color: #6d28d9;
+    color: #a78bfa;
     opacity: 0.6;
     flex: 1;
   `;
@@ -284,7 +284,7 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
     border: none;
     cursor: pointer;
     padding: 2px;
-    color: #999;
+    color: rgba(250,250,250,0.4);
     font-size: 14px;
     line-height: 1;
     display: flex;
@@ -369,7 +369,7 @@ function injectFloatingIcon(composeWindow: Element, recipientEmail: string | nul
       }
       .pranan-icon-btn:hover {
         opacity: 1;
-        background: rgba(109, 40, 217, 0.08);
+        background: rgba(167, 139, 250, 0.08);
       }
       .pranan-icon-btn svg {
         width: 14px;
@@ -377,7 +377,7 @@ function injectFloatingIcon(composeWindow: Element, recipientEmail: string | nul
       }
     </style>
     <button class="pranan-icon-btn" title="Draft with Pranan">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 2L2 7l10 5 10-5-10-5z"/>
         <path d="M2 17l10 5 10-5"/>
         <path d="M2 12l10 5 10-5"/>
@@ -559,15 +559,15 @@ function injectThreadPromptBar(threadContainer: Element) {
     border-radius: 8px;
     cursor: text;
     transition: all 0.15s ease;
-    font-family: -apple-system, system-ui, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   `;
 
   bar.addEventListener('mouseenter', () => {
-    bar.style.borderColor = 'rgba(109, 40, 217, 0.3)';
+    bar.style.borderColor = 'rgba(167, 139, 250, 0.3)';
     bar.style.background = '#f5f0ff';
   });
   bar.addEventListener('mouseleave', () => {
-    bar.style.borderColor = 'rgba(109, 40, 217, 0.12)';
+    bar.style.borderColor = 'rgba(167, 139, 250, 0.12)';
     bar.style.background = '#faf8ff';
   });
 
@@ -581,7 +581,7 @@ function injectThreadPromptBar(threadContainer: Element) {
     align-items: center;
     justify-content: center;
   `;
-  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
+  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
 
   // Prompt input
   const input = document.createElement('input');
@@ -595,19 +595,19 @@ function injectThreadPromptBar(threadContainer: Element) {
     background: transparent;
     outline: none;
     font-size: 13px;
-    color: #374151;
+    color: #fafafa;
     font-family: inherit;
     cursor: text;
   `;
   // Inject a <style> tag for placeholder color (can't set pseudo-element via .style)
   const placeholderStyle = document.createElement('style');
-  placeholderStyle.textContent = `[${PRANAN_THREAD_BAR_ATTR}] input::placeholder { color: rgba(109, 40, 217, 0.5); }`;
+  placeholderStyle.textContent = `[${PRANAN_THREAD_BAR_ATTR}] input::placeholder { color: rgba(167, 139, 250, 0.5); }`;
   bar.appendChild(placeholderStyle);
 
   // Send / generate button
   const generateBtn = document.createElement('button');
   generateBtn.style.cssText = `
-    background: #6d28d9;
+    background: linear-gradient(135deg, #6d28d9, #a78bfa);
     color: white;
     border: none;
     border-radius: 6px;
@@ -623,8 +623,8 @@ function injectThreadPromptBar(threadContainer: Element) {
     transition: opacity 0.15s ease;
   `;
   generateBtn.textContent = 'Generate';
-  generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = '#5b21b6'; });
-  generateBtn.addEventListener('mouseleave', () => { generateBtn.style.background = '#6d28d9'; });
+  generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = 'linear-gradient(135deg, #5b21b6, #8b5cf6)'; });
+  generateBtn.addEventListener('mouseleave', () => { generateBtn.style.background = 'linear-gradient(135deg, #6d28d9, #a78bfa)'; });
 
   // Show generate button when input has text
   input.addEventListener('input', () => {

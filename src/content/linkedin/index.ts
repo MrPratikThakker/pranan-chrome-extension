@@ -253,19 +253,19 @@ function injectMessagingPromptBar() {
     padding: 6px 12px;
     margin: 4px 8px 6px 8px;
     background: #faf8ff;
-    border: 1px solid rgba(109, 40, 217, 0.12);
+    border: 1px solid rgba(167, 139, 250, 0.12);
     border-radius: 8px;
     cursor: text;
     transition: all 0.15s ease;
-    font-family: -apple-system, system-ui, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   `;
 
   bar.addEventListener('mouseenter', () => {
-    bar.style.borderColor = 'rgba(109, 40, 217, 0.3)';
+    bar.style.borderColor = 'rgba(167, 139, 250, 0.3)';
     bar.style.background = '#f5f0ff';
   });
   bar.addEventListener('mouseleave', () => {
-    bar.style.borderColor = 'rgba(109, 40, 217, 0.12)';
+    bar.style.borderColor = 'rgba(167, 139, 250, 0.12)';
     bar.style.background = '#faf8ff';
   });
 
@@ -275,7 +275,7 @@ function injectMessagingPromptBar() {
     width: 22px; height: 22px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
   `;
-  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
+  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
 
   // Build placeholder text
   let placeholderText = 'Draft message with Pranan...';
@@ -290,25 +290,25 @@ function injectMessagingPromptBar() {
   input.placeholder = placeholderText;
   input.style.cssText = `
     flex: 1; border: none; background: transparent; outline: none;
-    font-size: 13px; color: #374151; font-family: inherit; cursor: text;
+    font-size: 13px; color: #fafafa; font-family: inherit; cursor: text;
   `;
 
   // Placeholder style injection
   const placeholderStyle = document.createElement('style');
-  placeholderStyle.textContent = `[${PRANAN_LI_MSG_BAR_ATTR}] input::placeholder { color: rgba(109, 40, 217, 0.5); }`;
+  placeholderStyle.textContent = `[${PRANAN_LI_MSG_BAR_ATTR}] input::placeholder { color: rgba(167, 139, 250, 0.5); }`;
   bar.appendChild(placeholderStyle);
 
   // Generate button
   const generateBtn = document.createElement('button');
   generateBtn.style.cssText = `
-    background: #6d28d9; color: white; border: none; border-radius: 6px;
+    background: linear-gradient(135deg, #6d28d9, #a78bfa); color: white; border: none; border-radius: 6px;
     padding: 4px 12px; font-size: 12px; font-weight: 500; cursor: pointer;
     transition: all 0.15s ease; font-family: inherit; white-space: nowrap;
     opacity: 0; pointer-events: none;
   `;
   generateBtn.textContent = 'Generate';
-  generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = '#5b21b6'; });
-  generateBtn.addEventListener('mouseleave', () => { generateBtn.style.background = '#6d28d9'; });
+  generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = 'linear-gradient(135deg, #5b21b6, #8b5cf6)'; });
+  generateBtn.addEventListener('mouseleave', () => { generateBtn.style.background = 'linear-gradient(135deg, #6d28d9, #a78bfa)'; });
 
   input.addEventListener('input', () => {
     const hasText = input.value.trim().length > 0;
@@ -320,7 +320,7 @@ function injectMessagingPromptBar() {
   const close = document.createElement('button');
   close.style.cssText = `
     background: none; border: none; cursor: pointer; padding: 2px;
-    color: #999; font-size: 14px; line-height: 1; display: flex; align-items: center;
+    color: rgba(250,250,250,0.4); font-size: 14px; line-height: 1; display: flex; align-items: center;
   `;
   close.innerHTML = '&times;';
   close.title = 'Dismiss';
@@ -409,19 +409,19 @@ function injectCommentPromptBars() {
       padding: 4px 10px;
       margin: 4px 0 2px 0;
       background: #faf8ff;
-      border: 1px solid rgba(109, 40, 217, 0.12);
+      border: 1px solid rgba(167, 139, 250, 0.12);
       border-radius: 6px;
       cursor: text;
       transition: all 0.15s ease;
-      font-family: -apple-system, system-ui, sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     `;
 
     bar.addEventListener('mouseenter', () => {
-      bar.style.borderColor = 'rgba(109, 40, 217, 0.3)';
+      bar.style.borderColor = 'rgba(167, 139, 250, 0.3)';
       bar.style.background = '#f5f0ff';
     });
     bar.addEventListener('mouseleave', () => {
-      bar.style.borderColor = 'rgba(109, 40, 217, 0.12)';
+      bar.style.borderColor = 'rgba(167, 139, 250, 0.12)';
       bar.style.background = '#faf8ff';
     });
 
@@ -431,7 +431,7 @@ function injectCommentPromptBars() {
       width: 18px; height: 18px; flex-shrink: 0;
       display: flex; align-items: center; justify-content: center;
     `;
-    icon.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6d28d9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
+    icon.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
 
     const input = document.createElement('input');
     input.type = 'text';
@@ -440,26 +440,26 @@ function injectCommentPromptBars() {
       : 'Draft comment with Pranan...';
     input.style.cssText = `
       flex: 1; border: none; background: transparent; outline: none;
-      font-size: 12px; color: #374151; font-family: inherit; cursor: text;
+      font-size: 12px; color: #fafafa; font-family: inherit; cursor: text;
       min-width: 0;
     `;
 
     // Placeholder style
     const placeholderStyle = document.createElement('style');
-    placeholderStyle.textContent = `[${PRANAN_LI_COMMENT_BAR_ATTR}] input::placeholder { color: rgba(109, 40, 217, 0.5); }`;
+    placeholderStyle.textContent = `[${PRANAN_LI_COMMENT_BAR_ATTR}] input::placeholder { color: rgba(167, 139, 250, 0.5); }`;
     bar.appendChild(placeholderStyle);
 
     // Generate button
     const generateBtn = document.createElement('button');
     generateBtn.style.cssText = `
-      background: #6d28d9; color: white; border: none; border-radius: 5px;
+      background: linear-gradient(135deg, #6d28d9, #a78bfa); color: white; border: none; border-radius: 5px;
       padding: 3px 10px; font-size: 11px; font-weight: 500; cursor: pointer;
       transition: all 0.15s ease; font-family: inherit; white-space: nowrap;
       opacity: 0; pointer-events: none;
     `;
     generateBtn.textContent = 'Draft';
-    generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = '#5b21b6'; });
-    generateBtn.addEventListener('mouseleave', () => { generateBtn.style.background = '#6d28d9'; });
+    generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = 'linear-gradient(135deg, #5b21b6, #8b5cf6)'; });
+    generateBtn.addEventListener('mouseleave', () => { generateBtn.style.background = 'linear-gradient(135deg, #6d28d9, #a78bfa)'; });
 
     input.addEventListener('input', () => {
       const hasText = input.value.trim().length > 0;
@@ -471,7 +471,7 @@ function injectCommentPromptBars() {
     const close = document.createElement('button');
     close.style.cssText = `
       background: none; border: none; cursor: pointer; padding: 1px;
-      color: #999; font-size: 12px; line-height: 1; display: flex; align-items: center;
+      color: rgba(250,250,250,0.4); font-size: 12px; line-height: 1; display: flex; align-items: center;
     `;
     close.innerHTML = '&times;';
     close.title = 'Dismiss';

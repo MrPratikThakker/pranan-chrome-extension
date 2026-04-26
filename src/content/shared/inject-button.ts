@@ -67,7 +67,7 @@ export function injectInlineButton(
       :host {
         display: inline-flex;
         align-items: center;
-        font-family: -apple-system, system-ui, sans-serif;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
       }
       .pranan-btn-wrap {
         display: inline-flex;
@@ -90,10 +90,10 @@ export function injectInlineButton(
       }
       .pranan-btn:hover {
         opacity: 1;
-        background: rgba(109, 40, 217, 0.08);
+        background: rgba(167, 139, 250, 0.08);
       }
       .pranan-btn:active {
-        background: rgba(109, 40, 217, 0.14);
+        background: rgba(167, 139, 250, 0.14);
       }
       .pranan-btn svg {
         width: 16px;
@@ -113,7 +113,7 @@ export function injectInlineButton(
         height: 16px;
         padding: 0;
         margin-left: -2px;
-        color: #6d28d9;
+        color: #a78bfa;
         background: transparent;
         border: none;
         border-radius: 50%;
@@ -123,7 +123,7 @@ export function injectInlineButton(
       }
       .pranan-dropdown-trigger:hover {
         opacity: 1;
-        background: rgba(109, 40, 217, 0.08);
+        background: rgba(167, 139, 250, 0.08);
       }
       .pranan-dropdown-trigger svg {
         width: 10px;
@@ -136,12 +136,12 @@ export function injectInlineButton(
         right: 0;
         margin-top: 4px;
         min-width: 160px;
-        background: #fff;
-        border: 1px solid rgba(0,0,0,0.12);
+        background: #18181b;
+        border: 1px solid rgba(250,250,250,0.08);
         border-radius: 8px;
         padding: 4px;
         z-index: 10000;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.4);
       }
       .pranan-dropdown.open {
         display: block;
@@ -152,7 +152,7 @@ export function injectInlineButton(
         padding: 6px 10px;
         font-size: 12px;
         font-family: inherit;
-        color: #333;
+        color: rgba(250,250,250,0.7);
         background: none;
         border: none;
         border-radius: 4px;
@@ -161,8 +161,8 @@ export function injectInlineButton(
         transition: all 0.1s ease;
       }
       .pranan-dropdown-item:hover {
-        background: rgba(109, 40, 217, 0.06);
-        color: #6d28d9;
+        background: rgba(167, 139, 250, 0.06);
+        color: #a78bfa;
       }
       .pranan-loading .pranan-btn {
         opacity: 0.4;
@@ -178,10 +178,11 @@ export function injectInlineButton(
     </style>
     <div class="pranan-btn-wrap">
       <button class="pranan-btn" title="${escapeHtml(config.title || config.label)}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#6d28d9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-          <path d="M2 17l10 5 10-5"/>
-          <path d="M2 12l10 5 10-5"/>
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2" y="2" width="20" height="20" rx="4" stroke="#a78bfa" stroke-width="1.5" opacity="0.3"/>
+          <rect x="5" y="5" width="14" height="14" rx="3" stroke="#a78bfa" stroke-width="1.5" opacity="0.5"/>
+          <rect x="8" y="8" width="8" height="8" rx="2" stroke="#a78bfa" stroke-width="1.5" opacity="0.7"/>
+          <rect x="10" y="10" width="4" height="4" rx="1" fill="#a78bfa"/>
         </svg>
       </button>
       ${hasDropdown ? `

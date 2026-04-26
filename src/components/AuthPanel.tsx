@@ -16,10 +16,10 @@ export function AuthPanel({ onConnect }: Props) {
     <div className="flex flex-col items-center justify-center flex-1 py-16 px-6 text-center animate-fade-in">
       {/* Logo */}
       <div className="w-16 h-16 rounded-xl bg-brand-accent/8 border border-brand-accent/15 flex items-center justify-center mb-6">
-        <span className="text-brand-accent text-2xl font-display">P</span>
+        <span className="text-brand-accent text-2xl font-light font-display tracking-[-0.04em]">P</span>
       </div>
 
-      <h2 className="text-lg font-display text-brand-text mb-2">
+      <h2 className="text-lg font-light font-display text-brand-text mb-2 tracking-[-0.04em]">
         Pranan
       </h2>
 

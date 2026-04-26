@@ -336,9 +336,9 @@ function AppInner() {
       <header className="flex items-center justify-between px-4 py-3 border-b border-brand-border bg-brand-bg flex-shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-md bg-brand-accent/10 border border-brand-accent/15 flex items-center justify-center">
-            <span className="text-brand-accent text-xs font-bold font-display">P</span>
+            <span className="text-brand-accent text-xs font-bold font-sans">P</span>
           </div>
-          <span className="text-sm font-semibold text-brand-text font-display tracking-tight">Pranan</span>
+          <span className="text-sm font-light text-brand-text font-display tracking-[-0.04em]">Pranan</span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -418,7 +418,7 @@ function AppInner() {
               <div className="space-y-4 animate-fade-in">
                 {/* Contextual greeting */}
                 <div className="py-3">
-                  <p className="text-sm font-medium text-brand-text">
+                  <p className="text-sm font-light text-brand-text tracking-[-0.04em]">
                     {currentPlatform === 'gmail' ? 'Your inbox, augmented.' : currentPlatform !== 'unknown' ? `Pranan on ${currentPlatform}` : 'Pranan Companion'}
                   </p>
                   <p className="text-[11px] text-brand-text-3 mt-0.5">

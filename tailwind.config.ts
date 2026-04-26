@@ -5,8 +5,8 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        display: ['Instrument Serif', 'serif'],
-        sans: ['Inter', '-apple-system', 'sans-serif'],
+        display: ['SF Pro Display', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace'],
       },
       colors: {
@@ -31,7 +31,7 @@ const config: Config = {
         },
       },
       borderRadius: {
-        sm: '6px',
+        sm: '4px',
         md: '8px',
         lg: '12px',
       },

@@ -109,7 +109,7 @@ function Popup() {
           fontSize: 14, fontWeight: 700, color: '#a78bfa',
         }}>P</div>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Pranan</div>
+          <div style={{ fontSize: 13, fontWeight: 300, letterSpacing: '-0.04em', fontFamily: "'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>Pranan</div>
           <div style={{ fontSize: 10, color: 'rgba(250,250,250,0.4)' }}>{platformLabel}</div>
         </div>
         {state.isAuthenticated && (
