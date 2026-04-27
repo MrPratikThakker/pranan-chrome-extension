@@ -106,8 +106,14 @@ function Popup() {
           background: 'rgba(167,139,250,0.15)',
           border: '1px solid rgba(167,139,250,0.2)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 14, fontWeight: 700, color: '#a78bfa',
-        }}>P</div>
+        }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="2" width="20" height="20" rx="4" stroke="#a78bfa" strokeWidth="1.5" opacity="0.3"/>
+            <rect x="5" y="5" width="14" height="14" rx="3" stroke="#a78bfa" strokeWidth="1.5" opacity="0.5"/>
+            <rect x="8" y="8" width="8" height="8" rx="2" stroke="#a78bfa" strokeWidth="1.5" opacity="0.7"/>
+            <rect x="10" y="10" width="4" height="4" rx="1" fill="#a78bfa"/>
+          </svg>
+        </div>
         <div>
           <div style={{ fontSize: 13, fontWeight: 300, letterSpacing: '-0.04em', fontFamily: "'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>Pranan</div>
           <div style={{ fontSize: 10, color: 'rgba(250,250,250,0.4)' }}>{platformLabel}</div>
