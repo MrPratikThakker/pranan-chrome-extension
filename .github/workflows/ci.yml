@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci --prefer-offline --no-audit --no-fund
+      - name: Type check
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Verify dist contents
+        run: |
+          test -f dist/manifest.json
+          test -f dist/background.js
+          test -f dist/sidepanel.html
+          test -f dist/popup.html
+          test -f dist/content/gmail.js
+          test -f dist/content/slack.js
+          test -f dist/content/linkedin.js
+          test -f dist/content/universal.js
+          test -f dist/content/pranan-app.js
+          test -f dist/icons/icon-128.png
+          echo "✓ All required dist files present"
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.sha }}
+          path: dist/
+          retention-days: 14
