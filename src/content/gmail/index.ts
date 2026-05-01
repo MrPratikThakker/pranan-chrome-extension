@@ -343,17 +343,19 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
 
   // Click handler: trigger draft
   bar.addEventListener('click', () => {
+    const recipientName = recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
+    console.log('[Pranan] prompt-bar clicked', { recipientEmail, recipientName });
     chrome.runtime.sendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
         platform: 'gmail',
         recipientEmail,
-        recipientName: null,
+        recipientName,
         messageToReplyTo: getThreadContext(composeWindow),
         channelName: null,
         subject: getSubject(composeWindow),
       },
-    }).catch(() => {});
+    }).catch((err) => console.warn('[Pranan] sendMessage failed:', err));
   });
 
   // Insert before the compose container (so it appears above it, like Voila)
@@ -361,33 +363,48 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
 }
 
 function injectFloatingIcon(composeWindow: Element, recipientEmail: string | null) {
-  // Find the compose body
-  const composeBody = composeWindow.querySelector(
-    '[contenteditable="true"][aria-label="Message Body"], .Am.aiL [contenteditable="true"]'
-  ) as HTMLElement | null;
-  if (!composeBody) return;
-
-  // Find a suitable positioned container
-  const bodyContainer = composeBody.closest('.aO7, .Am, .aoP, .M9') || composeBody.parentElement;
-  if (!bodyContainer) return;
-
-  // Don't inject twice
-  if (bodyContainer.querySelector(`[${PRANAN_FLOAT_ATTR}]`)) return;
-
-  const containerEl = bodyContainer as HTMLElement;
-  const currentPosition = window.getComputedStyle(containerEl).position;
-  if (currentPosition === 'static') {
-    containerEl.style.position = 'relative';
+  // Find Gmail's send toolbar (.btC) — the bottom row with Send + Aa + emoji + attach.
+  // Place the Pranan icon RIGHT AFTER the Send button, where Voila / Loom inject.
+  const sendButton = composeWindow.querySelector('[data-tooltip*="Send"], [aria-label*="Send"]') as HTMLElement | null;
+  const toolbar = sendButton?.closest('.btC, .aoP, .gU') as HTMLElement | null;
+  if (!sendButton || !toolbar) {
+    console.log('[Pranan] send toolbar not found; falling back to compose body');
+    // Fallback: floating in compose body
+    const composeBody = composeWindow.querySelector(
+      '[contenteditable="true"][aria-label="Message Body"], .Am.aiL [contenteditable="true"]'
+    ) as HTMLElement | null;
+    if (!composeBody) return;
+    const bodyContainer = composeBody.closest('.aO7, .Am, .aoP, .M9') || composeBody.parentElement;
+    if (!bodyContainer) return;
+    if (bodyContainer.querySelector(`[${PRANAN_FLOAT_ATTR}]`)) return;
+    const containerEl = bodyContainer as HTMLElement;
+    if (window.getComputedStyle(containerEl).position === 'static') containerEl.style.position = 'relative';
+    const fallbackHost = document.createElement('div');
+    fallbackHost.setAttribute(PRANAN_FLOAT_ATTR, 'true');
+    fallbackHost.style.cssText = `position:absolute;bottom:6px;right:52px;z-index:999`;
+    mountPrananToolbarButton(fallbackHost, composeWindow, recipientEmail);
+    containerEl.appendChild(fallbackHost);
+    return;
   }
+
+  // Dedup
+  if (toolbar.querySelector(`[${PRANAN_FLOAT_ATTR}]`)) return;
 
   const host = document.createElement('div');
   host.setAttribute(PRANAN_FLOAT_ATTR, 'true');
   host.style.cssText = `
-    position: absolute;
-    bottom: 6px;
-    right: 52px;
-    z-index: 999;
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    vertical-align: middle;
   `;
+  mountPrananToolbarButton(host, composeWindow, recipientEmail);
+  // Insert after the send button (Voila/Loom convention)
+  sendButton.parentElement?.insertBefore(host, sendButton.nextSibling);
+  return;
+}
+
+function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, recipientEmail: string | null) {
 
   const shadow = host.attachShadow({ mode: 'open' });
 
@@ -429,20 +446,20 @@ function injectFloatingIcon(composeWindow: Element, recipientEmail: string | nul
   shadow.querySelector('.pranan-icon-btn')!.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
+    const recipientName = recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
+    console.log('[Pranan] toolbar icon clicked', { recipientEmail, recipientName });
     chrome.runtime.sendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
         platform: 'gmail',
         recipientEmail,
-        recipientName: null,
+        recipientName,
         messageToReplyTo: getThreadContext(composeWindow),
         channelName: null,
         subject: getSubject(composeWindow),
       },
     }).catch(() => {});
   });
-
-  containerEl.appendChild(host);
 }
 
 // ---------------------------------------------------------------------------
