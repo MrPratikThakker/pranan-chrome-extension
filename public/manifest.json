@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pranan for Chrome",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Draft replies in your voice across Gmail, Slack, and LinkedIn. Smart nudges, tone check, and relationship context inline.",
   "permissions": [
     "activeTab",
@@ -17,8 +17,7 @@
     "https://mail.google.com/*",
     "https://app.slack.com/*",
     "https://www.linkedin.com/*",
-    "https://app.pranan.ai/*",
-    "https://*/*"
+    "https://app.pranan.ai/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -71,21 +70,6 @@
       ],
       "js": [
         "content/pranan-app.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://*/*"
-      ],
-      "exclude_matches": [
-        "https://mail.google.com/*",
-        "https://app.slack.com/*",
-        "https://www.linkedin.com/*",
-        "https://app.pranan.ai/*"
-      ],
-      "js": [
-        "content/universal.js"
       ],
       "run_at": "document_idle"
     }
