@@ -146,6 +146,46 @@ function extractRecipients(composeWindow: Element): string[] {
   return [...new Set(emails)];
 }
 
+/**
+ * Extract a human-readable recipient name for the given email.
+ * Tries multiple Gmail DOM patterns; returns null if nothing usable.
+ */
+function extractRecipientName(composeWindow: Element, email: string): string | null {
+  if (!email) return null;
+  const lowerEmail = email.toLowerCase();
+
+  // Pattern A: chip with both data-hovercard-id (email) and a name span inside
+  const chips = composeWindow.querySelectorAll('[data-hovercard-id]');
+  for (const chip of Array.from(chips)) {
+    if ((chip.getAttribute('data-hovercard-id') || '').toLowerCase() === lowerEmail) {
+      const name = chip.getAttribute('name') || chip.getAttribute('data-name') || (chip.textContent || '').trim();
+      if (name && !name.includes('@') && name.length > 1) return name.replace(/[<>]/g, '').trim();
+    }
+  }
+
+  // Pattern B: tooltip "Name <email@x.com>"
+  const tooltips = composeWindow.querySelectorAll('[data-tooltip], [title]');
+  for (const el of Array.from(tooltips)) {
+    const t = (el.getAttribute('data-tooltip') || el.getAttribute('title') || '').trim();
+    const m = t.match(/^([^<]+)<([^>]+)>$/);
+    if (m && m[2].toLowerCase() === lowerEmail) return m[1].trim();
+  }
+
+  // Pattern C: thread header — for Reply windows, the original sender's name
+  const threadHeader = composeWindow.closest('.h7, .gs, .nH');
+  if (threadHeader) {
+    const fromCandidates = threadHeader.querySelectorAll('.gD, .go, [email]');
+    for (const el of Array.from(fromCandidates)) {
+      if ((el.getAttribute('email') || '').toLowerCase() === lowerEmail) {
+        const name = el.getAttribute('name') || (el.textContent || '').trim();
+        if (name && !name.includes('@') && name.length > 1) return name.replace(/[<>"]/g, '').trim();
+      }
+    }
+  }
+
+  return null;
+}
+
 function getComposeBody(composeWindow: Element): string {
   const body = composeWindow.querySelector(
     '[contenteditable="true"][aria-label="Message Body"], .Am.aiL [contenteditable="true"]'
@@ -882,12 +922,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const win = composeWindows[0];
       const recipients = extractRecipients(win);
       const primaryRecipient = recipients[0] || null;
+      const primaryName = primaryRecipient ? extractRecipientName(win, primaryRecipient) : null;
       sendResponse({
         hasCompose: true,
         payload: {
           platform: 'gmail',
           recipientEmail: primaryRecipient,
-          recipientName: null,
+          recipientName: primaryName,
           threadId: null,
           messageToReplyTo: getThreadContext(win),
           channelName: null,
@@ -897,6 +938,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         },
       });
     } else {
+      // Debug aid: log when we can't find a compose window so users can diagnose
+      console.log('[Pranan] No compose window detected. If you have a Reply open, Gmail may have updated DOM selectors. File an issue with the page URL.');
       sendResponse({ hasCompose: false });
     }
   }
