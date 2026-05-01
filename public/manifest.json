@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Pranan for Chrome",
   "version": "0.2.2",
-  "description": "AI-powered relationship intelligence for Gmail, Slack, LinkedIn, and any web app. Draft replies in your voice, see relationship context, check tone, and get smart nudges — all inline.",
+  "description": "Draft replies in your voice across Gmail, Slack, and LinkedIn. Smart nudges, tone check, and relationship context inline.",
   "permissions": [
     "activeTab",
     "storage",
