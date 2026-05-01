@@ -17,6 +17,8 @@ import type {
   DecayAlert,
 } from '@/types';
 
+import { captureError } from '@/lib/observability';
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -77,10 +79,24 @@ async function handleResponse<T>(response: Response): Promise<T> {
     }
 
     if (response.status === 429) {
-      throw new ApiError('Rate limit exceeded. Please wait a moment.', 429, 'RATE_LIMITED');
+      const err = new ApiError('Rate limit exceeded. Please wait a moment.', 429, 'RATE_LIMITED');
+      captureError(err, { component: 'api-client', metadata: { status: 429, url: response.url } });
+      throw err;
     }
     if (response.status === 401) {
-      throw new ApiError('Session expired. Please reconnect.', 401, 'UNAUTHORIZED');
+      // Auth expired — proactively clear stale token so the popup re-prompts cleanly
+      try { await chrome.storage.local.remove('authToken'); } catch { /* pass */ }
+      try {
+        chrome.runtime.sendMessage({ type: 'AUTH_EXPIRED' });
+      } catch { /* pass — sender may not be a content script */ }
+      const err = new ApiError('Session expired. Please reconnect.', 401, 'UNAUTHORIZED');
+      captureError(err, { component: 'api-client', metadata: { url: response.url } });
+      throw err;
+    }
+    if (response.status >= 500) {
+      const err = new ApiError(message, response.status, code);
+      captureError(err, { component: 'api-client', metadata: { status: response.status, url: response.url, body: body.slice(0, 500) } });
+      throw err;
     }
 
     throw new ApiError(message, response.status, code);

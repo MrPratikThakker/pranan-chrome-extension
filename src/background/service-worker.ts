@@ -182,6 +182,20 @@ async function handleMessage(
     case 'AUTH_STATUS':
       return { auth: cachedAuth };
 
+    case 'AUTH_EXPIRED': {
+      // API client detected expired token. Clear it; popup re-prompts on next open.
+      try {
+        await chrome.storage.local.remove('authToken');
+      } catch { /* pass */ }
+      try {
+        if (chrome.action && 'openPopup' in chrome.action) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (chrome.action as any).openPopup();
+        }
+      } catch { /* pass — openPopup unavailable on some platforms */ }
+      return { ok: true };
+    }
+
     case 'SIDE_PANEL_READY': {
       const isAuthed = await initAuth();
       const tab = sender.tab;

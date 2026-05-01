@@ -118,6 +118,7 @@ export type MessageType =
   | 'PLATFORM_DETECTED'
   | 'AUTH_TOKEN'
   | 'AUTH_TOKEN_FROM_WEB'
+  | 'AUTH_EXPIRED'
   // Phase 1: Inline compose buttons
   | 'INLINE_DRAFT_REQUEST'
   | 'INLINE_REWRITE_REQUEST'

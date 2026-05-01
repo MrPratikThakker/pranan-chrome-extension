@@ -39,34 +39,54 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://mail.google.com/*"],
-      "js": ["content/gmail.js"],
+      "matches": [
+        "https://mail.google.com/*"
+      ],
+      "js": [
+        "content/gmail.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://app.slack.com/*"],
-      "js": ["content/slack.js"],
+      "matches": [
+        "https://app.slack.com/*"
+      ],
+      "js": [
+        "content/slack.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://www.linkedin.com/*"],
-      "js": ["content/linkedin.js"],
+      "matches": [
+        "https://www.linkedin.com/*"
+      ],
+      "js": [
+        "content/linkedin.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://app.pranan.ai/*"],
-      "js": ["content/pranan-app.js"],
+      "matches": [
+        "https://app.pranan.ai/*"
+      ],
+      "js": [
+        "content/pranan-app.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://*/*"],
+      "matches": [
+        "https://*/*"
+      ],
       "exclude_matches": [
         "https://mail.google.com/*",
         "https://app.slack.com/*",
         "https://www.linkedin.com/*",
         "https://app.pranan.ai/*"
       ],
-      "js": ["content/universal.js"],
+      "js": [
+        "content/universal.js"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -86,6 +106,8 @@
     }
   },
   "externally_connectable": {
-    "matches": ["https://app.pranan.ai/*"]
+    "matches": [
+      "https://app.pranan.ai/*"
+    ]
   }
 }
