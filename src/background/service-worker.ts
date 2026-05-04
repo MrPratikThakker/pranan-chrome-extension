@@ -183,10 +183,17 @@ async function handleMessage(
       return { auth: cachedAuth };
 
     case 'AUTH_EXPIRED': {
-      // API client detected expired token. Clear it; popup re-prompts on next open.
+      // API client detected expired token. Clear it, reset cached auth, and
+      // broadcast AUTH_STATUS to the side panel so it switches back to the
+      // AuthPanel (otherwise the user sits in a stale context view forever).
       try {
         await chrome.storage.local.remove('authToken');
       } catch { /* pass */ }
+      cachedAuth = null;
+      broadcastToSidePanel({
+        type: 'AUTH_STATUS',
+        payload: { valid: false },
+      });
       try {
         if (chrome.action && 'openPopup' in chrome.action) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -19,6 +19,9 @@ import type {
 
 import { captureError } from '@/lib/observability';
 
+// Module-level flag to dedup parallel 401 cleanup. See handleResponse 401 branch.
+let authExpiryInFlight = false;
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -84,11 +87,18 @@ async function handleResponse<T>(response: Response): Promise<T> {
       throw err;
     }
     if (response.status === 401) {
-      // Auth expired — proactively clear stale token so the popup re-prompts cleanly
-      try { await chrome.storage.local.remove('authToken'); } catch { /* pass */ }
-      try {
-        chrome.runtime.sendMessage({ type: 'AUTH_EXPIRED' });
-      } catch { /* pass — sender may not be a content script */ }
+      // Auth expired. Dedup so concurrent 401s (briefings + nudges + decay
+      // alerts firing in parallel) only trigger one cleanup + one broadcast.
+      if (!authExpiryInFlight) {
+        authExpiryInFlight = true;
+        try { await chrome.storage.local.remove('authToken'); } catch { /* pass */ }
+        try {
+          chrome.runtime.sendMessage({ type: 'AUTH_EXPIRED' });
+        } catch { /* pass — sender may not be a content script */ }
+        // Reset the flag after a short window so future 401s (e.g. after
+        // re-auth then a server hiccup) still trigger the cleanup.
+        setTimeout(() => { authExpiryInFlight = false; }, 5000);
+      }
       const err = new ApiError('Session expired. Please reconnect.', 401, 'UNAUTHORIZED');
       captureError(err, { component: 'api-client', metadata: { url: response.url } });
       throw err;
@@ -111,7 +121,20 @@ async function handleResponse<T>(response: Response): Promise<T> {
 
 export async function validateAuth(): Promise<AuthResponse> {
   const headers = await authHeaders();
-  const response = await fetch(`${API_BASE}/auth`, { headers });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/auth`, { headers });
+  } catch (e) {
+    // Network error: don't sign the user out; treat as transient.
+    console.warn('[API] validateAuth: network error, treating as transient', e);
+    return { valid: true, transient: true } as unknown as AuthResponse;
+  }
+  // Server signaling transient failure (503 with transient flag, e.g. Supabase
+  // blip). Don't clear the token; let the next call retry.
+  if (response.status === 503) {
+    console.warn('[API] validateAuth: 503 from server, treating as transient');
+    return { valid: true, transient: true } as unknown as AuthResponse;
+  }
   return handleResponse<AuthResponse>(response);
 }
 
@@ -216,28 +239,36 @@ export async function* streamDraft(
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  // Wrap in try/finally so the reader is always released even if the consumer
+  // aborts mid-stream or the connection drops. Without this, the underlying
+  // body stays locked and subsequent fetches can hang.
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6).trim();
-        if (data === '[DONE]') {
-          return;
-        }
-        try {
-          const parsed = JSON.parse(data);
-          yield parsed;
-        } catch {
-          // Skip malformed lines
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') {
+            return;
+          }
+          try {
+            const parsed = JSON.parse(data);
+            yield parsed;
+          } catch {
+            // Skip malformed lines
+          }
         }
       }
     }
+  } finally {
+    try { await reader.cancel(); } catch { /* already canceled */ }
+    try { reader.releaseLock(); } catch { /* already released */ }
   }
 }
 
