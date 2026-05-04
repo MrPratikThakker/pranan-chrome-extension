@@ -194,15 +194,38 @@ function getComposeBody(composeWindow: Element): string {
 }
 
 function getThreadContext(composeWindow: Element): string | null {
-  const thread = composeWindow.closest('.h7, .gs');
+  // Try several thread-container selectors. Gmail rotates class names, so we
+  // walk up looking for any of: the legacy .h7/.gs containers, the modern
+  // [role="main"] thread region, or any [data-thread-perm-id] ancestor. If
+  // none match, fall back to the visible thread on the page (most recent).
+  const thread =
+    composeWindow.closest('.h7, .gs') ||
+    composeWindow.closest('[data-thread-perm-id]') ||
+    composeWindow.closest('[role="main"]') ||
+    document.querySelector('[data-thread-perm-id]') ||
+    document.querySelector('.adn.ads, .ii.gt, .h7') ||
+    document.querySelector('[role="main"]');
+
   if (!thread) return null;
 
-  const messages = thread.querySelectorAll('.a3s.aiL');
-  if (messages.length === 0) return null;
+  // Collect ALL visible message bodies. .a3s.aiL is the legacy selector;
+  // .ii.gt is the modern message-body wrapper; [data-message-id] .a3s catches
+  // newer Gmail variants. Take up to the last 3 messages so the LLM has
+  // recent context plus the message being replied to.
+  const messageBodies = thread.querySelectorAll(
+    '.a3s.aiL, .ii.gt .a3s, [data-message-id] .a3s, .ii .a3s, [role="listitem"] .a3s'
+  );
+  if (messageBodies.length === 0) return null;
 
-  const lastMessage = messages[messages.length - 1];
-  const text = lastMessage?.textContent?.trim();
-  return text ? text.slice(0, 2000) : null;
+  const recent = Array.from(messageBodies).slice(-3);
+  const combined = recent
+    .map((m) => (m as HTMLElement).innerText?.trim() || m.textContent?.trim() || '')
+    .filter(Boolean)
+    .join('\n\n---\n\n');
+
+  if (!combined) return null;
+  // Cap at 4000 chars (~1k tokens) so we don't blow the context window.
+  return combined.slice(-4000);
 }
 
 function getSubject(composeWindow: Element): string | null {
@@ -399,8 +422,13 @@ function injectFloatingIcon(composeWindow: Element, recipientEmail: string | nul
     vertical-align: middle;
   `;
   mountPrananToolbarButton(host, composeWindow, recipientEmail);
-  // Insert after the send button (Voila/Loom convention)
-  sendButton.parentElement?.insertBefore(host, sendButton.nextSibling);
+  // Place Pranan AFTER all existing toolbar buttons so it lands to the right
+  // of Loom and Voila (which both inject after Send). Falls back to "after
+  // Send" if the toolbar parent can't be resolved.
+  const toolbarParent: HTMLElement | null = sendButton.parentElement;
+  if (toolbarParent) {
+    toolbarParent.appendChild(host);
+  }
   return;
 }
 
