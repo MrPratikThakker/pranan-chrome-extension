@@ -1,5 +1,15 @@
 name: Release
 
+# Tag-driven release. When a tag like v0.3.0 is pushed, this workflow:
+#   1. Builds dist + zips it
+#   2. Uploads to Chrome Web Store (only if all four CWS secrets are set)
+#   3. Creates a GitHub Release with the zip attached
+#
+# The Chrome Web Store upload is gated behind a "secrets configured" check
+# so a release tag still produces a GitHub Release artifact even when the
+# CWS credentials are absent. This avoids the previous failure mode where
+# a missing secret killed the entire workflow and skipped Release creation.
+
 on:
   push:
     tags:
@@ -19,7 +29,29 @@ jobs:
       - run: npm run build
       - name: Zip dist
         run: cd dist && zip -r ../pranan-companion-${{ github.ref_name }}.zip .
+
+      # Probe whether the Chrome Web Store secrets are configured. We can't
+      # check `secrets.X != ''` directly in `if:` because the values are
+      # masked, so we bounce them through an env var first and read from
+      # there. The output is a step output we gate the upload on.
+      - name: Detect Chrome Web Store credentials
+        id: cws
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+        run: |
+          if [[ -n "$CHROME_EXTENSION_ID" && -n "$CHROME_CLIENT_ID" && -n "$CHROME_CLIENT_SECRET" && -n "$CHROME_REFRESH_TOKEN" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Chrome Web Store credentials present -- will upload"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Chrome Web Store credentials missing -- skipping upload (GitHub Release still runs)"
+          fi
+
       - name: Upload to Chrome Web Store
+        if: steps.cws.outputs.configured == 'true'
         uses: mnao305/chrome-extension-upload@v5.0.0
         with:
           file-path: pranan-companion-${{ github.ref_name }}.zip
@@ -27,7 +59,8 @@ jobs:
           client-id: ${{ secrets.CHROME_CLIENT_ID }}
           client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
           refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
-          publish: false # publish=false → uploads but doesn't auto-publish; review in dashboard
+          publish: false # uploads but doesn't auto-publish; review in dashboard
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
