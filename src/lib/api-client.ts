@@ -384,3 +384,29 @@ export async function draftFromNudge(nudgeId: string): Promise<DraftResponse> {
   });
   return handleResponse<DraftResponse>(response);
 }
+
+// GET /api/companion/today -- one-shot snapshot for popup today-at-a-glance.
+// Returns: { draftsReady, threadsAwaiting, voiceScore, voiceDirection,
+//           topNudge, lastSyncAgo }. Cached 60s server-side so multiple
+// popup opens stay fast.
+export interface TodaySnapshot {
+  draftsReady: number;
+  threadsAwaiting: number;
+  voiceScore: number | null;
+  voiceDirection: 'up' | 'down' | 'flat';
+  voiceDelta: number;
+  topNudge: { id: string; subject: string; recipient: string } | null;
+  lastSyncAgo: string | null;
+  pipelineHealthy: boolean;
+}
+
+export async function getTodaySnapshot(): Promise<TodaySnapshot | null> {
+  try {
+    const headers = await authHeaders();
+    const response = await fetch(`${API_BASE}/today`, { headers });
+    return safeJsonResponse<TodaySnapshot>(response, null as any);
+  } catch {
+    return null;
+  }
+}
+

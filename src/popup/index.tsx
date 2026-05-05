@@ -1,23 +1,34 @@
 /**
- * Extension Popup -- Command Center (Phase 4)
+ * Extension Popup -- Today at a Glance
  *
- * Quick-access popup from the extension icon. Shows:
- * - Auth status and quick connect
- * - Current platform detection
- * - Quick actions: Draft, Rewrite, Grammar Check
- * - Intelligence summary: upcoming briefings, nudges, decay alerts
- * - Link to open full side panel
+ * One-tap visibility into Pranan's state without opening the full app.
+ * The popup is the highest-frequency surface (toolbar click), so the
+ * highest-value content has to fit above the fold:
+ *
+ *   1. Drafts ready right now -- the Send queue size
+ *   2. Threads still awaiting your reply -- inbox triage size
+ *   3. Voice score with delta vs. last week
+ *   4. Pipeline health pill (mirrors sidebar pill in the app)
+ *   5. Top nudge (the one follow-up most worth doing today)
+ *
+ * Below: the existing quick-action buttons (Draft, Grammar, Open panel).
+ * Auth-not-connected and not-on-supported-site states still render
+ * cleanly. Numbers fetch in parallel from /api/companion/today which is
+ * a single roundtrip the app caches for 60s.
  */
 
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Platform, AuthResponse } from '@/types';
+import { getTodaySnapshot, type TodaySnapshot } from '@/lib/api-client';
 
 interface PopupState {
   isAuthenticated: boolean;
   user: AuthResponse | null;
   platform: Platform;
   hasActiveCompose: boolean;
+  snapshot: TodaySnapshot | null;
+  snapshotLoading: boolean;
 }
 
 function Popup() {
@@ -26,10 +37,11 @@ function Popup() {
     user: null,
     platform: 'unknown',
     hasActiveCompose: false,
+    snapshot: null,
+    snapshotLoading: true,
   });
 
   useEffect(() => {
-    // Get current tab info
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       const url = tabs[0]?.url || '';
       let platform: Platform = 'unknown';
@@ -38,18 +50,20 @@ function Popup() {
       else if (url.includes('linkedin.com')) platform = 'linkedin';
       else platform = 'universal';
 
-      // Check auth
-      try {
-        const response = await chrome.runtime.sendMessage({ type: 'AUTH_STATUS' });
-        setState({
-          isAuthenticated: !!response?.auth?.valid,
-          user: response?.auth || null,
-          platform,
-          hasActiveCompose: false,
-        });
-      } catch {
-        setState(s => ({ ...s, platform }));
-      }
+      // Auth + snapshot in parallel so the popup doesn't double-roundtrip.
+      const [authResp, snapshot] = await Promise.all([
+        chrome.runtime.sendMessage({ type: 'AUTH_STATUS' }).catch(() => null),
+        getTodaySnapshot().catch(() => null),
+      ]);
+
+      setState({
+        isAuthenticated: !!authResp?.auth?.valid,
+        user: authResp?.auth || null,
+        platform,
+        hasActiveCompose: false,
+        snapshot,
+        snapshotLoading: false,
+      });
     });
   }, []);
 
@@ -60,6 +74,16 @@ function Popup() {
         window.close();
       }
     });
+  };
+
+  const openTriage = () => {
+    chrome.tabs.create({ url: 'https://app.pranan.ai/triage' });
+    window.close();
+  };
+
+  const openHome = () => {
+    chrome.tabs.create({ url: 'https://app.pranan.ai/home' });
+    window.close();
   };
 
   const openLogin = () => {
@@ -91,9 +115,13 @@ function Popup() {
     state.platform === 'universal' ? document.title?.slice(0, 20) || 'Web page' :
     state.platform.charAt(0).toUpperCase() + state.platform.slice(1);
 
+  const snap = state.snapshot;
+  const voiceArrow = snap?.voiceDirection === 'up' ? '↑' : snap?.voiceDirection === 'down' ? '↓' : '→';
+  const voiceColor = snap?.voiceDirection === 'up' ? '#34d399' : snap?.voiceDirection === 'down' ? '#f87171' : 'rgba(250,250,250,0.5)';
+
   return (
     <div style={{
-      width: 280,
+      width: 320,
       fontFamily: "'Inter', -apple-system, system-ui, sans-serif",
       background: '#09090b',
       color: '#fafafa',
@@ -118,7 +146,7 @@ function Popup() {
           <div style={{ fontSize: 13, fontWeight: 300, letterSpacing: '-0.04em', fontFamily: "'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>Pranan</div>
           <div style={{ fontSize: 10, color: 'rgba(250,250,250,0.4)' }}>{platformLabel}</div>
         </div>
-        {state.isAuthenticated && (
+        {state.isAuthenticated && snap && (
           <div style={{
             marginLeft: 'auto',
             fontSize: 9, fontWeight: 600,
@@ -126,9 +154,9 @@ function Popup() {
             letterSpacing: 1,
             padding: '2px 6px',
             borderRadius: 3,
-            background: 'rgba(52,211,153,0.12)',
-            color: '#34d399',
-          }}>Connected</div>
+            background: snap.pipelineHealthy ? 'rgba(52,211,153,0.12)' : 'rgba(248,113,113,0.12)',
+            color: snap.pipelineHealthy ? '#34d399' : '#f87171',
+          }}>{snap.pipelineHealthy ? 'Healthy' : 'Degraded'}</div>
         )}
       </div>
 
@@ -150,9 +178,64 @@ function Popup() {
         </div>
       )}
 
-      {/* Authenticated -- quick actions */}
+      {/* Authenticated -- today at a glance */}
       {state.isAuthenticated && (
         <>
+          {/* Two-up stat tiles */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+            <button onClick={openTriage} style={tileBtn}>
+              <div style={tileLabel}>Drafts ready</div>
+              <div style={tileValue}>{snap?.draftsReady ?? '—'}</div>
+              <div style={tileSub}>Tap to triage</div>
+            </button>
+            <button onClick={openTriage} style={tileBtn}>
+              <div style={tileLabel}>Awaiting you</div>
+              <div style={tileValue}>{snap?.threadsAwaiting ?? '—'}</div>
+              <div style={tileSub}>To Respond</div>
+            </button>
+          </div>
+
+          {/* Voice score + last sync */}
+          <button onClick={openHome} style={{
+            ...tileBtn,
+            display: 'grid', gridTemplateColumns: '1fr 1fr',
+            gap: 12, marginBottom: 8,
+            textAlign: 'left' as const,
+          }}>
+            <div>
+              <div style={tileLabel}>Voice score</div>
+              <div style={{ ...tileValue, display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                {snap?.voiceScore ?? '—'}
+                {snap?.voiceScore != null && snap?.voiceDelta !== 0 && (
+                  <span style={{ fontSize: 11, color: voiceColor }}>{voiceArrow} {Math.abs(snap.voiceDelta)}</span>
+                )}
+              </div>
+            </div>
+            <div>
+              <div style={tileLabel}>Last sync</div>
+              <div style={tileValue}>{snap?.lastSyncAgo ?? '—'}</div>
+            </div>
+          </button>
+
+          {/* Top nudge */}
+          {snap?.topNudge && (
+            <div style={{
+              marginBottom: 8,
+              padding: '10px 12px',
+              borderRadius: 6,
+              background: 'rgba(167,139,250,0.08)',
+              border: '1px solid rgba(167,139,250,0.18)',
+            }}>
+              <div style={{ ...tileLabel, color: 'rgba(167,139,250,0.7)' }}>Today's nudge</div>
+              <div style={{ fontSize: 12, fontWeight: 500, marginTop: 4, marginBottom: 6 }}>
+                Reply to {snap.topNudge.recipient}
+              </div>
+              <div style={{ fontSize: 11, color: 'rgba(250,250,250,0.5)' }}>
+                {snap.topNudge.subject}
+              </div>
+            </div>
+          )}
+
           {/* Quick actions */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
             <button onClick={quickDraft} style={actionBtnStyle}>
@@ -211,6 +294,38 @@ function Popup() {
     </div>
   );
 }
+
+const tileBtn: React.CSSProperties = {
+  padding: '10px 12px',
+  background: 'rgba(250,250,250,0.04)',
+  border: '1px solid rgba(250,250,250,0.08)',
+  borderRadius: 6,
+  cursor: 'pointer',
+  textAlign: 'left' as const,
+  fontFamily: 'inherit',
+  color: 'inherit',
+  width: '100%',
+};
+
+const tileLabel: React.CSSProperties = {
+  fontSize: 9, fontWeight: 600,
+  letterSpacing: 0.8,
+  textTransform: 'uppercase' as const,
+  color: 'rgba(250,250,250,0.4)',
+  marginBottom: 2,
+};
+
+const tileValue: React.CSSProperties = {
+  fontSize: 20, fontWeight: 600,
+  color: '#fafafa',
+  fontVariantNumeric: 'tabular-nums' as const,
+};
+
+const tileSub: React.CSSProperties = {
+  fontSize: 10,
+  color: 'rgba(250,250,250,0.35)',
+  marginTop: 2,
+};
 
 const actionBtnStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 8,

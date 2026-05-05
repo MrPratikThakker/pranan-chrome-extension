@@ -43,6 +43,7 @@ interface Actions {
   // Auth
   setAuth: (user: AuthResponse | null, token?: string) => void;
   checkAuth: () => Promise<void>;
+  hydrateAuthHint: () => Promise<void>;
   logout: () => void;
 
   // Context
@@ -84,6 +85,8 @@ interface Actions {
 
 const initialState: AppState = {
   isAuthenticated: false,
+  isAuthChecked: false,
+  lastKnownAuthValid: false,
   authToken: null,
   user: null,
   currentPlatform: 'unknown',
@@ -115,12 +118,17 @@ export const useStore = create<AppState & Actions>((set, get) => ({
   // --- Auth ---
 
   setAuth: (user, token) => {
+    const valid = !!user?.valid;
     set({
-      isAuthenticated: !!user?.valid,
+      isAuthenticated: valid,
+      isAuthChecked: true,
+      lastKnownAuthValid: valid,
       user,
       authToken: token || get().authToken,
-      viewMode: user?.valid ? 'context' : 'auth',
+      viewMode: valid ? 'context' : 'auth',
     });
+    // Persist optimistic-render hint so the next cold open doesn't flicker.
+    chrome.storage.local.set({ lastKnownAuthValid: valid }).catch(() => {});
   },
 
   checkAuth: async () => {
@@ -153,19 +161,40 @@ export const useStore = create<AppState & Actions>((set, get) => ({
       console.log('[Store] checkAuth: validateAuth result:', auth?.valid, auth?.userId);
       set({
         isAuthenticated: auth.valid,
+        isAuthChecked: true,
+        lastKnownAuthValid: auth.valid,
         user: auth,
         viewMode: auth.valid ? 'context' : 'auth',
       });
+      chrome.storage.local.set({ lastKnownAuthValid: auth.valid }).catch(() => {});
     } catch (err) {
       console.error('[Store] checkAuth: failed:', err);
-      set({ isAuthenticated: false, user: null, viewMode: 'auth' });
+      // On failure DO NOT flip lastKnownAuthValid -- could be a transient
+      // network blip and we'd rather hold the optimistic state until the
+      // user explicitly logs out.
+      set({ isAuthenticated: false, isAuthChecked: true, user: null, viewMode: 'auth' });
+    }
+  },
+
+  // Hydrate lastKnownAuthValid from chrome.storage on first mount so the
+  // initial paint can show the right shell instead of the auth screen.
+  hydrateAuthHint: async () => {
+    try {
+      const v = await chrome.storage.local.get('lastKnownAuthValid');
+      if (typeof v?.lastKnownAuthValid === 'boolean') {
+        set({ lastKnownAuthValid: v.lastKnownAuthValid });
+      }
+    } catch {
+      // chrome.storage may not be ready yet
     }
   },
 
   logout: () => {
-    chrome.storage.local.remove('authToken');
+    chrome.storage.local.remove(['authToken', 'lastKnownAuthValid']);
     set({
       isAuthenticated: false,
+      isAuthChecked: true,
+      lastKnownAuthValid: false,
       authToken: null,
       user: null,
       viewMode: 'auth',

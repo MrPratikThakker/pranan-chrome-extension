@@ -207,6 +207,14 @@ export interface AppState {
   isAuthenticated: boolean;
   authToken: string | null;
   user: AuthResponse | null;
+  // True once checkAuth has completed at least one round-trip. Lets the
+  // UI hold off rendering the unauth flicker on cold open while we wait
+  // on validateAuth (~500ms).
+  isAuthChecked: boolean;
+  // The last-known-good auth.valid value, persisted to chrome.storage.
+  // On cold open we render the optimistic state from this immediately
+  // and reconcile when checkAuth resolves.
+  lastKnownAuthValid: boolean;
 
   // Current context
   currentPlatform: Platform;

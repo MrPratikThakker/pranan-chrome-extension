@@ -778,6 +778,45 @@ function findThreadViews(): Element[] {
   return Array.from(document.querySelectorAll('.h7'));
 }
 
+/**
+ * Returns the sender of whichever thread is currently open in the
+ * reading pane (the most recently opened, most likely the visible one).
+ *
+ * Different from extractThreadSender which takes a specific container:
+ * this one finds the right container by itself. Used by the side panel
+ * + popup so they can show relationship context for whoever the user is
+ * reading right now, not just whoever they're composing to.
+ *
+ * Returns null when no thread is open (eg. inbox list view).
+ */
+export function findOpenThreadSender(): { email: string | null; name: string | null; subject: string | null; preview: string | null } | null {
+  const threads = findThreadViews();
+  if (threads.length === 0) return null;
+
+  // Gmail keeps multiple .h7 elements in the DOM as the user navigates,
+  // but only one is actually visible. Find the visible one (it has
+  // a non-zero offsetHeight). Fall back to the last one in the list,
+  // which tends to be the most recently rendered.
+  let visible: Element | null = null;
+  for (const t of threads) {
+    if ((t as HTMLElement).offsetHeight > 0) {
+      visible = t;
+      break;
+    }
+  }
+  const target = visible || threads[threads.length - 1];
+
+  const { email, name } = extractThreadSender(target);
+  if (!email && !name) return null;
+
+  return {
+    email,
+    name,
+    subject: extractThreadSubject(target),
+    preview: extractLatestMessageText(target)?.slice(0, 200) || null,
+  };
+}
+
 function scanThreadViews() {
   const currentThreads = new Set(findThreadViews());
 
@@ -960,6 +999,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     dismissRelationshipPopup();
     sendResponse({ ok: true });
   }
+  // Side panel asks for the currently open thread (read mode) so it
+  // can show relationship context even when no compose window is open.
+  if (message.type === 'GET_OPEN_THREAD_SENDER') {
+    const opened = findOpenThreadSender();
+    sendResponse({ opened });
+    return true;
+  }
+
   // Side panel requests current compose state on mount
   if (message.type === 'GET_COMPOSE_STATE') {
     const composeWindows = findComposeWindows();
