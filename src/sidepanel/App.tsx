@@ -68,6 +68,8 @@ const API_BASE = 'https://app.pranan.ai';
 function AppInner() {
   const {
     isAuthenticated,
+    isAuthChecked,
+    lastKnownAuthValid,
     user,
     currentPlatform,
     composeContext,
@@ -321,8 +323,22 @@ function AppInner() {
 
   // --- Render ---
 
-  // Auth gate
+  // Auth gate.
+  //
+  // On cold open, validateAuth takes ~500ms. During that window,
+  // isAuthenticated is false but isAuthChecked is also false. Showing
+  // the AuthPanel during that window is the flicker users complained
+  // about. We defer to the persisted lastKnownAuthValid hint and only
+  // hard-render the unauth screen once the first check has actually
+  // resolved unauthenticated.
   if (!isAuthenticated) {
+    if (!isAuthChecked && lastKnownAuthValid) {
+      return (
+        <div className="h-screen flex items-center justify-center bg-brand-bg text-brand-text">
+          <div className="text-xs text-brand-text-3 animate-pulse">Loading...</div>
+        </div>
+      );
+    }
     return (
       <div className="h-screen flex flex-col bg-brand-bg text-brand-text">
         <AuthPanel onConnect={handleConnect} />
