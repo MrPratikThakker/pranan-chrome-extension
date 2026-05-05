@@ -18,10 +18,14 @@ import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '..
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
+import { bootstrapSentry } from '@/lib/observability';
 
 // ---------------------------------------------------------------------------
 // Selectors
 // ---------------------------------------------------------------------------
+
+
+bootstrapSentry('content-slack');
 
 const SELECTORS = {
   // Message input area (layered for Slack DOM changes)

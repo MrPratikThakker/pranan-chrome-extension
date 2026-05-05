@@ -13,15 +13,20 @@
 // Content script -- runs in Chrome's isolated world (no ES module support)
 // IIFE bundling handles scope isolation
 
+import { injectMultilineText } from '@/lib/safe-dom';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
 import type { InlineSuggestion } from '../shared/inline-suggestions';
+import { bootstrapSentry } from '@/lib/observability';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
+
+
+bootstrapSentry('content-gmail');
 
 const COMPOSE_SELECTORS = {
   // Gmail compose window container
@@ -247,9 +252,7 @@ function injectDraft(composeWindow: Element, draftText: string): boolean {
   if (!body) return false;
 
   body.focus();
-  body.innerHTML = draftText.split('\n').map(line =>
-    `<div>${line || '<br>'}</div>`
-  ).join('');
+  injectMultilineText(body, draftText, 'div');
 
   body.dispatchEvent(new Event('input', { bubbles: true }));
   body.dispatchEvent(new Event('change', { bubbles: true }));

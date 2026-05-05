@@ -13,10 +13,14 @@
 
 import { validateAuth, getContactContext, generateDraft, rewriteText, checkGrammar } from '@/lib/api-client';
 import type { ExtensionMessage, Platform, AuthResponse, ContactContext } from '@/types';
+import { bootstrapSentry } from '@/lib/observability';
 
 // ---------------------------------------------------------------------------
 // State (persisted via chrome.storage, rebuilt on service worker restart)
 // ---------------------------------------------------------------------------
+
+
+bootstrapSentry('service-worker');
 
 let cachedAuth: AuthResponse | null = null;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;

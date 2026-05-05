@@ -21,6 +21,10 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Platform, AuthResponse } from '@/types';
 import { getTodaySnapshot, type TodaySnapshot } from '@/lib/api-client';
+import { bootstrapSentry } from '@/lib/observability';
+
+
+bootstrapSentry('popup');
 
 interface PopupState {
   isAuthenticated: boolean;

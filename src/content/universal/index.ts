@@ -12,15 +12,20 @@
 
 // Content script -- IIFE bundling handles scope isolation
 
+import { injectMultilineText } from '@/lib/safe-dom';
 import { monitorForTextFields, type DetectedField } from '../shared/universal-detector';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
+import { bootstrapSentry } from '@/lib/observability';
 
 // ---------------------------------------------------------------------------
 // Skip if a platform-specific script is already loaded
 // ---------------------------------------------------------------------------
+
+
+bootstrapSentry('content-universal');
 
 const PLATFORM_URLS = [
   'mail.google.com',
@@ -181,9 +186,7 @@ if (isPlatformPage()) {
         if (activeEl.tagName === 'TEXTAREA') {
           (activeEl as HTMLTextAreaElement).value = text;
         } else {
-          activeEl.innerHTML = text.split('\n').map((line: string) =>
-            `<p>${line || '<br>'}</p>`
-          ).join('');
+          injectMultilineText(activeEl, text, 'p');
         }
         activeEl.dispatchEvent(new Event('input', { bubbles: true }));
         sendResponse({ success: true });

@@ -97,3 +97,52 @@ export function addBreadcrumb(message: string, data?: Record<string, unknown>): 
   ensureInit();
   Sentry.addBreadcrumb({ message, data, level: 'info' });
 }
+
+/**
+ * Surface-aware bootstrap. Call once from each entry point (service
+ * worker, sidepanel, popup, content scripts) so Sentry initializes per
+ * context, knows which surface it's running in, and captures uncaught
+ * errors + unhandled promise rejections.
+ *
+ * Idempotent. Safe to call multiple times within a single context.
+ */
+type Surface = 'service-worker' | 'sidepanel' | 'popup' | 'content-gmail' | 'content-slack' | 'content-linkedin' | 'content-universal';
+
+let surfaceBootstrapped = false;
+
+export function bootstrapSentry(surface: Surface): void {
+  if (surfaceBootstrapped) return;
+  surfaceBootstrapped = true;
+
+  ensureInit();
+  if (!ENABLED) return;
+
+  Sentry.setTag('surface', surface);
+
+  // Service workers and content scripts have window in some contexts but
+  // not others. Guard each handler.
+  try {
+    if (typeof self !== 'undefined' && 'addEventListener' in self) {
+      self.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
+        captureError(event.reason ?? new Error('unhandledrejection'), {
+          component: surface,
+          user_action: 'unhandledrejection',
+        });
+      });
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('error', (event: ErrorEvent) => {
+        captureError(event.error || new Error(event.message), {
+          component: surface,
+          user_action: 'window.onerror',
+        });
+      });
+    }
+  } catch {
+    // ignore
+  }
+}

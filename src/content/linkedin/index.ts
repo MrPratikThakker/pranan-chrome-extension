@@ -16,14 +16,19 @@
 
 // Content script -- IIFE bundling handles scope isolation
 
+import { injectMultilineText } from '@/lib/safe-dom';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
+import { bootstrapSentry } from '@/lib/observability';
 
 // ---------------------------------------------------------------------------
 // Selectors (layered for resilience)
 // ---------------------------------------------------------------------------
+
+
+bootstrapSentry('content-linkedin');
 
 const SELECTORS = {
   // Messaging compose
@@ -780,12 +785,8 @@ function injectDraft(text: string): boolean {
 
   input.focus();
 
-  // LinkedIn messaging uses a rich text editor
-  const paragraphs = text.split('\n').map(line =>
-    `<p>${line || '<br>'}</p>`
-  ).join('');
-
-  input.innerHTML = paragraphs;
+  // LinkedIn messaging uses a rich text editor.
+  injectMultilineText(input, text, 'p');
   input.dispatchEvent(new Event('input', { bubbles: true }));
 
   return true;
@@ -815,9 +816,7 @@ function injectCommentDraft(text: string): boolean {
   if (!commentInput) return false;
 
   commentInput.focus();
-  commentInput.innerHTML = text.split('\n').map(line =>
-    `<p>${line || '<br>'}</p>`
-  ).join('');
+  injectMultilineText(commentInput, text, 'p');
   commentInput.dispatchEvent(new Event('input', { bubbles: true }));
 
   return true;
