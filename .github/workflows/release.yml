@@ -19,6 +19,12 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # softprops/action-gh-release needs contents:write to create the
+    # release. The default GITHUB_TOKEN is read-only unless we ask for
+    # this explicitly. Without it the release step 403s and we lose
+    # the tagged artifact.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
