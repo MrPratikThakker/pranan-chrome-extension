@@ -18,6 +18,7 @@ import { BriefingPanel } from '@/components/BriefingPanel';
 import { NudgesPanel } from '@/components/NudgesPanel';
 import { dismissNudge, draftFromNudge } from '@/lib/api-client';
 import type { ExtensionMessage, Platform, MeetingBriefing } from '@/types';
+import { APP_ORIGIN, appUrl } from '@/lib/config';
 
 // ---------------------------------------------------------------------------
 // Error Boundary
@@ -63,7 +64,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
   }
 }
 
-const API_BASE = 'https://app.pranan.ai';
+const API_BASE = APP_ORIGIN;
 
 function AppInner() {
   const {
@@ -507,7 +508,7 @@ function AppInner() {
                   <p className="section-label">// Quick Actions</p>
                   <div className="grid grid-cols-2 gap-2">
                     <a
-                      href="https://app.pranan.ai/relationships"
+                      href={appUrl("/relationships")}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-sm border border-brand-border bg-brand-surface hover:border-brand-border-strong transition-colors"
@@ -521,7 +522,7 @@ function AppInner() {
                       <span className="text-[10px] text-brand-text-3 font-medium">Relationships</span>
                     </a>
                     <a
-                      href="https://app.pranan.ai/memory"
+                      href={appUrl("/memory")}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-sm border border-brand-border bg-brand-surface hover:border-brand-border-strong transition-colors"
@@ -716,3 +717,4 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+
