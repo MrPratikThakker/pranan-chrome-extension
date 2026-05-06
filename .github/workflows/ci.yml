@@ -19,6 +19,8 @@ jobs:
       - run: npm ci --prefer-offline --no-audit --no-fund
       - name: Type check
         run: npm run typecheck
+      - name: Tests
+        run: npm test
       - name: Build
         run: npm run build
       - name: Verify dist contents
@@ -40,3 +42,4 @@ jobs:
           name: dist-${{ github.sha }}
           path: dist/
           retention-days: 14
+
