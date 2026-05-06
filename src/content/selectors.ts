@@ -163,6 +163,83 @@ export const SELECTORS = {
       '.h7',
       '.nH.if',
     ],
+    /** Compose body editable area (HTML element with the actual draft text). */
+    composeBodyEl: [
+      '.Am.aiL [contenteditable="true"]',
+      '[contenteditable="true"][aria-label="Message Body"]',
+    ],
+    /** Subject input inside compose. */
+    subjectInput: [
+      'input[name="subjectbox"]',
+      'input[aria-label*="Subject"]',
+    ],
+    /** Reply header where the recipient lives in inline replies. */
+    replyHeader: [
+      '.go [email]',
+      '.gD [email]',
+    ],
+    /** Tooltip-style recipient chips (Method 3 + 4 in the old extractor). */
+    recipientTooltipChips: [
+      '.aoD [data-tooltip]',
+      '.GS [data-tooltip]',
+      '.afV [data-tooltip]',
+      '.aoD [title]',
+      '.GS [title]',
+    ],
+    /** Inputs in the To field. */
+    toFieldInputs: [
+      'input[aria-label*="To"]',
+      'input[aria-label*="recipients"]',
+      'input[name="to"]',
+    ],
+    /** Thread root container — used to anchor thread-bar injection. */
+    threadRoot: [
+      '[data-thread-perm-id]',
+      '.adn.ads',
+      '.ii.gt',
+      '.h7',
+      '[role="main"]',
+    ],
+    /** Message bodies inside a thread (for context extraction). */
+    threadMessageBodies: [
+      '.a3s.aiL',
+      '.ii.gt',
+    ],
+    /** Last message sender element with the email + name. */
+    threadSender: [
+      '.gD[email]',
+      '.go[email]',
+      '[data-hovercard-id]',
+    ],
+    /** Thread subject heading. */
+    threadSubject: [
+      '.hP',
+      'h2.hP',
+    ],
+    /** Reply buttons row inside a thread (where the prompt bar attaches). */
+    threadReplyButtons: [
+      '.amn',
+      '.aDH',
+    ],
+    /** Recipient name candidates in thread headers. */
+    threadFromCandidates: [
+      '.gD',
+      '.go',
+      '[email]',
+    ],
+    /** To-field container — where the recipient observer attaches. */
+    toFieldContainer: [
+      '.aoD',
+      '.GS',
+      '[aria-label*="To"]',
+    ],
+    /** Floating-icon body container — the actual editable body host. */
+    composeBodyContainer: [
+      '.aO7',
+      '.Am',
+      '.aoP',
+      '.M9',
+    ],
   },
 
   slack: {
@@ -250,4 +327,5 @@ export const SELECTORS = {
     ],
   },
 } as const;
+
 
