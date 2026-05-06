@@ -18,7 +18,7 @@
  * findOne()/findAll() instead of querySelector / querySelectorAll directly.
  */
 
-import { addBreadcrumb, captureMessage } from './observability';
+import { addBreadcrumb, captureMessage } from '../lib/observability';
 
 export type SelectorChain = readonly string[];
 
