@@ -19,7 +19,7 @@ import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relat
 import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
 import { injectMultilineText } from '@/lib/safe-dom';
-import { findOne, SELECTORS as REGISTRY } from '../selectors';
+import { findOne, findAll, SELECTORS as REGISTRY } from '../selectors';
 import { bootstrapSentry } from '@/lib/observability';
 
 // ---------------------------------------------------------------------------
@@ -145,9 +145,9 @@ function getThreadContext(): string | null {
   if (messages.length === 0) return null;
 
   // Get the last few messages for context
-  const contextMessages = Array.from(messages)
+  const contextMessages = messages
     .slice(-5)
-    .map(m => m.textContent?.trim())
+    .map((m: Element) => m.textContent?.trim())
     .filter(Boolean);
 
   return contextMessages.join('\n---\n').slice(0, 2000);
@@ -768,6 +768,7 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
 
 
 
