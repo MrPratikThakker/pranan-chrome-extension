@@ -33,6 +33,7 @@ import {
   type GrammarRequest,
 } from '@/lib/api-client';
 import type { MeetingBriefing, FollowUpNudge, DecayAlert } from '@/types';
+import { APP_ORIGIN } from '@/lib/config';
 
 // Active AbortControllers for cancellable requests
 let draftAbortController: AbortController | null = null;
@@ -141,14 +142,14 @@ export const useStore = create<AppState & Actions>((set, get) => ({
         // Fallback: check for companion token cookie from app.pranan.ai
         try {
           const cookies = await chrome.cookies?.get({
-            url: 'https://app.pranan.ai',
+            url: APP_ORIGIN,
             name: 'pranan_companion_token',
           });
           if (cookies?.value) {
             // Found a cookie token -- store it and clear the cookie
             await chrome.storage.local.set({ authToken: cookies.value });
             await chrome.cookies?.remove({
-              url: 'https://app.pranan.ai',
+              url: APP_ORIGIN,
               name: 'pranan_companion_token',
             });
           }
@@ -591,3 +592,4 @@ export const useStore = create<AppState & Actions>((set, get) => ({
     chrome.storage.local.set({ interactionCount: count });
   },
 }));
+
