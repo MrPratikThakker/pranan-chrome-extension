@@ -26,7 +26,7 @@ let authExpiryInFlight = false;
 // Config
 // ---------------------------------------------------------------------------
 
-const API_BASE = 'https://app.pranan.ai/api/companion';
+import { API_BASE } from './config';
 
 // ---------------------------------------------------------------------------
 // Token management (reads from chrome.storage.local for persistence across restarts)
@@ -409,4 +409,5 @@ export async function getTodaySnapshot(): Promise<TodaySnapshot | null> {
     return null;
   }
 }
+
 
