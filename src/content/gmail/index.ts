@@ -20,6 +20,7 @@ import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
 import type { InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
+import { findAll, findOne, SELECTORS } from '../selectors';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -63,17 +64,18 @@ let contactContextCache: Map<string, RelationshipPopupData> = new Map();
 // ---------------------------------------------------------------------------
 
 function findComposeWindows(): Element[] {
-  const editables = document.querySelectorAll(
-    '[contenteditable="true"][aria-label="Message Body"], ' +
-    '.Am.aiL [contenteditable="true"], ' +
-    '[contenteditable="true"][g_editable="true"]'
-  );
-
+  // Use the selector registry so a Gmail UI change reports to Sentry as
+  // selector_chain_broken instead of silently returning no compose windows.
+  const editables = findAll('gmail.composeBody', SELECTORS.gmail.composeBody);
   if (editables.length === 0) return [];
+
+  // Compose container chain — same fallback shape, but here we want closest()
+  // semantics, so build a comma-joined selector from the registered chain.
+  const containerSelector = SELECTORS.gmail.composeWindow.join(', ');
 
   const containers = new Set<Element>();
   for (const el of editables) {
-    const container = el.closest('.AD, .M9, .nH.oy8Mbf, [role="dialog"], .ip.iq');
+    const container = el.closest(containerSelector);
     if (container) {
       containers.add(container);
     } else {
@@ -88,19 +90,14 @@ function findComposeWindows(): Element[] {
 function extractRecipients(composeWindow: Element): string[] {
   const emails: string[] = [];
 
-  // Method 1: data-hovercard-id attributes on recipient chips
-  const chips = composeWindow.querySelectorAll('[data-hovercard-id]');
+  // Method 1+2 collapsed onto the recipient chip chain. The registry
+  // tracks both data-hovercard-id (modern Gmail) and [email] (older Gmail)
+  // plus tooltip/title fallbacks. If primary is empty and a fallback chip
+  // is hit, we get a Sentry breadcrumb so we know HubSpot Sidekick (or
+  // similar) is rewriting recipient chips on this user's tab.
+  const chips = findAll('gmail.recipientChips', SELECTORS.gmail.recipientChips, composeWindow);
   chips.forEach(chip => {
-    const email = chip.getAttribute('data-hovercard-id');
-    if (email && email.includes('@')) {
-      emails.push(email);
-    }
-  });
-
-  // Method 2: email attribute on recipient elements (older Gmail)
-  const emailEls = composeWindow.querySelectorAll('[email]');
-  emailEls.forEach(el => {
-    const email = el.getAttribute('email');
+    const email = chip.getAttribute('data-hovercard-id') || chip.getAttribute('email') || '';
     if (email && email.includes('@')) {
       emails.push(email);
     }
@@ -1175,4 +1172,5 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
 
