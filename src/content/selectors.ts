@@ -284,6 +284,38 @@ export const SELECTORS = {
       '[data-qa="message-text"]',
       '.c-message_kit__message .c-message__body',
       '.c-message_kit__blocks .c-message__body',
+      '.c-message_kit__blocks [data-qa="message-text"]',
+      '.c-message_kit__message .p-rich_text_section',
+      '.c-virtual_list__item .c-message__body',
+      '.c-virtual_list__item [data-qa="message-text"]',
+    ],
+    /** Channel header fallback chain — covers UI variants. */
+    channelHeaderFallbacks: [
+      '.p-view_header__channel_title',
+      '[data-qa="channel-header-title"]',
+      '.p-ia__view_header__channel_topic_text',
+      '.p-ia__view_header .p-view_header__channel_title',
+    ],
+    /** Channel members count badge in the header. */
+    channelMembers: [
+      '[data-qa="channel_header_members"]',
+    ],
+    /** Thread side-pane message bodies (used in getThreadMessages). */
+    threadMessageBody: [
+      '.c-message__body',
+    ],
+    /** Message kit container around a single message — for sender lookup. */
+    messageKitContainer: [
+      '.c-message_kit__message',
+      '.c-message_kit__blocks',
+      '.c-virtual_list__item',
+      '[data-qa="virtual-list-item"]',
+    ],
+    /** Sender name inside a message kit container. */
+    messageSenderName: [
+      '[data-qa="message_sender_name"]',
+      '.c-message__sender_button',
+      '.c-message_kit__sender button',
     ],
   },
 
@@ -327,5 +359,6 @@ export const SELECTORS = {
     ],
   },
 } as const;
+
 
 
