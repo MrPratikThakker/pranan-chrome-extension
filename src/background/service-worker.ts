@@ -609,30 +609,13 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Persistent Token Refresh (survives service worker restarts via chrome.alarms)
-// ---------------------------------------------------------------------------
-
-chrome.alarms.create('pranan-token-refresh', { periodInMinutes: 360 }); // Every 6 hours
-
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === 'pranan-token-refresh') {
-    try {
-      const { authToken } = await chrome.storage.local.get('authToken');
-      if (!authToken) return;
-
-      cachedAuth = await deduplicatedValidateAuth();
-      if (!cachedAuth?.valid) {
-        await chrome.storage.local.remove('authToken');
-        broadcastToSidePanel({ type: 'AUTH_STATUS', payload: { valid: false } });
-      }
-    } catch {
-      // Silent -- will retry next alarm
-    }
-  }
-});
-
-// Re-init auth eagerly on service worker startup
+// Re-init auth eagerly on service worker startup. The token refresh
+// alarm is now scheduled inside scheduleTokenRefresh() (called by initAuth)
+// using chrome.alarms.create with delayInMinutes: 25, then re-armed after
+// each successful refresh. The previous duplicate 6-hour periodic alarm
+// + listener block was removed because it ran the same logic with worse
+// timing.
 initAuth();
+
 
 
