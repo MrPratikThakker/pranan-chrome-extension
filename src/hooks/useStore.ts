@@ -50,7 +50,7 @@ interface Actions {
   // Context
   setPlatform: (platform: Platform) => void;
   setComposeContext: (ctx: ComposeContext | null) => void;
-  loadContactContext: (email?: string, name?: string) => Promise<void>;
+  loadContactContext: (email?: string, name?: string, linkedinUrl?: string) => Promise<void>;
 
   // Draft
   requestDraft: (request: DraftRequest) => Promise<void>;
@@ -602,6 +602,7 @@ export const useStore = create<AppState & Actions>((set, get) => ({
     chrome.storage.local.set({ interactionCount: count });
   },
 }));
+
 
 
 
