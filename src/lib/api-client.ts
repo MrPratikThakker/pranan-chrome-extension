@@ -143,12 +143,13 @@ export async function validateAuth(): Promise<AuthResponse> {
 // ---------------------------------------------------------------------------
 
 export async function getContactContext(
-  params: { email?: string; name?: string }
+  params: { email?: string; name?: string; linkedinUrl?: string }
 ): Promise<ContactContext> {
   const headers = await authHeaders();
   const query = new URLSearchParams();
   if (params.email) query.set('email', params.email);
   if (params.name) query.set('name', params.name);
+  if (params.linkedinUrl) query.set('linkedinUrl', params.linkedinUrl);
 
   const response = await fetch(`${API_BASE}/context?${query}`, { headers });
   return handleResponse<ContactContext>(response);
@@ -416,6 +417,7 @@ export async function getTodaySnapshot(): Promise<TodaySnapshot | null> {
     return null;
   }
 }
+
 
 
 
