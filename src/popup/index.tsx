@@ -22,6 +22,7 @@ import { createRoot } from 'react-dom/client';
 import type { Platform, AuthResponse } from '@/types';
 import { getTodaySnapshot, type TodaySnapshot } from '@/lib/api-client';
 import { bootstrapSentry } from '@/lib/observability';
+import { appUrl } from '@/lib/config';
 
 
 bootstrapSentry('popup');
@@ -81,17 +82,17 @@ function Popup() {
   };
 
   const openTriage = () => {
-    chrome.tabs.create({ url: 'https://app.pranan.ai/triage' });
+    chrome.tabs.create({ url: appUrl('/triage') });
     window.close();
   };
 
   const openHome = () => {
-    chrome.tabs.create({ url: 'https://app.pranan.ai/home' });
+    chrome.tabs.create({ url: appUrl('/home') });
     window.close();
   };
 
   const openLogin = () => {
-    chrome.tabs.create({ url: 'https://app.pranan.ai/login?source=companion' });
+    chrome.tabs.create({ url: appUrl('/login?source=companion') });
     window.close();
   };
 
@@ -349,3 +350,4 @@ const root = document.getElementById('popup-root');
 if (root) {
   createRoot(root).render(<Popup />);
 }
+
