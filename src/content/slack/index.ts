@@ -19,6 +19,7 @@ import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relat
 import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
 import { injectMultilineText } from '@/lib/safe-dom';
+import { findOne, SELECTORS as REGISTRY } from '../selectors';
 import { bootstrapSentry } from '@/lib/observability';
 
 // ---------------------------------------------------------------------------
@@ -70,18 +71,18 @@ const PRANAN_SLACK_BAR_ATTR = 'data-pranan-slack-bar';
 // ---------------------------------------------------------------------------
 
 function getChannelName(): string | null {
-  const header = document.querySelector(SELECTORS.channelHeader);
+  const header = findOne('slack.channelHeader', REGISTRY.slack.channelHeader);
   return header?.textContent?.trim() || null;
 }
 
 function getDMRecipient(): string | null {
   // Try dedicated DM header selectors first
-  const dmHeader = document.querySelector(SELECTORS.dmHeader);
+  const dmHeader = findOne('slack.dmHeader', REGISTRY.slack.dmHeader);
   if (dmHeader?.textContent?.trim()) return dmHeader.textContent.trim();
 
   // Fallback: in DMs, the channel header often shows the person's name
   if (isDirectMessage()) {
-    const channelHeader = document.querySelector(SELECTORS.channelHeader);
+    const channelHeader = findOne('slack.channelHeader', REGISTRY.slack.channelHeader);
     if (channelHeader?.textContent?.trim()) return channelHeader.textContent.trim();
   }
 
@@ -113,11 +114,11 @@ function isDirectMessage(): boolean {
   }
 
   // Fallback: check for DM header element
-  if (document.querySelector(SELECTORS.dmHeader)) return true;
+  if (findOne('slack.dmHeader', REGISTRY.slack.dmHeader)) return true;
 
   // Fallback: check if the channel header does NOT have a # prefix
   // (DMs show a person's name or avatar, channels show #channel-name)
-  const channelHeader = document.querySelector(SELECTORS.channelHeader);
+  const channelHeader = findOne('slack.channelHeader', REGISTRY.slack.channelHeader);
   if (channelHeader) {
     const text = channelHeader.textContent?.trim() || '';
     // Channel names start with # in the header or have specific classes
@@ -134,18 +135,18 @@ function isDirectMessage(): boolean {
 }
 
 function getMessageInputContent(): string {
-  const input = document.querySelector(SELECTORS.messageInput);
+  const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput);
   return input?.textContent?.trim() || '';
 }
 
 function isInputFocused(): boolean {
-  const input = document.querySelector(SELECTORS.messageInput);
+  const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput);
   return document.activeElement === input ||
     (input?.contains(document.activeElement) ?? false);
 }
 
 function getThreadContext(): string | null {
-  const threadPane = document.querySelector(SELECTORS.threadContainer);
+  const threadPane = findOne('slack.threadContainer', REGISTRY.slack.threadContainer);
   if (!threadPane) return null;
 
   const messages = threadPane.querySelectorAll('.c-message__body');
@@ -217,7 +218,7 @@ function getRecentChannelMessages(): string | null {
 
 function injectSlackPromptBar() {
   // Find the compose container to inject below
-  const composeContainer = document.querySelector(SELECTORS.composeContainer);
+  const composeContainer = findOne('slack.composeContainer', REGISTRY.slack.composeContainer);
   if (!composeContainer) return;
 
   // Don't inject twice
@@ -392,7 +393,7 @@ function removeSlackPromptBar() {
 // ---------------------------------------------------------------------------
 
 function injectComposeButtons() {
-  const sendBtn = document.querySelector(SELECTORS.sendButton);
+  const sendBtn = findOne<HTMLElement>('slack.sendButton', REGISTRY.slack.sendButton);
   if (!sendBtn) return;
   if (hasInjectedButton(sendBtn, 'pranan-slack-main')) return;
 
@@ -482,7 +483,7 @@ function showComposeRelationshipPopup() {
 }
 
 function renderPopup(data: RelationshipPopupData) {
-  const header = document.querySelector(SELECTORS.dmHeader);
+  const header = findOne('slack.dmHeader', REGISTRY.slack.dmHeader);
   if (!header) return;
 
   showRelationshipPopup(header, data,
@@ -517,7 +518,7 @@ function attachSuggestionMonitor() {
     suggestionCleanup = null;
   }
 
-  const input = document.querySelector(SELECTORS.messageInput) as HTMLElement | null;
+  const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput) as HTMLElement | null;
   if (!input) return;
 
   suggestionCleanup = createSuggestionMonitor({
@@ -593,7 +594,7 @@ function checkForActiveCompose(requireFocus = true) {
 // ---------------------------------------------------------------------------
 
 function injectDraft(text: string): boolean {
-  const input = document.querySelector(SELECTORS.messageInput) as HTMLElement | null;
+  const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput) as HTMLElement | null;
   if (!input) return false;
 
   input.focus();
@@ -638,7 +639,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   // Service worker asks for current compose state when side panel opens
   if (message.type === 'GET_COMPOSE_STATE') {
-    const input = document.querySelector(SELECTORS.messageInput);
+    const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput);
     if (input) {
       const isDM = isDirectMessage();
       const channel = getChannelName();
@@ -705,7 +706,7 @@ const urlObserver = new MutationObserver(() => {
   // 2. Input element appearance detection (catches async-rendered inputs)
   // This fires on any DOM mutation, so we check cheaply with a flag
   if (!lastInputDetected) {
-    const input = document.querySelector(SELECTORS.messageInput);
+    const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput);
     if (input) {
       lastInputDetected = true;
       checkForActiveCompose(false);
@@ -739,7 +740,7 @@ function init() {
       setTimeout(() => {
         if (!isInputFocused() && document.hasFocus()) {
           // Cleanup Phase 1-3 elements + prompt bar
-          const input = document.querySelector(SELECTORS.messageInput);
+          const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput);
           if (input?.parentElement) {
             removeInjectedButtons(input.parentElement);
           }
@@ -764,7 +765,7 @@ function init() {
   // Periodic fallback: check every 3 seconds for new inputs that MutationObserver may miss
   // (e.g., when Slack replaces its virtual DOM tree without standard mutations)
   setInterval(() => {
-    const input = document.querySelector(SELECTORS.messageInput);
+    const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput);
     if (input && !lastInputDetected) {
       lastInputDetected = true;
       checkForActiveCompose(false);
@@ -776,7 +777,7 @@ function init() {
   // Also listen for SIDE_PANEL_READY to re-send context
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'SIDE_PANEL_READY') {
-      const input = document.querySelector(SELECTORS.messageInput);
+      const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput);
       if (input) {
         lastChannel = null;
         lastRecipient = null;
@@ -791,4 +792,5 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
 
