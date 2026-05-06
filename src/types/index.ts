@@ -16,6 +16,7 @@ export interface ComposeContext {
   isDM: boolean;                 // Slack
   selectedText: string | null;   // For rewrite
   composeType?: 'message' | 'post' | 'comment'; // LinkedIn compose variant
+  linkedinUrl?: string | null;  // LinkedIn post author profile URL (comment context)
 }
 
 // --- API Response Types ---
@@ -259,3 +260,4 @@ export const RATE_LIMITS = {
   premium: { requestsPerMinute: 30, draftsPerDay: Infinity, rewritesPerDay: Infinity },
   team: { requestsPerMinute: 60, draftsPerDay: Infinity, rewritesPerDay: Infinity },
 } as const;
+
