@@ -457,6 +457,7 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           platform?: string;
           postAuthor?: string;
           postText?: string;
+          postUrl?: string;
           prompt?: string;
           composeType?: string;
         };
@@ -477,6 +478,8 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           platform: 'linkedin',
           messageToReplyTo: payload.postText,
           prompt: payload.prompt,
+          composeType: 'comment',
+          postUrl: payload.postUrl,
         });
         break;
       }
@@ -592,4 +595,5 @@ export const useStore = create<AppState & Actions>((set, get) => ({
     chrome.storage.local.set({ interactionCount: count });
   },
 }));
+
 
