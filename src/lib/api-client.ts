@@ -53,6 +53,65 @@ async function authHeaders(): Promise<Record<string, string>> {
 }
 
 // ---------------------------------------------------------------------------
+// fetchWithRetry — capped exponential backoff for transient failures
+// ---------------------------------------------------------------------------
+
+/**
+ * Wrapper around fetch that retries on network error or 5xx responses.
+ * Backoff is 250ms / 500ms / 1000ms (capped at 3 retries).
+ *
+ * Does NOT retry on:
+ *   - 4xx responses (auth errors, bad requests, rate limits — those are
+ *     deterministic and retrying just makes things worse)
+ *   - AbortError (the caller cancelled — never retry a cancellation)
+ *
+ * Streaming requests (SSE) cannot be retried mid-stream and should not call
+ * this helper for the streaming fetch itself; they can fall back to the
+ * non-streaming path which DOES retry.
+ */
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  opts: { retries?: number } = {},
+): Promise<Response> {
+  const retries = opts.retries ?? 3;
+  let lastErr: unknown = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, init);
+
+      // Retry on 5xx but not 4xx. 4xx is the caller's problem.
+      if (response.status >= 500 && response.status < 600 && attempt < retries) {
+        await sleep(backoffMs(attempt));
+        continue;
+      }
+      return response;
+    } catch (err) {
+      // Don't retry user cancellation.
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      lastErr = err;
+      if (attempt < retries) {
+        await sleep(backoffMs(attempt));
+        continue;
+      }
+      throw err;
+    }
+  }
+  // Unreachable but keeps TS happy.
+  throw lastErr ?? new Error('fetchWithRetry: unknown failure');
+}
+
+function backoffMs(attempt: number): number {
+  // 0 -> 250, 1 -> 500, 2 -> 1000, capped.
+  return Math.min(250 * Math.pow(2, attempt), 1500);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ---------------------------------------------------------------------------
 // Error handling
 // ---------------------------------------------------------------------------
 
@@ -151,7 +210,7 @@ export async function getContactContext(
   if (params.name) query.set('name', params.name);
   if (params.linkedinUrl) query.set('linkedinUrl', params.linkedinUrl);
 
-  const response = await fetch(`${API_BASE}/context?${query}`, { headers });
+  const response = await fetchWithRetry(`${API_BASE}/context?${query}`, { headers });
   return handleResponse<ContactContext>(response);
 }
 
@@ -180,7 +239,7 @@ export interface DraftRequest {
 export async function generateDraft(request: DraftRequest, signal?: AbortSignal): Promise<DraftResponse> {
   const headers = await authHeaders();
   console.log('[API] generateDraft: POST', `${API_BASE}/draft`, { hasAuth: !!headers['Authorization'] });
-  const response = await fetch(`${API_BASE}/draft`, {
+  const response = await fetchWithRetry(`${API_BASE}/draft`, {
     method: 'POST',
     headers,
     body: JSON.stringify(request),
@@ -294,7 +353,7 @@ export interface RewriteRequest {
 
 export async function rewriteText(request: RewriteRequest, signal?: AbortSignal): Promise<RewriteResponse> {
   const headers = await authHeaders();
-  const response = await fetch(`${API_BASE}/rewrite`, {
+  const response = await fetchWithRetry(`${API_BASE}/rewrite`, {
     method: 'POST',
     headers,
     body: JSON.stringify(request),
@@ -316,7 +375,7 @@ export interface GrammarRequest {
 
 export async function checkGrammar(request: GrammarRequest, signal?: AbortSignal): Promise<GrammarResponse> {
   const headers = await authHeaders();
-  const response = await fetch(`${API_BASE}/grammar`, {
+  const response = await fetchWithRetry(`${API_BASE}/grammar`, {
     method: 'POST',
     headers,
     body: JSON.stringify(request),
@@ -345,7 +404,7 @@ async function safeJsonResponse<T>(response: Response, fallback: T): Promise<T> 
 export async function getBriefings(): Promise<MeetingBriefing[]> {
   try {
     const headers = await authHeaders();
-    const response = await fetch(`${API_BASE}/briefings`, { headers });
+    const response = await fetchWithRetry(`${API_BASE}/briefings`, { headers });
     return safeJsonResponse<MeetingBriefing[]>(response, []);
   } catch {
     return [];
@@ -356,7 +415,7 @@ export async function getBriefings(): Promise<MeetingBriefing[]> {
 export async function getNudges(): Promise<FollowUpNudge[]> {
   try {
     const headers = await authHeaders();
-    const response = await fetch(`${API_BASE}/nudges`, { headers });
+    const response = await fetchWithRetry(`${API_BASE}/nudges`, { headers });
     return safeJsonResponse<FollowUpNudge[]>(response, []);
   } catch {
     return [];
@@ -367,7 +426,7 @@ export async function getNudges(): Promise<FollowUpNudge[]> {
 export async function getDecayAlerts(): Promise<DecayAlert[]> {
   try {
     const headers = await authHeaders();
-    const response = await fetch(`${API_BASE}/decay-alerts`, { headers });
+    const response = await fetchWithRetry(`${API_BASE}/decay-alerts`, { headers });
     return safeJsonResponse<DecayAlert[]>(response, []);
   } catch {
     return [];
@@ -448,5 +507,6 @@ export async function getSnippets(): Promise<Snippet[]> {
     return [];
   }
 }
+
 
 
