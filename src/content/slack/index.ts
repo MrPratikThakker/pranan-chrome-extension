@@ -18,6 +18,7 @@ import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '..
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
+import { injectMultilineText } from '@/lib/safe-dom';
 import { bootstrapSentry } from '@/lib/observability';
 
 // ---------------------------------------------------------------------------
@@ -597,12 +598,12 @@ function injectDraft(text: string): boolean {
 
   input.focus();
 
-  // Slack uses Quill-like editor. Set innerHTML and dispatch events.
-  const paragraphs = text.split('\n').map(line =>
-    `<p>${line || '<br>'}</p>`
-  ).join('');
-
-  input.innerHTML = paragraphs;
+  // Slack uses a Quill-like editor; one <p> block per line preserves
+  // line breaks. We use injectMultilineText (textContent under the hood)
+  // so any '<' / '>' / & in the draft is rendered as literal text instead
+  // of HTML. Closes the residual XSS-shape vector that the safe-dom
+  // commit (df39974c) missed for Slack.
+  injectMultilineText(input, text, 'p');
   input.dispatchEvent(new Event('input', { bubbles: true }));
 
   return true;
@@ -790,3 +791,4 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
