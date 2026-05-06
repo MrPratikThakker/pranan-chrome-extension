@@ -14,6 +14,7 @@
 import { validateAuth, getContactContext, generateDraft, rewriteText, checkGrammar } from '@/lib/api-client';
 import type { ExtensionMessage, Platform, AuthResponse, ContactContext } from '@/types';
 import { bootstrapSentry } from '@/lib/observability';
+import { APP_ORIGIN } from '@/lib/config';
 
 // ---------------------------------------------------------------------------
 // State (persisted via chrome.storage, rebuilt on service worker restart)
@@ -506,7 +507,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 chrome.runtime.onMessageExternal.addListener(
   (message, sender, sendResponse) => {
-    if (sender.origin !== 'https://app.pranan.ai') {
+    if (sender.origin !== APP_ORIGIN) {
       sendResponse({ error: 'Unauthorized origin' });
       return;
     }
@@ -621,3 +622,4 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 // Re-init auth eagerly on service worker startup
 initAuth();
+
