@@ -24,7 +24,12 @@ import { APP_ORIGIN } from '@/lib/config';
 bootstrapSentry('service-worker');
 
 let cachedAuth: AuthResponse | null = null;
-let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+// MV3 service workers terminate after ~30s idle, which kills setTimeout-based
+// refresh. chrome.alarms persists across SW restarts so the 25-min refresh
+// fires reliably even on long-idle tabs. Alarm name is namespaced so other
+// alarms don't collide.
+const REFRESH_ALARM_NAME = 'pranan-token-refresh';
 
 // Pending-promise pattern to deduplicate concurrent validateAuth calls
 let pendingValidation: Promise<AuthResponse> | null = null;
@@ -60,22 +65,29 @@ async function initAuth(): Promise<boolean> {
 }
 
 function scheduleTokenRefresh() {
-  if (refreshTimer) clearTimeout(refreshTimer);
-  // Refresh every 25 minutes (tokens expire at 30)
-  refreshTimer = setTimeout(async () => {
-    try {
-      cachedAuth = await deduplicatedValidateAuth();
-      if (cachedAuth.valid) {
-        scheduleTokenRefresh();
-      } else {
-        await chrome.storage.local.remove('authToken');
-        broadcastToSidePanel({ type: 'AUTH_STATUS', payload: { valid: false } });
-      }
-    } catch {
-      // Will retry on next API call
-    }
-  }, 25 * 60 * 1000);
+  // chrome.alarms minimum interval is 0.5 minutes (30s) on production, 30s
+  // for periodic. We refresh every 25 min — well above the floor. The alarm
+  // is recreated each call so the timer resets after a successful refresh.
+  chrome.alarms.create(REFRESH_ALARM_NAME, { delayInMinutes: 25 });
 }
+
+// Single registration point for the alarm handler. Survives SW restarts:
+// when Chrome wakes the SW to fire the alarm, this listener fires the same
+// refresh logic that the old setTimeout used to run.
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== REFRESH_ALARM_NAME) return;
+  try {
+    cachedAuth = await deduplicatedValidateAuth();
+    if (cachedAuth.valid) {
+      scheduleTokenRefresh();
+    } else {
+      await chrome.storage.local.remove('authToken');
+      broadcastToSidePanel({ type: 'AUTH_STATUS', payload: { valid: false } });
+    }
+  } catch {
+    // Will retry on next API call
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Platform Detection
@@ -622,4 +634,5 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 // Re-init auth eagerly on service worker startup
 initAuth();
+
 
