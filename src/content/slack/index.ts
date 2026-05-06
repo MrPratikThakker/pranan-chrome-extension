@@ -86,19 +86,11 @@ function getDMRecipient(): string | null {
     if (channelHeader?.textContent?.trim()) return channelHeader.textContent.trim();
   }
 
-  // Broader fallback: look for the header title in the view header area
-  const headerCandidates = [
-    '.p-view_header__channel_title',
-    '[data-qa="channel-header-title"]',
-    '.p-ia__view_header__channel_topic_text',
-    '.p-ia__view_header .p-view_header__channel_title',
-  ];
-  for (const sel of headerCandidates) {
-    const el = document.querySelector(sel);
-    const text = el?.textContent?.trim();
-    if (text && text.length > 0 && !text.startsWith('#')) {
-      return text;
-    }
+  // Broader fallback: try registry chain for header title fallbacks.
+  const fallback = findOne('slack.channelHeaderFallbacks', REGISTRY.slack.channelHeaderFallbacks);
+  const fallbackText = fallback?.textContent?.trim();
+  if (fallbackText && fallbackText.length > 0 && !fallbackText.startsWith('#')) {
+    return fallbackText;
   }
 
   return null;
@@ -126,7 +118,7 @@ function isDirectMessage(): boolean {
       channelHeader.closest('[data-qa="channel_sidebar_name_channel"]') !== null;
     if (!isChannel && text.length > 0) {
       // Could be a DM -- check if there's no channel member count (DMs don't show member counts)
-      const memberCount = document.querySelector(SELECTORS.channelMembers);
+      const memberCount = findOne('slack.channelMembers', REGISTRY.slack.channelMembers);
       if (!memberCount) return true;
     }
   }
@@ -149,7 +141,7 @@ function getThreadContext(): string | null {
   const threadPane = findOne('slack.threadContainer', REGISTRY.slack.threadContainer);
   if (!threadPane) return null;
 
-  const messages = threadPane.querySelectorAll('.c-message__body');
+  const messages = findAll('slack.threadMessageBody', REGISTRY.slack.threadMessageBody, threadPane);
   if (messages.length === 0) return null;
 
   // Get the last few messages for context
@@ -171,37 +163,21 @@ function getThreadContext(): string | null {
  * - .p-rich_text_section: rich text blocks in messages
  */
 function getRecentChannelMessages(): string | null {
-  // Try multiple selectors in order of specificity
-  const selectorStrategies = [
-    SELECTORS.recentMessages,
-    '.c-message_kit__blocks [data-qa="message-text"]',
-    '.c-message_kit__message .p-rich_text_section',
-    '.c-virtual_list__item .c-message__body',
-    '.c-virtual_list__item [data-qa="message-text"]',
-  ];
-
-  let messageEls: NodeListOf<Element> | null = null;
-  for (const sel of selectorStrategies) {
-    const els = document.querySelectorAll(sel);
-    if (els.length > 0) {
-      messageEls = els;
-      break;
-    }
-  }
-
-  if (!messageEls || messageEls.length === 0) return null;
+  // Registry chain covers all selectors that were in the local strategy list.
+  const messageEls = findAll('slack.recentMessages', REGISTRY.slack.recentMessages);
+  if (messageEls.length === 0) return null;
 
   const messages: string[] = [];
-  const last5 = Array.from(messageEls).slice(-5);
+  const last5 = messageEls.slice(-5);
   for (const el of last5) {
     // Try to find the sender name for this message
     // Walk up to find the message container, then look for sender
-    const messageKit = el.closest(
-      '.c-message_kit__message, .c-message_kit__blocks, .c-virtual_list__item, [data-qa="virtual-list-item"]'
-    );
-    const senderEl = messageKit?.querySelector(
-      '[data-qa="message_sender_name"], .c-message__sender_button, .c-message_kit__sender button'
-    );
+    // closest() needs a comma-joined string — registry chain has the same
+    // entries; join them so the fallback semantics match.
+    const messageKit = el.closest(REGISTRY.slack.messageKitContainer.join(', '));
+    const senderEl = messageKit
+      ? findOne('slack.messageSenderName', REGISTRY.slack.messageSenderName, messageKit)
+      : null;
     const sender = senderEl?.textContent?.trim() || 'Someone';
     const text = el.textContent?.trim();
     if (text) {
@@ -792,5 +768,6 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
 
 
