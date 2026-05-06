@@ -1137,6 +1137,37 @@ async function init() {
     knownComposeWindows.add(win);
     onComposeDetected(win);
   });
+
+  // SPA navigation: Gmail uses #inbox, #sent, #search/.../THREAD_ID, etc.
+  // The rootObserver catches most compose pops, but Gmail occasionally
+  // swaps an entire subtree (e.g. opening a thread from search results)
+  // without firing the kind of mutation our observer reacts to. Re-running
+  // detection on hashchange + popstate is a cheap safety net that picks up
+  // any compose windows we missed and prunes any that closed during nav.
+  //
+  // Throttled to one detection per 250ms so a burst of nav events doesn't
+  // saturate the main thread.
+  let lastSpaCheck = 0;
+  const onSpaNav = () => {
+    const now = Date.now();
+    if (now - lastSpaCheck < 250) return;
+    lastSpaCheck = now;
+    const currentWindows = new Set(findComposeWindows());
+    for (const win of currentWindows) {
+      if (!knownComposeWindows.has(win)) {
+        onComposeDetected(win);
+      }
+    }
+    for (const win of knownComposeWindows) {
+      if (!currentWindows.has(win)) {
+        onComposeClosed(win);
+      }
+    }
+    knownComposeWindows = currentWindows;
+    scanThreadViews();
+  };
+  window.addEventListener('hashchange', onSpaNav);
+  window.addEventListener('popstate', onSpaNav);
 }
 
 if (document.readyState === 'loading') {
@@ -1144,3 +1175,4 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
