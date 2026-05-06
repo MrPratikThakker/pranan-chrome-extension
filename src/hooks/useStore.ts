@@ -212,19 +212,24 @@ export const useStore = create<AppState & Actions>((set, get) => ({
       // Auto-load contact context when compose is detected
       const email = ctx.recipientEmail;
       const name = ctx.recipientName;
-      if (email || name) {
-        get().loadContactContext(email || undefined, name || undefined);
+      const linkedinUrl = (ctx as { linkedinUrl?: string | null }).linkedinUrl ?? null;
+      if (email || name || linkedinUrl) {
+        get().loadContactContext(
+          email || undefined,
+          name || undefined,
+          linkedinUrl || undefined,
+        );
       }
     } else {
       set({ contactContext: null, currentDraft: null });
     }
   },
 
-  loadContactContext: async (email, name) => {
-    if (!email && !name) return;
+  loadContactContext: async (email, name, linkedinUrl) => {
+    if (!email && !name && !linkedinUrl) return;
     set({ isLoading: true, error: null });
     try {
-      const context = await getContactContext({ email, name });
+      const context = await getContactContext({ email, name, linkedinUrl });
       set({ contactContext: context, isLoading: false, viewMode: 'context' });
     } catch (err) {
       set({
@@ -456,6 +461,7 @@ export const useStore = create<AppState & Actions>((set, get) => ({
         const payload = message.payload as {
           platform?: string;
           postAuthor?: string;
+          postAuthorUrl?: string;
           postText?: string;
           postUrl?: string;
           prompt?: string;
@@ -471,7 +477,8 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           isDM: false,
           selectedText: null,
           composeType: 'comment',
-        };
+          linkedinUrl: payload.postAuthorUrl || null,
+        } as ComposeContext;
         get().setComposeContext(ctx);
         get().requestDraft({
           recipientName: payload.postAuthor,
@@ -595,5 +602,6 @@ export const useStore = create<AppState & Actions>((set, get) => ({
     chrome.storage.local.set({ interactionCount: count });
   },
 }));
+
 
 
