@@ -104,9 +104,7 @@ function extractRecipients(composeWindow: Element): string[] {
   });
 
   // Method 3: Chip spans with data-tooltip containing email
-  const tooltipChips = composeWindow.querySelectorAll(
-    '.aoD [data-tooltip], .GS [data-tooltip], .afV [data-tooltip]'
-  );
+  const tooltipChips = findAll('gmail.recipientTooltipChips', SELECTORS.gmail.recipientTooltipChips, composeWindow);
   tooltipChips.forEach(el => {
     const tooltip = el.getAttribute('data-tooltip') || '';
     const emailMatch = tooltip.match(/[\w.+-]+@[\w.-]+\.\w+/);
@@ -114,9 +112,7 @@ function extractRecipients(composeWindow: Element): string[] {
   });
 
   // Method 4: Chip spans with title attribute containing email
-  const titleChips = composeWindow.querySelectorAll(
-    '.aoD [title], .GS [title]'
-  );
+  const titleChips = findAll('gmail.recipientTooltipChips', ['.aoD [title]', '.GS [title]'], composeWindow);
   titleChips.forEach(el => {
     const title = el.getAttribute('title') || '';
     const emailMatch = title.match(/[\w.+-]+@[\w.-]+\.\w+/);
@@ -124,9 +120,7 @@ function extractRecipients(composeWindow: Element): string[] {
   });
 
   // Method 5: Parse To input field value
-  const toInputs = composeWindow.querySelectorAll(
-    'input[aria-label*="To"], input[aria-label*="recipients"], input[name="to"]'
-  );
+  const toInputs = findAll('gmail.toFieldInputs', SELECTORS.gmail.toFieldInputs, composeWindow);
   toInputs.forEach(input => {
     const value = (input as HTMLInputElement).value;
     const match = value.match(/[\w.+-]+@[\w.-]+\.\w+/g);
@@ -137,7 +131,7 @@ function extractRecipients(composeWindow: Element): string[] {
   if (emails.length === 0) {
     const replyHeader = composeWindow.closest('.h7, .gs, .nH');
     if (replyHeader) {
-      const fromSpans = replyHeader.querySelectorAll('.go [email], .gD [email]');
+      const fromSpans = findAll('gmail.replyHeader', SELECTORS.gmail.replyHeader, replyHeader);
       fromSpans.forEach(el => {
         const email = el.getAttribute('email');
         if (email && email.includes('@')) emails.push(email);
@@ -204,9 +198,7 @@ function getThreadContext(composeWindow: Element): string | null {
     composeWindow.closest('.h7, .gs') ||
     composeWindow.closest('[data-thread-perm-id]') ||
     composeWindow.closest('[role="main"]') ||
-    document.querySelector('[data-thread-perm-id]') ||
-    document.querySelector('.adn.ads, .ii.gt, .h7') ||
-    document.querySelector('[role="main"]');
+    findOne('gmail.threadRoot', SELECTORS.gmail.threadRoot);
 
   if (!thread) return null;
 
@@ -388,7 +380,7 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
 function injectFloatingIcon(composeWindow: Element, recipientEmail: string | null) {
   // Find Gmail's send toolbar (.btC) — the bottom row with Send + Aa + emoji + attach.
   // Place the Pranan icon RIGHT AFTER the Send button, where Voila / Loom inject.
-  const sendButton = composeWindow.querySelector('[data-tooltip*="Send"], [aria-label*="Send"]') as HTMLElement | null;
+  const sendButton = findOne<HTMLElement>('gmail.sendButton', SELECTORS.gmail.sendButton, composeWindow);
   const toolbar = sendButton?.closest('.btC, .aoP, .gU') as HTMLElement | null;
   if (!sendButton || !toolbar) {
     console.log('[Pranan] send toolbar not found; falling back to compose body');
@@ -517,7 +509,7 @@ function showComposeRelationshipPopup(composeWindow: Element, recipientEmail: st
 
 function renderRelationshipPopup(composeWindow: Element, data: RelationshipPopupData) {
   // Find the To field as anchor
-  const toField = composeWindow.querySelector('.aoD, .GS, [aria-label*="To"]');
+  const toField = findOne('gmail.toFieldContainer', SELECTORS.gmail.toFieldContainer, composeWindow);
   if (!toField) return;
 
   showRelationshipPopup(
@@ -596,18 +588,18 @@ function extractThreadSender(threadContainer: Element): { email: string | null; 
 
   // Extract sender email
   // In Gmail, .gD itself carries the [email] attr (not a child), e.g. <span class="gD" email="user@example.com">
-  const senderEl = lastMessage.querySelector('.gD[email], .go[email], [data-hovercard-id]');
+  const senderEl = findOne('gmail.threadSender', SELECTORS.gmail.threadSender, lastMessage);
   const email = senderEl?.getAttribute('email') || senderEl?.getAttribute('data-hovercard-id') || null;
 
   // Extract sender name
-  const nameEl = lastMessage.querySelector('.gD[name], .gD, .go');
+  const nameEl = findOne('gmail.threadFromCandidates', SELECTORS.gmail.threadFromCandidates, lastMessage);
   const name = nameEl?.getAttribute('name') || nameEl?.textContent?.trim() || null;
 
   return { email, name };
 }
 
 function extractThreadSubject(threadContainer: Element): string | null {
-  const subjectEl = threadContainer.querySelector('.hP, h2.hP');
+  const subjectEl = findOne('gmail.threadSubject', SELECTORS.gmail.threadSubject, threadContainer);
   return subjectEl?.textContent?.trim() || null;
 }
 
@@ -625,7 +617,7 @@ function injectThreadPromptBar(threadContainer: Element) {
 
   // Find the reply/forward button area at the bottom of the thread
   // Gmail uses .amn for the "Reply" / "Reply all" / "Forward" buttons row
-  const replyButtonsRow = threadContainer.querySelector('.amn');
+  const replyButtonsRow = findOne('gmail.threadReplyButtons', SELECTORS.gmail.threadReplyButtons, threadContainer);
   if (!replyButtonsRow) return;
 
   const { email: senderEmail, name: senderName } = extractThreadSender(threadContainer);
@@ -775,7 +767,7 @@ let knownThreadViews = new Set<Element>();
 
 function findThreadViews(): Element[] {
   // .h7 is the Gmail thread view container
-  return Array.from(document.querySelectorAll('.h7'));
+  return findAll('gmail.threadView', SELECTORS.gmail.threadView);
 }
 
 /**
@@ -922,7 +914,7 @@ function onComposeDetected(composeWindow: Element) {
     injectComposeButtons(composeWindow);
   });
 
-  const toContainer = composeWindow.querySelector('.aoD, .GS');
+  const toContainer = findOne('gmail.toFieldContainer', SELECTORS.gmail.toFieldContainer, composeWindow);
   if (toContainer) {
     recipientObserver.observe(toContainer, { childList: true, subtree: true });
     activeComposeObservers.set(composeWindow, recipientObserver);
@@ -947,7 +939,7 @@ function onComposeClosed(composeWindow: Element) {
   const floats = composeWindow.querySelectorAll(`[${PRANAN_FLOAT_ATTR}]`);
   floats.forEach(f => f.remove());
   // Also check parent containers
-  const bodyContainer = composeWindow.querySelector('.aO7, .Am, .aoP, .M9');
+  const bodyContainer = findOne('gmail.composeBodyContainer', SELECTORS.gmail.composeBodyContainer, composeWindow);
   if (bodyContainer) {
     bodyContainer.querySelectorAll(`[${PRANAN_FLOAT_ATTR}]`).forEach(f => f.remove());
   }
@@ -1172,5 +1164,6 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
 
 
