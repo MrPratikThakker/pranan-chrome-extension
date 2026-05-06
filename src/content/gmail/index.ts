@@ -20,7 +20,7 @@ import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
 import type { InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
-import { findAll, findOne, SELECTORS } from '../selectors';
+import { findAll, SELECTORS } from '../selectors';
 
 // ---------------------------------------------------------------------------
 // Constants
