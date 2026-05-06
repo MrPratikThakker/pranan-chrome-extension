@@ -427,8 +427,17 @@ function injectCommentPromptBars() {
     );
     if (!commentForm) continue;
 
-    // Don't inject twice on this form
-    if (commentForm.querySelector(`[${PRANAN_LI_COMMENT_BAR_ATTR}]`)) continue;
+    // Don't inject twice on this form. The bar is inserted as a SIBLING
+    // (commentForm.parentElement.insertBefore(bar, commentForm)), not inside,
+    // so checking commentForm itself misses it. Mark the form on inject and
+    // also scan the parent for any existing bar — defends against both
+    // LinkedIn re-rendering the contenteditable (which invalidates the
+    // WeakSet entry) and against the form being reused across nav.
+    if (commentForm.hasAttribute('data-pranan-bar-injected')) continue;
+    if (commentForm.parentElement?.querySelector(`:scope > [${PRANAN_LI_COMMENT_BAR_ATTR}]`)) {
+      commentForm.setAttribute('data-pranan-bar-injected', 'true');
+      continue;
+    }
 
     const { postAuthor, postAuthorUrl, postText, postUrl } = getCommentPostContext(commentInput);
 
@@ -510,6 +519,7 @@ function injectCommentPromptBars() {
     close.addEventListener('click', (e) => {
       e.stopPropagation();
       bar.remove();
+      commentForm.removeAttribute('data-pranan-bar-injected');
     });
 
     const triggerCommentDraft = () => {
@@ -557,6 +567,8 @@ function injectCommentPromptBars() {
 
     // Insert the bar before the comment form
     commentForm.parentElement?.insertBefore(bar, commentForm);
+    // Mark the form so subsequent observer ticks skip the parent scan.
+    commentForm.setAttribute('data-pranan-bar-injected', 'true');
   }
 }
 
@@ -959,6 +971,7 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
 
 
 
