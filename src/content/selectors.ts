@@ -166,11 +166,47 @@ export const SELECTORS = {
   },
 
   slack: {
-    /** Quill-like message input. */
+    /** Message input (Quill editor). The data-qa wrapper is most stable. */
     messageInput: [
-      '.ql-editor[contenteditable="true"]',
       '[data-qa="message_input"] [contenteditable="true"]',
       '[data-qa="texty_composer_container"] [contenteditable="true"]',
+      '.ql-editor[data-placeholder]',
+      '[contenteditable="true"][role="textbox"][aria-label*="Message"]',
+    ],
+    /** Channel header with the channel name. */
+    channelHeader: [
+      '[data-qa="channel_name"]',
+      '.p-view_header__channel_title',
+      '[data-qa="channel_header_title"]',
+    ],
+    /** DM/conversation header for 1:1 + group messages. */
+    dmHeader: [
+      '[data-qa="conversation_header_name_text"]',
+      '.p-view_header__channel_title button span',
+      '.p-ia__view_header__channel_topic_text',
+    ],
+    /** Thread side-pane container. */
+    threadContainer: [
+      '.p-flexpane__inside_body--scrollbar',
+      '[data-qa="threads_flexpane"]',
+    ],
+    /** Send button — Slack rotates these classes. */
+    sendButton: [
+      '[data-qa="texty_send_button"]',
+      'button[data-qa="texty_send_button"]',
+      'button[aria-label="Send now"]',
+    ],
+    /** Compose container wrapping input + toolbar. */
+    composeContainer: [
+      '.c-wysiwyg_container',
+      '[data-qa="message_input_container"]',
+      '.p-message_input_field_container',
+    ],
+    /** Recent message bodies (used for context extraction). */
+    recentMessages: [
+      '[data-qa="message-text"]',
+      '.c-message_kit__message .c-message__body',
+      '.c-message_kit__blocks .c-message__body',
     ],
   },
 
@@ -178,7 +214,15 @@ export const SELECTORS = {
     /** Direct message compose body. */
     messageCompose: [
       '.msg-form__contenteditable',
+      '.msg-form [contenteditable="true"]',
+      '[role="textbox"][aria-label*="message"]',
       '[contenteditable="true"][role="textbox"][data-placeholder*="message"]',
+    ],
+    /** Post compose (the "What do you want to talk about" editor). */
+    postCompose: [
+      '.share-creation-state__text-editor [contenteditable="true"]',
+      '.ql-editor[data-placeholder*="What do you want to talk about"]',
+      '[role="textbox"][aria-label*="post"]',
     ],
     /** Comment compose on a feed post. */
     commentCompose: [
@@ -187,11 +231,23 @@ export const SELECTORS = {
       '[data-placeholder*="Add a comment"]',
       '.comments-comment-box [role="textbox"]',
     ],
-    /** Feed post container — used to scope the post-content extraction. */
+    /** Feed post container — used to scope post-content extraction. */
     feedPost: [
       '.feed-shared-update-v2',
       'article[data-id]',
       'div[data-urn^="urn:li:activity"]',
     ],
+    /** Conversation/messaging header. */
+    conversationHeader: [
+      '.msg-overlay-conversation-bubble__title',
+      '.msg-thread__header-title',
+      '.msg-s-message-list-container .msg-entity-lockup__entity-title',
+    ],
+    /** Send button for messaging. */
+    sendButton: [
+      '.msg-form__send-button',
+      'button[type="submit"].msg-form__send-button',
+    ],
   },
 } as const;
+
