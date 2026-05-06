@@ -16,6 +16,7 @@ import { RewritePanel } from '@/components/RewritePanel';
 import { GrammarPanel } from '@/components/GrammarPanel';
 import { BriefingPanel } from '@/components/BriefingPanel';
 import { NudgesPanel } from '@/components/NudgesPanel';
+import { SnippetsPanel } from '@/components/SnippetsPanel';
 import { dismissNudge, draftFromNudge } from '@/lib/api-client';
 import type { ExtensionMessage, Platform, MeetingBriefing } from '@/types';
 import { APP_ORIGIN, appUrl } from '@/lib/config';
@@ -429,8 +430,18 @@ function AppInner() {
           />
         )}
 
+        {viewMode === 'snippets' && (
+          <SnippetsPanel
+            onBack={() => setViewMode('context')}
+            onInsert={(text) => {
+              handleInsertDraft(text);
+              setViewMode('context');
+            }}
+          />
+        )}
+
         {/* No compose detected -- contextual intelligence hub */}
-        {!composeContext && viewMode !== 'draft' && viewMode !== 'rewrite' && viewMode !== 'grammar' && viewMode !== 'briefing' && viewMode !== 'nudges' && (
+        {!composeContext && viewMode !== 'draft' && viewMode !== 'rewrite' && viewMode !== 'grammar' && viewMode !== 'briefing' && viewMode !== 'nudges' && viewMode !== 'snippets' && (
           <>
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
@@ -717,4 +728,5 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+
 
