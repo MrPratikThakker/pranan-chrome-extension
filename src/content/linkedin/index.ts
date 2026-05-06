@@ -403,7 +403,7 @@ function injectCommentPromptBars() {
     // Don't inject twice on this form
     if (commentForm.querySelector(`[${PRANAN_LI_COMMENT_BAR_ATTR}]`)) continue;
 
-    const { postAuthor, postText } = getCommentPostContext(commentInput);
+    const { postAuthor, postText, postUrl } = getCommentPostContext(commentInput);
 
     const bar = document.createElement('div');
     bar.setAttribute(PRANAN_LI_COMMENT_BAR_ATTR, 'true');
@@ -493,6 +493,7 @@ function injectCommentPromptBars() {
           platform: 'linkedin',
           postAuthor,
           postText,
+          postUrl,
           prompt,
           composeType: 'comment',
         },
@@ -930,3 +931,4 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
