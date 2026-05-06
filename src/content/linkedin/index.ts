@@ -22,6 +22,7 @@ import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relat
 import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
+import { findOne, findAll } from '../selectors';
 
 // ---------------------------------------------------------------------------
 // Selectors (layered for resilience)
@@ -120,19 +121,21 @@ const SELECTORS = {
 // Helper: try multiple selectors
 // ---------------------------------------------------------------------------
 
+function chainName(selectors: readonly string[]): string {
+  // Use the first selector as a stable telemetry key. Sentry groups by the
+  // captured message + breadcrumb name, so this gives one event per chain
+  // rather than per individual selector inside it.
+  const first = (selectors[0] || 'unknown').slice(0, 60);
+  return `linkedin.${first.replace(/[^a-zA-Z0-9_-]+/g, '_')}`;
+}
+
 function queryFirst(selectors: string[]): Element | null {
-  for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el) return el;
-  }
-  return null;
+  return findOne(chainName(selectors), selectors);
 }
 
 function queryAll(selectors: string[]): Element[] {
-  const results: Element[] = [];
-  for (const sel of selectors) {
-    results.push(...document.querySelectorAll(sel));
-  }
+  const results = findAll(chainName(selectors), selectors);
+  // Dedup since the original helper returned [...new Set(...)]
   return [...new Set(results)];
 }
 
@@ -931,4 +934,5 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
 
