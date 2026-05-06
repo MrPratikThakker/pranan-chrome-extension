@@ -167,6 +167,13 @@ export interface DraftRequest {
   channelName?: string;
   prompt?: string;
   tone?: string;
+  /**
+   * LinkedIn compose variant. 'comment' triggers a different prompt shape on
+   * the backend (short, post-context-aware, less email-formal).
+   */
+  composeType?: 'message' | 'post' | 'comment';
+  /** LinkedIn post permalink, used for relationship lookup + telemetry. */
+  postUrl?: string;
 }
 
 export async function generateDraft(request: DraftRequest, signal?: AbortSignal): Promise<DraftResponse> {
@@ -409,5 +416,6 @@ export async function getTodaySnapshot(): Promise<TodaySnapshot | null> {
     return null;
   }
 }
+
 
 
