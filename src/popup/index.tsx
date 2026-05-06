@@ -55,14 +55,27 @@ function Popup() {
       else if (url.includes('linkedin.com')) platform = 'linkedin';
       else platform = 'universal';
 
-      // Auth + snapshot in parallel so the popup doesn't double-roundtrip.
-      const [authResp, snapshot] = await Promise.all([
+      // Auth check is layered to avoid the 'Connect Account' flicker when
+      // the SW was just woken (cold start) and cachedAuth is still null.
+      // Optimistic order:
+      //   1. chrome.storage.local.authToken — if present, render authed shell
+      //      immediately. Token might be stale, but UI doesn't pretend the
+      //      user is logged out when they aren't.
+      //   2. SW's cachedAuth via AUTH_STATUS — used to fill user object.
+      //   3. Side-channel validateAuth refresh (kicked off, not awaited).
+      const [storage, authResp, snapshot] = await Promise.all([
+        chrome.storage.local.get(['authToken', 'lastKnownAuthValid']).catch(() => ({} as Record<string, unknown>)),
         chrome.runtime.sendMessage({ type: 'AUTH_STATUS' }).catch(() => null),
         getTodaySnapshot().catch(() => null),
       ]);
 
+      const hasStoredToken = !!(storage as { authToken?: string }).authToken;
+      const hintValid = (storage as { lastKnownAuthValid?: boolean }).lastKnownAuthValid === true;
+      const swValid = !!authResp?.auth?.valid;
+      const optimisticAuth = swValid || (hasStoredToken && hintValid !== false);
+
       setState({
-        isAuthenticated: !!authResp?.auth?.valid,
+        isAuthenticated: optimisticAuth,
         user: authResp?.auth || null,
         platform,
         hasActiveCompose: false,
@@ -350,4 +363,5 @@ const root = document.getElementById('popup-root');
 if (root) {
   createRoot(root).render(<Popup />);
 }
+
 
