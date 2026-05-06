@@ -418,6 +418,35 @@ export async function getTodaySnapshot(): Promise<TodaySnapshot | null> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// GET /api/companion/snippets — personal + org snippets for the side panel
+// ---------------------------------------------------------------------------
 
+export interface Snippet {
+  id: string;
+  owner_user_id: string;
+  org_id: string | null;
+  scope: 'personal' | 'org';
+  name: string;
+  title: string | null;
+  body: string;
+  tags: string[];
+  use_count: number;
+  last_used_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getSnippets(): Promise<Snippet[]> {
+  try {
+    const headers = await authHeaders();
+    const response = await fetch(`${API_BASE}/snippets`, { headers });
+    if (!response.ok) return [];
+    const data = (await response.json()) as { snippets?: Snippet[] };
+    return data.snippets ?? [];
+  } catch {
+    return [];
+  }
+}
 
 
