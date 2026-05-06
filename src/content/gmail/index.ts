@@ -20,7 +20,7 @@ import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
 import type { InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
-import { findAll, SELECTORS } from '../selectors';
+import { findAll, findOne, SELECTORS } from '../selectors';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -213,7 +213,7 @@ function getThreadContext(composeWindow: Element): string | null {
 
   const recent = Array.from(messageBodies).slice(-3);
   const combined = recent
-    .map((m) => (m as HTMLElement).innerText?.trim() || m.textContent?.trim() || '')
+    .map((m: Element) => (m as HTMLElement).innerText?.trim() || m.textContent?.trim() || '')
     .filter(Boolean)
     .join('\n\n---\n\n');
 
@@ -1164,6 +1164,7 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
 
 
 
