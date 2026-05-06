@@ -47,6 +47,9 @@ function contentScriptPlugin() {
             minify: 'esbuild',
             sourcemap: false,
           },
+          esbuild: {
+            drop: process.env.NODE_ENV === 'development' ? [] : ['console', 'debugger'],
+          },
         });
       }
     },
@@ -61,6 +64,12 @@ export default defineConfig({
     },
   },
   base: './',
+  esbuild: {
+    // Strip console.* and debugger from production bundles. Dev mode
+    // (NODE_ENV=development) keeps them so the inline diagnostics in
+    // useStore + service-worker remain useful during local debugging.
+    drop: process.env.NODE_ENV === 'development' ? [] : ['console', 'debugger'],
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
@@ -87,3 +96,4 @@ export default defineConfig({
     postcss: './postcss.config.js',
   },
 });
+
