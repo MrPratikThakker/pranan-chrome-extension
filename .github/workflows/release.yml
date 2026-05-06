@@ -27,6 +27,28 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
+      # Guard: package.json and public/manifest.json must agree, and both
+      # must match the pushed tag. Caught a Chrome Web Store rejection on
+      # 2026-05-06 when these drifted; this fails the workflow before the
+      # build wastes ~2min.
+      - name: Verify version sync
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          MAN=$(node -p "require('./public/manifest.json').version")
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "package.json: $PKG"
+          echo "manifest.json: $MAN"
+          echo "tag (no v): $TAG"
+          if [ "$PKG" != "$MAN" ]; then
+            echo "::error::package.json ($PKG) and manifest.json ($MAN) disagree. Run scripts/bump-version.mjs to keep them in sync."
+            exit 1
+          fi
+          if [ "$PKG" != "$TAG" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $PKG"
+            exit 1
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -72,3 +94,4 @@ jobs:
         with:
           files: pranan-companion-${{ github.ref_name }}.zip
           generate_release_notes: true
+
