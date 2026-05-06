@@ -203,12 +203,13 @@ function getComposeContent(): string {
  */
 function getCommentPostContext(commentInput: Element): {
   postAuthor: string | null;
+  postAuthorUrl: string | null;
   postText: string | null;
   postUrl: string | null;
 } {
   // Walk up from the comment input to find the containing feed post
   const postContainer = commentInput.closest(SELECTORS.feedPost.join(', '));
-  if (!postContainer) return { postAuthor: null, postText: null, postUrl: null };
+  if (!postContainer) return { postAuthor: null, postAuthorUrl: null, postText: null, postUrl: null };
 
   // Extract author name
   let postAuthor: string | null = null;
@@ -216,6 +217,29 @@ function getCommentPostContext(commentInput: Element): {
     const el = postContainer.querySelector(sel);
     if (el?.textContent?.trim()) {
       postAuthor = el.textContent.trim();
+      break;
+    }
+  }
+
+  // Extract author profile URL — used by the backend to resolve the post
+  // author against contact_styles.enriched_linkedin even if we've never
+  // emailed them.
+  let postAuthorUrl: string | null = null;
+  const actorLinkSelectors = [
+    '.update-components-actor__meta-link',
+    '.feed-shared-actor__container-link',
+    '.update-components-actor__container-link',
+    'a.update-components-actor__name-link',
+    'a[data-test-app-aware-link][href*="/in/"]',
+    'a[href*="/in/"]',
+  ];
+  for (const sel of actorLinkSelectors) {
+    const a = postContainer.querySelector(sel) as HTMLAnchorElement | null;
+    if (a?.href && /linkedin\.com\/in\//i.test(a.href)) {
+      // Strip query string + trailing slash so the handle is consistent
+      // (linkedin.com/in/jane-doe instead of linkedin.com/in/jane-doe/?utm=...)
+      const u = new URL(a.href);
+      postAuthorUrl = `${u.origin}${u.pathname.replace(/\/$/, '')}`;
       break;
     }
   }
@@ -234,7 +258,7 @@ function getCommentPostContext(commentInput: Element): {
   const linkEl = postContainer.querySelector('a[href*="/feed/update/"]') as HTMLAnchorElement | null;
   const postUrl = linkEl?.href || null;
 
-  return { postAuthor, postText, postUrl };
+  return { postAuthor, postAuthorUrl, postText, postUrl };
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +430,7 @@ function injectCommentPromptBars() {
     // Don't inject twice on this form
     if (commentForm.querySelector(`[${PRANAN_LI_COMMENT_BAR_ATTR}]`)) continue;
 
-    const { postAuthor, postText, postUrl } = getCommentPostContext(commentInput);
+    const { postAuthor, postAuthorUrl, postText, postUrl } = getCommentPostContext(commentInput);
 
     const bar = document.createElement('div');
     bar.setAttribute(PRANAN_LI_COMMENT_BAR_ATTR, 'true');
@@ -495,6 +519,7 @@ function injectCommentPromptBars() {
         payload: {
           platform: 'linkedin',
           postAuthor,
+          postAuthorUrl,
           postText,
           postUrl,
           prompt,
@@ -934,5 +959,6 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
 
 
