@@ -89,10 +89,37 @@ Vite watches src/ and rebuilds dist/ on save. After each rebuild, click the relo
 
 ## Release process
 
-1. Bump version in `manifest.json` and `package.json`
-2. `npm run build`
-3. Tag the commit: `git tag v0.x.0 && git push --tags`
-4. CI (`.github/workflows/release.yml`) auto-builds + uploads to Chrome Web Store
+**Every release runs through the [pre-publish QA gate](./RELEASE_CHECKLIST.md) before tagging.**
+Skip steps and bugs ship to Chrome Web Store. The checklist exists because
+we hit the same auth bug class three times. Never again.
+
+Quick path once the checklist passes:
+
+```bash
+npm run prepublish:check       # typecheck + tests + build, all must be green
+npm run version:patch          # or version:minor / version:major
+git commit -am "release: v$(node -p "require('./package.json').version")"
+git push origin main
+git tag v$(node -p "require('./package.json').version")
+git push origin --tags
+```
+
+The Release workflow auto-builds, uploads to Chrome Web Store, and creates
+a GitHub Release with the zip artifact.
+
+### Local + staging testing (before you ever tag)
+
+```bash
+# Production build, point at app.pranan.ai (default)
+npm run build
+# → load dist/ as unpacked in chrome://extensions
+
+# Staging / Vercel preview build
+VITE_API_HOST=https://pranan-app-git-feat-x.vercel.app npm run build:staging
+# → name in chrome://extensions becomes "Pranan for Chrome (pranan-app-git-...)"
+# → host_permissions auto-patched so the extension can talk to that origin
+# → safe to install alongside the prod CWS extension
+```
 
 ## Backend dependencies
 

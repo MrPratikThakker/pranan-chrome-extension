@@ -15,7 +15,10 @@
     "version:major": "node scripts/bump-version.mjs major",
     "release:zip": "npm run build && cd dist && zip -r ../pranan-companion-v$(node -p \"require(\"../package.json\").version\").zip .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:staging": "VITE_API_HOST=\"${VITE_API_HOST:?Set VITE_API_HOST=https://...your-staging-or-preview-url}\" npm run build && node scripts/build-manifest.mjs",
+    "build:preview": "npm run build:staging",
+    "prepublish:check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "@sentry/browser": "^10.51.0",
