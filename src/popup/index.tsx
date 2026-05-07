@@ -55,33 +55,47 @@ function Popup() {
       else if (url.includes('linkedin.com')) platform = 'linkedin';
       else platform = 'universal';
 
-      // Auth check is layered to avoid the 'Connect Account' flicker when
-      // the SW was just woken (cold start) and cachedAuth is still null.
-      // Optimistic order:
-      //   1. chrome.storage.local.authToken — if present, render authed shell
-      //      immediately. Token might be stale, but UI doesn't pretend the
-      //      user is logged out when they aren't.
-      //   2. SW's cachedAuth via AUTH_STATUS — used to fill user object.
-      //   3. Side-channel validateAuth refresh (kicked off, not awaited).
-      const [storage, authResp, snapshot] = await Promise.all([
+      // Auth resolution is split into two phases to eliminate the
+      // 'Connect Account' flicker on cold popup open. The bug:
+      // previously we awaited Promise.all([storage, AUTH_STATUS,
+      // getTodaySnapshot]) which gated isAuthenticated on a ~1-2s
+      // network round-trip to /api/companion/today. During that window
+      // the popup rendered the unauth shell.
+      //
+      // Phase 1 (~10-50ms): resolve auth state from local sources only
+      // (chrome.storage + SW cachedAuth). setState immediately so the
+      // authed shell renders before the snapshot arrives.
+      //
+      // Phase 2 (~1-2s): fetch today snapshot in the background, fill
+      // it in. snapshotLoading stays true until this completes so the
+      // numbers section can show its skeleton.
+      const [storage, authResp] = await Promise.all([
         chrome.storage.local.get(['authToken', 'lastKnownAuthValid']).catch(() => ({} as Record<string, unknown>)),
         chrome.runtime.sendMessage({ type: 'AUTH_STATUS' }).catch(() => null),
-        getTodaySnapshot().catch(() => null),
       ]);
 
       const hasStoredToken = !!(storage as { authToken?: string }).authToken;
       const hintValid = (storage as { lastKnownAuthValid?: boolean }).lastKnownAuthValid === true;
       const swValid = !!authResp?.auth?.valid;
-      const optimisticAuth = swValid || (hasStoredToken && hintValid !== false);
+      // Post-v0.4.0 cookie auth: hintValid alone is sufficient (no token
+      // needed). Pre-v0.4.0: fall back to stored Bearer presence + hint.
+      const optimisticAuth = swValid || hintValid || hasStoredToken;
 
-      setState({
+      setState((s) => ({
+        ...s,
         isAuthenticated: optimisticAuth,
         user: authResp?.auth || null,
         platform,
         hasActiveCompose: false,
+      }));
+
+      // Phase 2: snapshot fetch in the background. Doesn't block render.
+      const snapshot = await getTodaySnapshot().catch(() => null);
+      setState((s) => ({
+        ...s,
         snapshot,
         snapshotLoading: false,
-      });
+      }));
     });
   }, []);
 
