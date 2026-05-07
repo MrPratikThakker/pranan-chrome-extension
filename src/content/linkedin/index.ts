@@ -46,6 +46,18 @@ const SELECTORS = {
   ],
   // Comment compose (feed post comments)
   commentCompose: [
+    // 2026 redesign: LinkedIn migrated to TipTap/ProseMirror. Class names
+    // are now obfuscated hashes (a2dd5017, _2fcd7cb3, etc.) so we anchor
+    // on stable signals: aria-label substring + data-testid wrapper.
+    // Verified via DOM inspection on www.linkedin.com/feed on 2026-05-07.
+    // Caveat: aria-label is locale-dependent (English: "creating comment").
+    // Spanish/German/etc. surfaces may need a separate fallback in v0.5.
+    '[contenteditable="true"][aria-label*="comment" i]',
+    '[role="textbox"][aria-label*="comment" i]',
+    '[data-testid="ui-core-tiptap-text-editor-wrapper"] [contenteditable="true"]',
+    '[data-testid="ui-core-tiptap-text-editor-wrapper"] [role="textbox"]',
+    // Legacy 2024 selectors. Keep as fallback for surfaces LinkedIn
+    // hasn't migrated (some reply contexts, group comments).
     '.comments-comment-texteditor [contenteditable="true"]',
     '.comments-comment-box__form [contenteditable="true"]',
     '[data-placeholder*="Add a comment"]',
@@ -423,7 +435,7 @@ function injectCommentPromptBars() {
 
     // Find the comment form container
     const commentForm = commentInput.closest(
-      '.comments-comment-box, .comments-comment-texteditor'
+      '[data-testid="ui-core-tiptap-text-editor-wrapper"], .comments-comment-box, .comments-comment-texteditor'
     );
     if (!commentForm) continue;
 
