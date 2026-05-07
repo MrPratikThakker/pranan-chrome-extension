@@ -55,6 +55,11 @@ export const TIER_LABELS: Record<string, TierStyle> = {
   network:      { label: 'Network',      bg: 'bg-indigo-500/10',     text: 'text-indigo-400',     border: 'border-indigo-400/30' },
   casual:       { label: 'Casual',       bg: 'bg-slate-500/10',      text: 'text-slate-400',      border: 'border-slate-400/30' },
   new:          { label: 'New',          bg: 'bg-brand-accent/10',   text: 'text-brand-accent',   border: 'border-brand-accent/30' },
+  // Partner: HubSpot, Salesforce, Anthropic, etc — hardcoded partner-domain
+  // fallback in /api/companion/context. Without this key, the side panel
+  // falls through to 'New Contact' for known partner contacts. Real bug
+  // class — 'Sam Hirbod shows New Contact' was task #200, and recurred.
+  partner:      { label: 'Partner',      bg: 'bg-violet-500/10',     text: 'text-violet-400',     border: 'border-violet-400/30' },
   unknown:      { label: 'New Contact',  bg: 'bg-brand-surface-2',   text: 'text-brand-text-3',   border: 'border-brand-border' },
 };
 
@@ -130,6 +135,7 @@ export const TIER_CSS_COLORS: Record<string, { bg: string; text: string; border:
   network:      { bg: 'rgba(99, 102, 241, 0.1)', text: '#818cf8', border: 'rgba(99, 102, 241, 0.3)', label: 'Network' },
   casual:       { bg: 'rgba(100, 116, 139, 0.1)', text: '#94a3b8', border: 'rgba(100, 116, 139, 0.3)', label: 'Casual' },
   new:          { bg: 'rgba(139, 92, 246, 0.1)', text: '#a78bfa', border: 'rgba(139, 92, 246, 0.3)', label: 'New' },
+  partner:      { bg: 'rgba(139, 92, 246, 0.08)',  text: '#a78bfa', border: 'rgba(139, 92, 246, 0.25)', label: 'Partner' },
   unknown:      { bg: 'rgba(100, 116, 139, 0.05)', text: '#94a3b8', border: 'rgba(100, 116, 139, 0.2)', label: 'New Contact' },
 };
 
