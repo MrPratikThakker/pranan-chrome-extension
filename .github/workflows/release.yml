@@ -78,8 +78,14 @@ jobs:
             echo "Chrome Web Store credentials missing -- skipping upload (GitHub Release still runs)"
           fi
 
+      # CWS rejection (e.g. previous version still in review) is an
+      # external queue issue, not a code problem. Don't fail the whole
+      # release on it — keep going so the GitHub Release artifact is
+      # still created and downloadable.
       - name: Upload to Chrome Web Store
+        id: cws-upload
         if: steps.cws.outputs.configured == 'true'
+        continue-on-error: true
         uses: mnao305/chrome-extension-upload@v5.0.0
         with:
           file-path: pranan-companion-${{ github.ref_name }}.zip
@@ -89,9 +95,38 @@ jobs:
           refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
           publish: false # uploads but doesn't auto-publish; review in dashboard
 
+      # Always create the GitHub Release with the zip artifact, regardless
+      # of whether CWS upload succeeded. The zip is the source of truth for
+      # manual CWS uploads, fallback installs, and reproduction.
       - name: Create GitHub Release
+        if: always()
         uses: softprops/action-gh-release@v2
         with:
           files: pranan-companion-${{ github.ref_name }}.zip
           generate_release_notes: true
+
+      # Job summary so the workflow run page tells you exactly what
+      # happened. Exits 0 even if CWS upload was queue-blocked because
+      # that's not a code-quality failure — just a CWS-side queueing
+      # mechanic. If you need to re-attempt the upload, manually
+      # upload the GitHub Release zip via chrome.google.com/webstore/devconsole
+      # OR re-run this workflow once previous version clears review.
+      - name: Status summary
+        if: always()
+        run: |
+          {
+            echo "### Release ${{ github.ref_name }}"
+            echo
+            if [[ "${{ steps.cws-upload.outcome }}" == "success" ]]; then
+              echo "- ✅ Chrome Web Store: uploaded (in review)"
+            elif [[ "${{ steps.cws-upload.outcome }}" == "skipped" ]]; then
+              echo "- ⏭️ Chrome Web Store: skipped (credentials missing)"
+            else
+              echo "- ⚠️ Chrome Web Store: upload failed (likely queue-blocked by previous version still in review)"
+              echo "  - The GitHub Release zip is still available; manual upload via CWS dashboard is the fallback."
+              echo "  - Re-run this workflow once previous version clears CWS review."
+            fi
+            echo "- ✅ GitHub Release: pranan-companion-${{ github.ref_name }}.zip"
+          } >> "$GITHUB_STEP_SUMMARY"
+
 
