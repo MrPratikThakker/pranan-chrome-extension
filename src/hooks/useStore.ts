@@ -233,25 +233,12 @@ export const useStore = create<AppState & Actions>((set, get) => ({
 
     console.log('[Store] requestDraft: starting', { recipient: request.recipientEmail, platform: request.platform, hasTone: !!request.tone });
 
-    // Check auth token presence
-    try {
-      const { authToken } = await chrome.storage.local.get('authToken');
-      console.log('[Store] requestDraft: auth token present?', !!authToken, authToken ? `(${authToken.length} chars)` : '');
-      if (!authToken) {
-        console.error('[Store] requestDraft: NO AUTH TOKEN -- draft will fail');
-        set({
-          isDraftLoading: false,
-          isDraftStreaming: false,
-          streamingDraftText: '',
-          viewMode: 'draft',
-          currentDraft: null,
-          error: 'Not authenticated. Please reconnect to Pranan.',
-        });
-        return;
-      }
-    } catch (e) {
-      console.error('[Store] requestDraft: failed to check auth token', e);
-    }
+    // v0.4.0+: cookie-passthrough auth means there's no stored Bearer token
+    // for most users. The legacy pre-flight check that errored on missing
+    // authToken was producing false 'Not authenticated' banners for users
+    // who are perfectly authed via cookie. Server-side authenticateCompanion
+    // handles both paths; if neither works, the API returns 401 and
+    // handleResponse in api-client clears state cleanly. No pre-flight needed.
 
     set({ isDraftLoading: true, isDraftStreaming: true, streamingDraftText: '', error: null, viewMode: 'draft', currentDraft: null });
     try {

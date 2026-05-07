@@ -178,18 +178,39 @@ function Popup() {
           <div style={{ fontSize: 13, fontWeight: 300, letterSpacing: '-0.04em', fontFamily: "'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>Pranan</div>
           <div style={{ fontSize: 10, color: 'rgba(250,250,250,0.4)' }}>{platformLabel}</div>
         </div>
-        {state.isAuthenticated && snap && (
-          <div style={{
-            marginLeft: 'auto',
-            fontSize: 9, fontWeight: 600,
-            textTransform: 'uppercase' as const,
-            letterSpacing: 1,
-            padding: '2px 6px',
-            borderRadius: 3,
-            background: snap.pipelineHealthy ? 'rgba(52,211,153,0.12)' : 'rgba(248,113,113,0.12)',
-            color: snap.pipelineHealthy ? '#34d399' : '#f87171',
-          }}>{snap.pipelineHealthy ? 'Healthy' : 'Degraded'}</div>
-        )}
+        {state.isAuthenticated && snap && (() => {
+          // Status semantics, friendlier than the previous binary badge:
+          //   Active   — pipelineHealthy=true, last_sync within window
+          //   Syncing  — last_sync=null (cron hasn't recorded yet, or just
+          //              after a force-resync). NOT an error; nothing for
+          //              the user to do. Will self-resolve on next cron tick.
+          //   Issue    — pipelineHealthy=false AND lastSyncAgo present but
+          //              stale, OR another real error condition. Only this
+          //              state should alarm; renamed away from 'Degraded'
+          //              which read as broken to users.
+          const isActive = snap.pipelineHealthy;
+          const isSyncing = !snap.pipelineHealthy && !snap.lastSyncAgo;
+          // 'Issue' is the residual case: not healthy AND we have a stale
+          // last_sync timestamp (so sync ran but is now older than threshold).
+          const label = isActive ? 'Active' : isSyncing ? 'Syncing' : 'Issue';
+          const palette = isActive
+            ? { bg: 'rgba(52,211,153,0.12)', fg: '#34d399' }
+            : isSyncing
+            ? { bg: 'rgba(250,204,21,0.12)', fg: '#facc15' }
+            : { bg: 'rgba(248,113,113,0.12)', fg: '#f87171' };
+          return (
+            <div style={{
+              marginLeft: 'auto',
+              fontSize: 9, fontWeight: 600,
+              textTransform: 'uppercase' as const,
+              letterSpacing: 1,
+              padding: '2px 6px',
+              borderRadius: 3,
+              background: palette.bg,
+              color: palette.fg,
+            }}>{label}</div>
+          );
+        })()}
       </div>
 
       {/* Not authenticated */}
