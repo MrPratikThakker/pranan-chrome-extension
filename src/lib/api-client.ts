@@ -29,10 +29,23 @@ let authExpiryInFlight = false;
 import { API_BASE } from './config';
 
 // ---------------------------------------------------------------------------
-// Token management (reads from chrome.storage.local for persistence across restarts)
+// Auth passthrough — v0.4.0+
+//
+// The server accepts EITHER:
+//   1. Cookie-based session (Supabase auth-token cookie, set on app.pranan.ai
+//      when the user signs in). This is the primary path. As long as the user
+//      is signed into app.pranan.ai in their browser, the extension is
+//      authenticated. No "Connect Account" loop on token expiry.
+//   2. Authorization: Bearer <token> (legacy clients with a stored access
+//      token from pre-v0.4.0 versions). Retained for backwards compat until
+//      those tokens expire and the user falls through to the cookie path.
+//
+// `credentials: 'include'` tells the browser to attach cookies on the
+// outbound fetch. Because app.pranan.ai is in our manifest host_permissions,
+// the cookies flow even from the service worker and even with SameSite=Lax.
 // ---------------------------------------------------------------------------
 
-async function getAuthToken(): Promise<string | null> {
+async function getLegacyAuthToken(): Promise<string | null> {
   try {
     const result = await chrome.storage.local.get('authToken');
     return result.authToken || null;
@@ -41,15 +54,41 @@ async function getAuthToken(): Promise<string | null> {
   }
 }
 
-async function authHeaders(): Promise<Record<string, string>> {
-  const token = await getAuthToken();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+async function authedFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const legacyToken = await getLegacyAuthToken();
+  const headers = new Headers(init.headers || {});
+  if (!headers.has('Content-Type') && init.body) {
+    headers.set('Content-Type', 'application/json');
   }
-  return headers;
+  if (legacyToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${legacyToken}`);
+  }
+  return fetch(url, {
+    ...init,
+    headers,
+    credentials: 'include',
+  });
+}
+
+/**
+ * Variant of authedFetch that auto-retries on transient failures (5xx,
+ * network drop). Backoff lives inside fetchWithRetry; this wrapper just
+ * threads cookies + legacy Bearer through every retry.
+ */
+async function authedFetchWithRetry(
+  url: string,
+  init: RequestInit = {},
+  opts: { retries?: number } = {}
+): Promise<Response> {
+  const legacyToken = await getLegacyAuthToken();
+  const headers = new Headers(init.headers || {});
+  if (!headers.has('Content-Type') && init.body) {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (legacyToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${legacyToken}`);
+  }
+  return fetchWithRetry(url, { ...init, headers, credentials: 'include' }, opts);
 }
 
 // ---------------------------------------------------------------------------
@@ -179,10 +218,9 @@ async function handleResponse<T>(response: Response): Promise<T> {
 // ---------------------------------------------------------------------------
 
 export async function validateAuth(): Promise<AuthResponse> {
-  const headers = await authHeaders();
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}/auth`, { headers });
+    response = await authedFetch(`${API_BASE}/auth`);
   } catch (e) {
     // Network error: don't sign the user out; treat as transient.
     console.warn('[API] validateAuth: network error, treating as transient', e);
@@ -204,13 +242,12 @@ export async function validateAuth(): Promise<AuthResponse> {
 export async function getContactContext(
   params: { email?: string; name?: string; linkedinUrl?: string }
 ): Promise<ContactContext> {
-  const headers = await authHeaders();
   const query = new URLSearchParams();
   if (params.email) query.set('email', params.email);
   if (params.name) query.set('name', params.name);
   if (params.linkedinUrl) query.set('linkedinUrl', params.linkedinUrl);
 
-  const response = await fetchWithRetry(`${API_BASE}/context?${query}`, { headers });
+  const response = await authedFetchWithRetry(`${API_BASE}/context?${query}`);
   return handleResponse<ContactContext>(response);
 }
 
@@ -237,14 +274,8 @@ export interface DraftRequest {
 }
 
 export async function generateDraft(request: DraftRequest, signal?: AbortSignal): Promise<DraftResponse> {
-  const headers = await authHeaders();
-  console.log('[API] generateDraft: POST', `${API_BASE}/draft`, { hasAuth: !!headers['Authorization'] });
-  const response = await fetchWithRetry(`${API_BASE}/draft`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(request),
-    signal,
-  });
+  console.log('[API] generateDraft: POST', `${API_BASE}/draft`);
+  const response = await authedFetchWithRetry(`${API_BASE}/draft`, { method: 'POST', body: JSON.stringify(request), signal });
   console.log('[API] generateDraft: response status', response.status);
   return handleResponse<DraftResponse>(response);
 }
@@ -262,13 +293,10 @@ export async function* streamDraft(
   request: DraftRequest,
   signal?: AbortSignal
 ): AsyncGenerator<{ type: 'chunk' | 'done'; text: string; meta?: Partial<DraftResponse> }> {
-  const headers = await authHeaders();
-  headers['Accept'] = 'text/event-stream';
-
-  console.log('[API] streamDraft: POST', `${API_BASE}/draft`, { hasAuth: !!headers['Authorization'], stream: true });
-  const response = await fetch(`${API_BASE}/draft`, {
+  console.log('[API] streamDraft: POST', `${API_BASE}/draft`, { stream: true });
+  const response = await authedFetch(`${API_BASE}/draft`, {
     method: 'POST',
-    headers,
+    headers: { 'Accept': 'text/event-stream' },
     body: JSON.stringify({ ...request, stream: true }),
     signal,
   });
@@ -352,13 +380,7 @@ export interface RewriteRequest {
 }
 
 export async function rewriteText(request: RewriteRequest, signal?: AbortSignal): Promise<RewriteResponse> {
-  const headers = await authHeaders();
-  const response = await fetchWithRetry(`${API_BASE}/rewrite`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(request),
-    signal,
-  });
+  const response = await authedFetchWithRetry(`${API_BASE}/rewrite`, { method: 'POST', body: JSON.stringify(request), signal });
   return handleResponse<RewriteResponse>(response);
 }
 
@@ -374,13 +396,7 @@ export interface GrammarRequest {
 }
 
 export async function checkGrammar(request: GrammarRequest, signal?: AbortSignal): Promise<GrammarResponse> {
-  const headers = await authHeaders();
-  const response = await fetchWithRetry(`${API_BASE}/grammar`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(request),
-    signal,
-  });
+  const response = await authedFetchWithRetry(`${API_BASE}/grammar`, { method: 'POST', body: JSON.stringify(request), signal });
   return handleResponse<GrammarResponse>(response);
 }
 
@@ -403,8 +419,7 @@ async function safeJsonResponse<T>(response: Response, fallback: T): Promise<T> 
 // GET /api/companion/briefings -- pre-meeting briefings
 export async function getBriefings(): Promise<MeetingBriefing[]> {
   try {
-    const headers = await authHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/briefings`, { headers });
+      const response = await authedFetchWithRetry(`${API_BASE}/briefings`);
     return safeJsonResponse<MeetingBriefing[]>(response, []);
   } catch {
     return [];
@@ -414,8 +429,7 @@ export async function getBriefings(): Promise<MeetingBriefing[]> {
 // GET /api/companion/nudges -- follow-up nudges
 export async function getNudges(): Promise<FollowUpNudge[]> {
   try {
-    const headers = await authHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/nudges`, { headers });
+      const response = await authedFetchWithRetry(`${API_BASE}/nudges`);
     return safeJsonResponse<FollowUpNudge[]>(response, []);
   } catch {
     return [];
@@ -425,8 +439,7 @@ export async function getNudges(): Promise<FollowUpNudge[]> {
 // GET /api/companion/decay-alerts -- relationship decay alerts
 export async function getDecayAlerts(): Promise<DecayAlert[]> {
   try {
-    const headers = await authHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/decay-alerts`, { headers });
+      const response = await authedFetchWithRetry(`${API_BASE}/decay-alerts`);
     return safeJsonResponse<DecayAlert[]>(response, []);
   } catch {
     return [];
@@ -435,20 +448,12 @@ export async function getDecayAlerts(): Promise<DecayAlert[]> {
 
 // POST /api/companion/nudges/:id/dismiss -- dismiss a nudge
 export async function dismissNudge(nudgeId: string): Promise<void> {
-  const headers = await authHeaders();
-  await fetch(`${API_BASE}/nudges/${nudgeId}/dismiss`, {
-    method: 'POST',
-    headers,
-  });
+  await authedFetch(`${API_BASE}/nudges/${nudgeId}/dismiss`, { method: 'POST' });
 }
 
 // POST /api/companion/nudges/:id/draft -- generate draft from nudge
 export async function draftFromNudge(nudgeId: string): Promise<DraftResponse> {
-  const headers = await authHeaders();
-  const response = await fetch(`${API_BASE}/nudges/${nudgeId}/draft`, {
-    method: 'POST',
-    headers,
-  });
+  const response = await authedFetch(`${API_BASE}/nudges/${nudgeId}/draft`, { method: 'POST' });
   return handleResponse<DraftResponse>(response);
 }
 
@@ -469,8 +474,7 @@ export interface TodaySnapshot {
 
 export async function getTodaySnapshot(): Promise<TodaySnapshot | null> {
   try {
-    const headers = await authHeaders();
-    const response = await fetch(`${API_BASE}/today`, { headers });
+      const response = await authedFetch(`${API_BASE}/today`);
     return safeJsonResponse<TodaySnapshot>(response, null as any);
   } catch {
     return null;
@@ -498,8 +502,7 @@ export interface Snippet {
 
 export async function getSnippets(): Promise<Snippet[]> {
   try {
-    const headers = await authHeaders();
-    const response = await fetch(`${API_BASE}/snippets`, { headers });
+      const response = await authedFetch(`${API_BASE}/snippets`);
     if (!response.ok) return [];
     const data = (await response.json()) as { snippets?: Snippet[] };
     return data.snippets ?? [];

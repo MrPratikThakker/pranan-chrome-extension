@@ -51,12 +51,12 @@ async function deduplicatedValidateAuth(): Promise<AuthResponse> {
 }
 
 async function initAuth(): Promise<boolean> {
+  // v0.4.0+: cookie-based auth means we must always call validateAuth.
+  // The legacy stored Bearer token is no longer the gate; the user may be
+  // signed into app.pranan.ai (cookie present) without any stored token.
   try {
-    const { authToken } = await chrome.storage.local.get('authToken');
-    if (!authToken) return false;
-
     cachedAuth = await deduplicatedValidateAuth();
-    scheduleTokenRefresh();
+    if (cachedAuth.valid) scheduleTokenRefresh();
     return cachedAuth.valid;
   } catch {
     cachedAuth = null;

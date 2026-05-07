@@ -33,7 +33,6 @@ import {
   type GrammarRequest,
 } from '@/lib/api-client';
 import type { MeetingBriefing, FollowUpNudge, DecayAlert } from '@/types';
-import { APP_ORIGIN } from '@/lib/config';
 
 // Active AbortControllers for cancellable requests
 let draftAbortController: AbortController | null = null;
@@ -133,31 +132,16 @@ export const useStore = create<AppState & Actions>((set, get) => ({
   },
 
   checkAuth: async () => {
+    // v0.4.0+: cookie-passthrough auth. We no longer copy/delete companion
+    // token cookies. Every API call sends `credentials: 'include'`, so the
+    // browser auto-attaches the user's Supabase auth cookie. Calling
+    // validateAuth() is the single source of truth for "is the user signed
+    // into app.pranan.ai right now?"
+    //
+    // Legacy stored Bearer tokens (pre-v0.4.0) still work via the Bearer
+    // fallback in api-client.authedFetch(). They expire naturally and the
+    // user transparently moves to cookie auth on the next call.
     try {
-      // First check if we already have a stored token
-      const { authToken } = await chrome.storage.local.get('authToken');
-      console.log('[Store] checkAuth: stored token exists?', !!authToken);
-
-      if (!authToken) {
-        // Fallback: check for companion token cookie from app.pranan.ai
-        try {
-          const cookies = await chrome.cookies?.get({
-            url: APP_ORIGIN,
-            name: 'pranan_companion_token',
-          });
-          if (cookies?.value) {
-            // Found a cookie token -- store it and clear the cookie
-            await chrome.storage.local.set({ authToken: cookies.value });
-            await chrome.cookies?.remove({
-              url: APP_ORIGIN,
-              name: 'pranan_companion_token',
-            });
-          }
-        } catch {
-          // cookies API may not be available -- that's fine
-        }
-      }
-
       const auth = await validateAuth();
       console.log('[Store] checkAuth: validateAuth result:', auth?.valid, auth?.userId);
       set({
