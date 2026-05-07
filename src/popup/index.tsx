@@ -99,6 +99,31 @@ function Popup() {
     });
   }, []);
 
+  // Listen for auth state changes broadcast by the SW. This is the
+  // popup-side counterpart to v0.4.5's AUTH_RECOVERED auto-recovery
+  // flow. Without this, a transient 401 -> 200 cycle that happens while
+  // the popup is open would leave the popup showing stale unauth state
+  // until the user closes and reopens it.
+  useEffect(() => {
+    const handler = (msg: { type?: string; payload?: { valid?: boolean; user?: AuthResponse } }) => {
+      if (!msg || typeof msg.type !== 'string') return;
+      if (msg.type === 'AUTH_RECOVERED') {
+        setState((s) => ({ ...s, isAuthenticated: true }));
+      } else if (msg.type === 'AUTH_STATUS') {
+        const valid = !!msg.payload?.valid;
+        setState((s) => ({
+          ...s,
+          isAuthenticated: valid,
+          user: valid ? (msg.payload?.user ?? s.user) : null,
+        }));
+      } else if (msg.type === 'AUTH_EXPIRED') {
+        setState((s) => ({ ...s, isAuthenticated: false, user: null }));
+      }
+    };
+    chrome.runtime.onMessage.addListener(handler);
+    return () => chrome.runtime.onMessage.removeListener(handler);
+  }, []);
+
   const openSidePanel = () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
