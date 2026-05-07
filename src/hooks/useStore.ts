@@ -490,6 +490,23 @@ export const useStore = create<AppState & Actions>((set, get) => ({
         }
         break;
       }
+      case 'AUTH_RECOVERED': {
+        // SW saw a successful API call after a recent 401. Clear the
+        // 'Not authenticated' error banner without forcing the user to
+        // click Reconnect. The follow-up AUTH_STATUS broadcast (sent by
+        // SW after re-validating) will refresh the user object.
+        console.log('[Store] AUTH_RECOVERED received, clearing error banner');
+        const current = get();
+        if (current.error && /not authenticated|reconnect/i.test(current.error)) {
+          set({ error: null });
+        }
+        // Also clear isAuthenticated=false if it was set by AUTH_EXPIRED;
+        // the follow-up AUTH_STATUS valid will refill isAuthenticated=true.
+        if (!current.isAuthenticated) {
+          set({ isAuthenticated: true });
+        }
+        break;
+      }
       case 'AUTH_STATUS': {
         console.log('[Store] AUTH_STATUS received:', message.payload);
         const payload = message.payload as { valid: boolean; user?: AuthResponse } | undefined;

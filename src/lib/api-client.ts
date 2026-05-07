@@ -166,6 +166,20 @@ export class ApiError extends Error {
 }
 
 async function handleResponse<T>(response: Response): Promise<T> {
+  // Auto-recovery: if a successful response arrives while we recently
+  // broadcast AUTH_EXPIRED, the underlying auth has self-healed (cookie
+  // refreshed, transient blip recovered, etc). Tell the side panel +
+  // popup so the 'Not authenticated' banner clears automatically.
+  // Without this, a single transient 401 leaves the banner showing
+  // until the user manually clicks Reconnect — even though every
+  // subsequent API call works. Real bug observed by Pratik 2026-05-08.
+  if (response.ok && authExpiryInFlight) {
+    authExpiryInFlight = false;
+    try {
+      chrome.runtime.sendMessage({ type: 'AUTH_RECOVERED' });
+    } catch { /* sender may not be a content script */ }
+  }
+
   if (!response.ok) {
     const body = await response.text();
     let message = `API error: ${response.status}`;

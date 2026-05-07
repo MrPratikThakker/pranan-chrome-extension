@@ -199,6 +199,26 @@ async function handleMessage(
     case 'AUTH_STATUS':
       return { auth: cachedAuth };
 
+    case 'AUTH_RECOVERED': {
+      // API client detected a successful response after a recent 401.
+      // Re-validate auth so cachedAuth picks up a real user object,
+      // then broadcast AUTH_STATUS valid:true so the side panel clears
+      // its 'Not authenticated' error state. Best-effort: if validation
+      // itself fails (e.g., the success was a stale 200 cached response),
+      // we just leave the banner state as-is and the next real failure
+      // will refresh it.
+      try {
+        cachedAuth = await deduplicatedValidateAuth();
+        if (cachedAuth.valid) {
+          broadcastToSidePanel({
+            type: 'AUTH_STATUS',
+            payload: { valid: true, user: cachedAuth },
+          });
+        }
+      } catch { /* validation hiccup; leave state unchanged */ }
+      return { ok: true };
+    }
+
     case 'AUTH_EXPIRED': {
       // API client detected expired token. Clear it, reset cached auth, and
       // broadcast AUTH_STATUS to the side panel so it switches back to the
