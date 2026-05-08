@@ -24,6 +24,7 @@ const EXTENSION_PATH = path.resolve(__dirname, 'dist');
 
 export default defineConfig({
   testDir: './tests/e2e',
+  globalSetup: require.resolve('./tests/e2e/global-setup'),
   timeout: 30_000,
   fullyParallel: false, // extension contexts don't parallelize cleanly
   retries: process.env.CI ? 1 : 0,

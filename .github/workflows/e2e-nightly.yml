@@ -49,9 +49,15 @@ jobs:
           # Need a virtual display because extension contexts require headed mode.
           xvfb-run -a npx playwright test
         env:
-          # Allow the build to set deterministic version_name so tests can
-          # assert on it consistently.
           CI: true
+          # Auth-flow tests will SKIP if these aren't set. Configure the
+          # extension repo's GitHub Actions secrets:
+          #   TEST_USER_EMAIL    -- e.g. e2e-test@insidea.com
+          #   TEST_USER_PASSWORD -- the test account's password
+          # Test user must have onboarding completed + valid Gmail connection.
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+          PRANAN_APP_ORIGIN: ${{ secrets.PRANAN_APP_ORIGIN || 'https://app.pranan.ai' }}
 
       - name: Upload Playwright report on failure
         if: failure()

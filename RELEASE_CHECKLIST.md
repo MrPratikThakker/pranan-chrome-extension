@@ -218,3 +218,23 @@ npm run test:e2e           # builds + runs the smoke specs
 
 Add new specs in `tests/e2e/`. Authenticated flows are deferred until
 we have a test account + cookie injection helper.
+
+## Stage 8 — E2E auth-flow tests (one-time setup)
+
+The auth-flow specs in `tests/e2e/auth-flow.spec.ts` need a test
+account on Pranan + GitHub secrets configured. Steps:
+
+1. Sign up `e2e-test@insidea.com` (or similar dedicated test email)
+   on `app.pranan.ai`. Complete onboarding. Connect Gmail.
+2. In the extension repo settings → Secrets and variables → Actions:
+   - `TEST_USER_EMAIL` → the test account email
+   - `TEST_USER_PASSWORD` → the test account password
+   - `PRANAN_APP_ORIGIN` → optional, defaults to `https://app.pranan.ai`
+3. The next nightly run + every `main` push will execute the auth specs.
+
+Specs that run when configured:
+- Scenario A: authed popup with no Connect Account flash
+- Scenario B: authed sidepanel with no Not Authenticated banner
+- Scenario C: AUTH_RECOVERED message clears the banner
+
+Specs skip silently when secrets aren't set, so unauth smoke still runs.

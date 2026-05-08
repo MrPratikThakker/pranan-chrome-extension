@@ -9,3 +9,6 @@ dist/
 /test-results/
 /playwright-report/
 /playwright/.cache/
+
+# Cached auth state for Playwright (generated, don't commit)
+.playwright-state/
