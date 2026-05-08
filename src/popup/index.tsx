@@ -29,21 +29,25 @@ bootstrapSentry('popup');
 
 interface PopupState {
   isAuthenticated: boolean;
+  isAuthChecked: boolean;
   user: AuthResponse | null;
   platform: Platform;
   hasActiveCompose: boolean;
   snapshot: TodaySnapshot | null;
   snapshotLoading: boolean;
+  snapshotError: string | null;
 }
 
 function Popup() {
   const [state, setState] = useState<PopupState>({
     isAuthenticated: false,
+    isAuthChecked: false,
     user: null,
     platform: 'unknown',
     hasActiveCompose: false,
     snapshot: null,
     snapshotLoading: true,
+    snapshotError: null,
   });
 
   useEffect(() => {
@@ -84,17 +88,26 @@ function Popup() {
       setState((s) => ({
         ...s,
         isAuthenticated: optimisticAuth,
+        isAuthChecked: true,
         user: authResp?.auth || null,
         platform,
         hasActiveCompose: false,
       }));
 
       // Phase 2: snapshot fetch in the background. Doesn't block render.
-      const snapshot = await getTodaySnapshot().catch(() => null);
+      // Capture error so we can surface a small banner instead of staying silent.
+      let snapshot: TodaySnapshot | null = null;
+      let snapshotError: string | null = null;
+      try {
+        snapshot = await getTodaySnapshot();
+      } catch (e) {
+        snapshotError = e instanceof Error ? e.message : 'Could not load today\'s snapshot';
+      }
       setState((s) => ({
         ...s,
         snapshot,
         snapshotLoading: false,
+        snapshotError,
       }));
     });
   }, []);
@@ -238,11 +251,36 @@ function Popup() {
         })()}
       </div>
 
-      {/* Not authenticated */}
-      {!state.isAuthenticated && (
+      {/* Auth checking — soft skeleton instead of flashing the unauth CTA at returning users */}
+      {!state.isAuthChecked && (
+        <div style={{ textAlign: 'center', padding: '20px 0' }}>
+          <div style={{
+            width: '60%',
+            height: 8,
+            margin: '0 auto 10px',
+            borderRadius: 4,
+            background: 'rgba(250,250,250,0.06)',
+            animation: 'pranan-pulse 1.4s ease-in-out infinite',
+          }} />
+          <div style={{
+            width: '40%',
+            height: 8,
+            margin: '0 auto',
+            borderRadius: 4,
+            background: 'rgba(250,250,250,0.06)',
+            animation: 'pranan-pulse 1.4s ease-in-out infinite',
+          }} />
+        </div>
+      )}
+
+      {/* Not authenticated — only after first check has actually resolved unauthenticated */}
+      {state.isAuthChecked && !state.isAuthenticated && (
         <div style={{ textAlign: 'center', padding: '12px 0' }}>
-          <p style={{ fontSize: 12, color: 'rgba(250,250,250,0.5)', marginBottom: 12 }}>
-            Connect your Pranan account to get started.
+          <p style={{ fontSize: 12, color: 'rgba(250,250,250,0.6)', marginBottom: 4, fontWeight: 500 }}>
+            Sign in to Pranan
+          </p>
+          <p style={{ fontSize: 11, color: 'rgba(250,250,250,0.4)', marginBottom: 12 }}>
+            Already have an account? Click below to reconnect.
           </p>
           <button onClick={openLogin} style={{
             width: '100%', padding: '8px 16px',
@@ -251,24 +289,48 @@ function Popup() {
             background: 'linear-gradient(135deg, #6d28d9, #a78bfa)',
             border: 'none', borderRadius: 6, cursor: 'pointer',
           }}>
-            Connect Account
+            Continue to Pranan
           </button>
+        </div>
+      )}
+
+      {/* Snapshot fetch error — quiet, dismissible, non-blocking. Better than silent. */}
+      {state.isAuthenticated && state.snapshotError && (
+        <div style={{
+          marginBottom: 8,
+          padding: '8px 10px',
+          borderRadius: 6,
+          background: 'rgba(248,113,113,0.08)',
+          border: '1px solid rgba(248,113,113,0.18)',
+          fontSize: 11,
+          color: 'rgba(248,113,113,0.85)',
+        }}>
+          Couldn't refresh your snapshot. Showing last known state.
         </div>
       )}
 
       {/* Authenticated -- today at a glance */}
       {state.isAuthenticated && (
         <>
-          {/* Two-up stat tiles */}
+          {/* Two-up stat tiles. Real pulsing skeletons during load — feels like
+              "fetching", not "broken". Numbers slot in as soon as snap arrives. */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
             <button onClick={openTriage} style={tileBtn}>
               <div style={tileLabel}>Drafts ready</div>
-              <div style={tileValue}>{snap?.draftsReady ?? '—'}</div>
+              {state.snapshotLoading && !snap ? (
+                <div style={skeletonNumber} />
+              ) : (
+                <div style={tileValue}>{snap?.draftsReady ?? '—'}</div>
+              )}
               <div style={tileSub}>Tap to triage</div>
             </button>
             <button onClick={openTriage} style={tileBtn}>
               <div style={tileLabel}>Awaiting you</div>
-              <div style={tileValue}>{snap?.threadsAwaiting ?? '—'}</div>
+              {state.snapshotLoading && !snap ? (
+                <div style={skeletonNumber} />
+              ) : (
+                <div style={tileValue}>{snap?.threadsAwaiting ?? '—'}</div>
+              )}
               <div style={tileSub}>To Respond</div>
             </button>
           </div>
@@ -282,16 +344,24 @@ function Popup() {
           }}>
             <div>
               <div style={tileLabel}>Voice score</div>
-              <div style={{ ...tileValue, display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                {snap?.voiceScore ?? '—'}
-                {snap?.voiceScore != null && snap?.voiceDelta !== 0 && (
-                  <span style={{ fontSize: 11, color: voiceColor }}>{voiceArrow} {Math.abs(snap.voiceDelta)}</span>
-                )}
-              </div>
+              {state.snapshotLoading && !snap ? (
+                <div style={skeletonNumber} />
+              ) : (
+                <div style={{ ...tileValue, display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                  {snap?.voiceScore ?? '—'}
+                  {snap?.voiceScore != null && snap?.voiceDelta !== 0 && (
+                    <span style={{ fontSize: 11, color: voiceColor }}>{voiceArrow} {Math.abs(snap.voiceDelta)}</span>
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <div style={tileLabel}>Last sync</div>
-              <div style={tileValue}>{snap?.lastSyncAgo ?? '—'}</div>
+              {state.snapshotLoading && !snap ? (
+                <div style={skeletonText} />
+              ) : (
+                <div style={tileValue}>{snap?.lastSyncAgo ?? '—'}</div>
+              )}
             </div>
           </button>
 
@@ -403,6 +473,26 @@ const tileSub: React.CSSProperties = {
   fontSize: 10,
   color: 'rgba(250,250,250,0.35)',
   marginTop: 2,
+};
+
+const skeletonNumber: React.CSSProperties = {
+  height: 22,
+  width: 32,
+  marginTop: 1,
+  marginBottom: 1,
+  borderRadius: 4,
+  background: 'rgba(250,250,250,0.06)',
+  animation: 'pranan-pulse 1.4s ease-in-out infinite',
+};
+
+const skeletonText: React.CSSProperties = {
+  height: 14,
+  width: 60,
+  marginTop: 4,
+  marginBottom: 5,
+  borderRadius: 4,
+  background: 'rgba(250,250,250,0.06)',
+  animation: 'pranan-pulse 1.4s ease-in-out infinite',
 };
 
 const actionBtnStyle: React.CSSProperties = {

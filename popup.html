@@ -4,6 +4,19 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pranan</title>
+  <style>
+    /* Local-only keyframes for popup skeleton states. Popup uses inline
+       styles (no Tailwind / globals.css), so animations live here. */
+    @keyframes pranan-pulse {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: 0.45; }
+    }
+    @keyframes pranan-fade-in {
+      from { opacity: 0; transform: translateY(2px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    body { margin: 0; background: #09090b; }
+  </style>
 </head>
 <body>
   <div id="popup-root"></div>

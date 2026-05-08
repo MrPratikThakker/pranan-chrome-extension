@@ -161,7 +161,7 @@ function AppInner() {
       // Only handle messages broadcast by the service worker (tagged with _fromSW)
       // to avoid processing content script messages meant for the SW
       if (!message._fromSW) return;
-      console.log('[SidePanel] Received message:', message.type);
+      if (import.meta.env.DEV) console.log('[SidePanel] Received message:', message.type);
       handleMessage(message);
       // Return undefined (not true) -- we don't call sendResponse, so Chrome
       // should not keep the message channel open.
@@ -183,19 +183,19 @@ function AppInner() {
   // --- Handlers ---
 
   const handleConnect = useCallback(() => {
-    console.log('[Pranan] Connect clicked, opening login...');
+    if (import.meta.env.DEV) console.log('[Pranan] Connect clicked, opening login...');
     chrome.tabs.create({ url: `${API_BASE}/login?source=companion` })
-      .then((tab) => console.log('[Pranan] Tab created:', tab?.id))
+      .then((tab) => { if (import.meta.env.DEV) console.log('[Pranan] Tab created:', tab?.id); })
       .catch((err) => console.error('[Pranan] Failed to create tab:', err));
   }, []);
 
   const handleGenerateDraft = useCallback(() => {
-    console.log('[SidePanel] Draft clicked, composeContext:', composeContext ? 'set' : 'null');
+    if (import.meta.env.DEV) console.log('[SidePanel] Draft clicked, composeContext:', composeContext ? 'set' : 'null');
     if (!composeContext) {
       setError('No compose window detected. Open a compose or reply in Gmail, then try again.');
       return;
     }
-    console.log('[SidePanel] Requesting draft for:', composeContext.recipientEmail, 'platform:', composeContext.platform);
+    if (import.meta.env.DEV) console.log('[SidePanel] Requesting draft for:', composeContext.recipientEmail, 'platform:', composeContext.platform);
     requestDraft({
       recipientEmail: composeContext.recipientEmail || undefined,
       recipientName: composeContext.recipientName || undefined,
