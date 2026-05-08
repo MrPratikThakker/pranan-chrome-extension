@@ -30,7 +30,7 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: {
-    headless: false, // extension contexts need headed mode in older Chromium
+    headless: false, // 'new' headless mode if running in CI (see launchOptions); local dev keeps headed for visibility
     actionTimeout: 5_000,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',

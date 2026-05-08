@@ -22,21 +22,29 @@ let context: BrowserContext;
 let extensionId: string;
 
 test.beforeAll(async () => {
+  // CI runs in 'new' headless mode (Chromium's modern headless that
+  // supports extensions since 2024). Local dev keeps headed mode for
+  // visibility into what the test is doing.
+  const isCI = !!process.env.CI;
   context = await chromium.launchPersistentContext('', {
     headless: false,
+    channel: isCI ? undefined : undefined,
     args: [
       `--disable-extensions-except=${EXTENSION_PATH}`,
       `--load-extension=${EXTENSION_PATH}`,
       '--no-sandbox',
       '--disable-dev-shm-usage',
+      ...(isCI ? ['--headless=new'] : []),
     ],
   });
 
   // Resolve the extension ID from the loaded background service worker.
   // MV3 SW shows up under context.serviceWorkers() once the extension
-  // is registered.
+  // is registered. Wait up to 10s for the SW to register on slow CI runners.
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker');
+  if (!worker) {
+    worker = await context.waitForEvent('serviceworker', { timeout: 10_000 });
+  }
   const swUrl = worker.url(); // chrome-extension://<id>/background.js
   extensionId = swUrl.split('/')[2];
 });
