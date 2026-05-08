@@ -25,6 +25,11 @@
  */
 import { test as base, expect, chromium, type BrowserContext } from '@playwright/test';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// ESM-equivalent of __dirname (project has "type": "module" in package.json)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import { existsSync, mkdirSync } from 'node:fs';
 
 const EXTENSION_PATH = path.resolve(__dirname, '..', '..', 'dist');

@@ -1,5 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// ESM-equivalent of __dirname (project has "type": "module" in package.json)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Playwright config for the Pranan Chrome extension.
@@ -24,7 +29,7 @@ const EXTENSION_PATH = path.resolve(__dirname, 'dist');
 
 export default defineConfig({
   testDir: './tests/e2e',
-  globalSetup: require.resolve('./tests/e2e/global-setup'),
+  globalSetup: './tests/e2e/global-setup.ts',
   timeout: 30_000,
   fullyParallel: false, // extension contexts don't parallelize cleanly
   retries: process.env.CI ? 1 : 0,
