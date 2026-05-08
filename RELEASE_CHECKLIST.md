@@ -197,3 +197,24 @@ release that breaks 1,000 users for 24 hours.
 - **Staging build target**: `npm run build:staging` builds against
   a Vercel preview URL or future `staging.pranan.ai` for risk-free
   testing of schema/auth/model changes before they hit production.
+
+## Stage 7 — E2E smoke (automated, runs nightly + on push)
+
+The `e2e-nightly.yml` workflow runs `npx playwright test` against a
+fresh build on every push to `main` and at 03:00 UTC daily. It loads
+the unpacked extension into a real Chromium and asserts:
+
+- popup.html mounts without console errors
+- sidepanel.html mounts without console errors
+
+When it fails, traces and reports are uploaded as workflow artifacts.
+
+To run it locally before pushing:
+
+```bash
+npm run test:e2e:install   # one-time: download Chromium for Playwright
+npm run test:e2e           # builds + runs the smoke specs
+```
+
+Add new specs in `tests/e2e/`. Authenticated flows are deferred until
+we have a test account + cookie injection helper.
