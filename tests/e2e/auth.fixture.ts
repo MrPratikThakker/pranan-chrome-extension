@@ -75,7 +75,7 @@ export async function loginAndCacheStorageState(): Promise<string | null> {
   });
   await emailInput.fill(TEST_USER_EMAIL);
   await page.getByPlaceholder(/password/i).first().fill(TEST_USER_PASSWORD);
-  await page.getByRole('button', { name: /sign in/i }).click();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   // Wait for the redirect to /home OR the dashboard
   await page.waitForURL(/\/home|\/dashboard|\/triage/, { timeout: 15_000 });
   // Capture the storage state (cookies + localStorage)
