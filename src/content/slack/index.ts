@@ -29,9 +29,17 @@ import { bootstrapSentry } from '@/lib/observability';
 
 bootstrapSentry('content-slack');
 
+// Derived from REGISTRY.slack.messageInput so the focusin matcher and
+// the explicit findOne/findAll registry calls can never diverge again.
+// Audit P1 finding (PRANAN_DEEP_AUDIT_COMBINED, 2026-05-08): the previous
+// local SELECTORS.messageInput lacked the [data-qa="message_input"] [contenteditable]
+// descendant variant that REGISTRY had, so a Slack UI rollout could break
+// one path while leaving the other working — irreproducible flakiness.
+const REGISTRY_MESSAGE_INPUT_JOINED = REGISTRY.slack.messageInput.join(', ');
+
 const SELECTORS = {
-  // Message input area (layered for Slack DOM changes)
-  messageInput: '[data-qa="message_input"], .ql-editor[data-placeholder], [contenteditable="true"][role="textbox"][aria-label*="Message"], [contenteditable="true"][data-placeholder*="Message"]',
+  // Message input area — derived from REGISTRY (single source of truth).
+  messageInput: REGISTRY_MESSAGE_INPUT_JOINED,
   // Channel header with name
   channelHeader: '[data-qa="channel_name"], .p-view_header__channel_title, [data-qa="channel_header_title"]',
   // DM header (layered: direct match + sidebar active item)
@@ -645,6 +653,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: true });
   }
 
+  // SIDE_PANEL_READY: side panel just mounted; re-send compose context.
+  // Migrated from the second (now-removed) onMessage listener per audit
+  // P1 finding (PRANAN_DEEP_AUDIT_COMBINED, 2026-05-08): two listeners
+  // in one content script means the response channel is nondeterministic.
+  // Now only one listener exists and all broadcasts route through it.
+  if (message.type === 'SIDE_PANEL_READY') {
+    const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput);
+    if (input) {
+      lastChannel = null;
+      lastRecipient = null;
+      checkForActiveCompose(false);
+    }
+  }
+
   return true;
 });
 
@@ -750,17 +772,10 @@ function init() {
     }
   }, 3000);
 
-  // Also listen for SIDE_PANEL_READY to re-send context
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === 'SIDE_PANEL_READY') {
-      const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput);
-      if (input) {
-        lastChannel = null;
-        lastRecipient = null;
-        checkForActiveCompose(false);
-      }
-    }
-  });
+  // SIDE_PANEL_READY handling consolidated into the canonical onMessage
+  // listener at the top of this module (audit P1 fix). Do NOT re-register
+  // a second listener here — Chrome treats them as separate handlers and
+  // each can send a response, causing nondeterministic delivery.
 }
 
 if (document.readyState === 'loading') {

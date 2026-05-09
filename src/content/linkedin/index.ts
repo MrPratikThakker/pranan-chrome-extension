@@ -932,10 +932,27 @@ function cleanupComposeElements() {
 // ---------------------------------------------------------------------------
 
 function init() {
-  // Watch for compose areas appearing
-  const observer = new MutationObserver(() => {
-    detectActiveCompose();
-  });
+  // Watch for compose areas appearing.
+  //
+  // CRITICAL fix per PRANAN_DEEP_AUDIT_COMBINED (2026-05-08): the previous
+  // version called detectActiveCompose() on EVERY MutationObserver callback,
+  // which on LinkedIn's feed fires dozens of times per second on scroll.
+  // Each call did ~15 full-document querySelectorAll's. Result: CPU spikes
+  // up to 100% on long sessions, fans spinning, users uninstalling.
+  //
+  // Now uses a 150ms trailing-edge debounce. The user-visible behavior is
+  // identical (compose detection still happens; just batched). Worst-case
+  // additional latency on detecting a NEW compose surface is 150ms, which
+  // is below the human-perceptible threshold.
+  let pendingDetect: ReturnType<typeof setTimeout> | null = null;
+  const debouncedDetect = () => {
+    if (pendingDetect !== null) clearTimeout(pendingDetect);
+    pendingDetect = setTimeout(() => {
+      pendingDetect = null;
+      detectActiveCompose();
+    }, 150);
+  };
+  const observer = new MutationObserver(debouncedDetect);
 
   observer.observe(document.body, {
     childList: true,
