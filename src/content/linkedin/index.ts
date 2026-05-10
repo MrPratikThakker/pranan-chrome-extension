@@ -319,7 +319,7 @@ function injectMessagingPromptBar() {
     width: 22px; height: 22px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
   `;
-  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="20" height="20" rx="4" stroke="#a78bfa" stroke-width="1.5" opacity="0.3"/><rect x="5" y="5" width="14" height="14" rx="3" stroke="#a78bfa" stroke-width="1.5" opacity="0.5"/><rect x="8" y="8" width="8" height="8" rx="2" stroke="#a78bfa" stroke-width="1.5" opacity="0.7"/><rect x="10" y="10" width="4" height="4" rx="1" fill="#a78bfa"/></svg>`;
+  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="60" cy="60" r="33" stroke="#a78bfa" stroke-width="7" fill="none"/><circle cx="60" cy="60" r="16" fill="#a78bfa"/></svg>`;
 
   // Build placeholder text
   let placeholderText = 'Draft message with Pranan...';
@@ -484,7 +484,7 @@ function injectCommentPromptBars() {
       width: 18px; height: 18px; flex-shrink: 0;
       display: flex; align-items: center; justify-content: center;
     `;
-    icon.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="20" height="20" rx="4" stroke="#a78bfa" stroke-width="1.5" opacity="0.3"/><rect x="5" y="5" width="14" height="14" rx="3" stroke="#a78bfa" stroke-width="1.5" opacity="0.5"/><rect x="8" y="8" width="8" height="8" rx="2" stroke="#a78bfa" stroke-width="1.5" opacity="0.7"/><rect x="10" y="10" width="4" height="4" rx="1" fill="#a78bfa"/></svg>`;
+    icon.innerHTML = `<svg width="12" height="12" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="60" cy="60" r="33" stroke="#a78bfa" stroke-width="7" fill="none"/><circle cx="60" cy="60" r="16" fill="#a78bfa"/></svg>`;
 
     const input = document.createElement('input');
     input.type = 'text';
