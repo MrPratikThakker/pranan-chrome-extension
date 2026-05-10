@@ -353,6 +353,15 @@ export async function* streamDraft(
   // body stays locked and subsequent fetches can hang.
   try {
     while (true) {
+      // Bug fix v0.5.3: respect abort signal so we don't leave the
+      // SSE connection draining server-side after the user clicks stop.
+      // Without reader.cancel() the fetch abort propagates but the
+      // body stream keeps reading until server timeout, wasting LLM
+      // tokens that the user already opted out of.
+      if (signal?.aborted) {
+        try { await reader.cancel(); } catch { /* already closed */ }
+        break;
+      }
       const { done, value } = await reader.read();
       if (done) break;
 

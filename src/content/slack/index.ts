@@ -762,7 +762,12 @@ function init() {
 
   // Periodic fallback: check every 3 seconds for new inputs that MutationObserver may miss
   // (e.g., when Slack replaces its virtual DOM tree without standard mutations)
-  setInterval(() => {
+  // Bug fix v0.5.3: pause when tab is hidden (saves CPU/battery on long-lived
+  // background tabs) and disconnect on beforeunload to avoid leaking the
+  // interval handle across SPA navigations.
+  let composePollHandle: number | null = null;
+  const pollFn = () => {
+    if (document.hidden) return; // tab not visible — skip work
     const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput);
     if (input && !lastInputDetected) {
       lastInputDetected = true;
@@ -770,7 +775,14 @@ function init() {
     } else if (!input && lastInputDetected) {
       lastInputDetected = false;
     }
-  }, 3000);
+  };
+  composePollHandle = window.setInterval(pollFn, 3000);
+  window.addEventListener('beforeunload', () => {
+    if (composePollHandle !== null) {
+      clearInterval(composePollHandle);
+      composePollHandle = null;
+    }
+  }, { once: true });
 
   // SIDE_PANEL_READY handling consolidated into the canonical onMessage
   // listener at the top of this module (audit P1 fix). Do NOT re-register
