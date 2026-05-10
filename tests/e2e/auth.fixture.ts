@@ -76,8 +76,33 @@ export async function loginAndCacheStorageState(): Promise<string | null> {
   await emailInput.fill(TEST_USER_EMAIL);
   await page.getByPlaceholder(/password/i).first().fill(TEST_USER_PASSWORD);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  // Wait for the redirect to /home OR the dashboard
-  await page.waitForURL(/\/home|\/dashboard|\/triage/, { timeout: 15_000 });
+
+  // Race the redirect against any visible auth error so we don't wait
+  // 15 seconds just to time out when the credentials are invalid /
+  // rate-limited. If the supabase signInWithPassword call surfaces an
+  // error (locked account, wrong password, rate-limited), the login
+  // page renders the error message in a div with role='alert' (or in
+  // the form-error span). Surface that fast with a clear message.
+  const redirectPromise = page.waitForURL(/\/home|\/dashboard|\/triage/, { timeout: 15_000 });
+  const errorPromise = page.waitForSelector(
+    '[role="alert"], [data-testid="auth-error"], .error-message',
+    { timeout: 15_000, state: 'visible' },
+  ).then(async (el) => {
+    const text = await el.textContent();
+    throw new Error(`[auth.fixture] Sign-in failed with on-page error: "${text?.trim() || '(empty)'}". Check TEST_USER_EMAIL / TEST_USER_PASSWORD GH secrets — the test account may be locked, rate-limited, or the password may have rotated.`);
+  });
+  try {
+    await Promise.race([redirectPromise, errorPromise]);
+  } catch (err) {
+    // Augment the timeout with diagnostic context (current URL, page
+    // title, and any visible error text) so the CI log immediately
+    // explains WHY auth failed instead of just "timed out".
+    const url = page.url();
+    const title = await page.title().catch(() => '?');
+    const visibleErr = await page.locator('[role="alert"], .error-message').first().textContent().catch(() => null);
+    console.error(`[auth.fixture] sign-in did not redirect. url=${url} title=${title} on-page-error=${visibleErr || '(none)'}`);
+    throw err;
+  }
   // Capture the storage state (cookies + localStorage)
   const state = await ctx.storageState();
   // Write to disk so Playwright tests can reuse it via storageState option
