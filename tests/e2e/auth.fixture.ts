@@ -64,6 +64,26 @@ export async function loginAndCacheStorageState(): Promise<string | null> {
     ],
   });
   const page = await ctx.newPage();
+
+  // Capture every Supabase auth response so we can see WHY auth failed.
+  // The visible-error-on-page detection misses cases where Supabase
+  // returns 400/429/etc and the React code silently swallows or the
+  // setError fires before our selector catches it. This network log
+  // is the source of truth — what Supabase actually returned.
+  const authResponses: Array<{ url: string; status: number; body: string }> = [];
+  page.on('response', async (resp) => {
+    const url = resp.url();
+    if (!/supabase\.co\/auth\/v1\/token/.test(url)) return;
+    try {
+      const body = await resp.text().catch(() => '(could not read body)');
+      authResponses.push({
+        url,
+        status: resp.status(),
+        body: body.slice(0, 500),
+      });
+    } catch { /* ignore */ }
+  });
+
   await page.goto(`${APP_ORIGIN}/login`);
   // Click "Sign in with email" if the form isn't immediately visible
   const emailInput = page.getByPlaceholder(/email/i).first();
@@ -77,30 +97,60 @@ export async function loginAndCacheStorageState(): Promise<string | null> {
   await page.getByPlaceholder(/password/i).first().fill(TEST_USER_PASSWORD);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 
-  // Race the redirect against any visible auth error so we don't wait
-  // 15 seconds just to time out when the credentials are invalid /
-  // rate-limited. If the supabase signInWithPassword call surfaces an
-  // error (locked account, wrong password, rate-limited), the login
-  // page renders the error message in a div with role='alert' (or in
-  // the form-error span). Surface that fast with a clear message.
+  // Race the redirect against the SPECIFIC auth-error testid (the
+  // [data-testid=auth-error] div on /login). v0.5.5 fixture used a
+  // broad role=alert selector which matched unrelated empty toast
+  // containers — that was the "(empty)" noise in earlier runs.
   const redirectPromise = page.waitForURL(/\/home|\/dashboard|\/triage/, { timeout: 15_000 });
   const errorPromise = page.waitForSelector(
-    '[role="alert"], [data-testid="auth-error"], .error-message',
+    '[data-testid="auth-error"]',
     { timeout: 15_000, state: 'visible' },
   ).then(async (el) => {
-    const text = await el.textContent();
-    throw new Error(`[auth.fixture] Sign-in failed with on-page error: "${text?.trim() || '(empty)'}". Check TEST_USER_EMAIL / TEST_USER_PASSWORD GH secrets — the test account may be locked, rate-limited, or the password may have rotated.`);
+    const text = (await el.textContent())?.trim() || '(visible-but-empty)';
+    throw new Error(`[auth.fixture] Login surfaced an error: "${text}"`);
   });
+
   try {
     await Promise.race([redirectPromise, errorPromise]);
   } catch (err) {
-    // Augment the timeout with diagnostic context (current URL, page
-    // title, and any visible error text) so the CI log immediately
-    // explains WHY auth failed instead of just "timed out".
+    // Build the most informative diagnostic possible: current URL +
+    // visible auth error + every Supabase /auth/v1/token response we
+    // saw. This collapses the typical 4-step "rerun locally to debug"
+    // loop into a single CI log inspection.
     const url = page.url();
     const title = await page.title().catch(() => '?');
-    const visibleErr = await page.locator('[role="alert"], .error-message').first().textContent().catch(() => null);
-    console.error(`[auth.fixture] sign-in did not redirect. url=${url} title=${title} on-page-error=${visibleErr || '(none)'}`);
+    const visibleErr = await page
+      .locator('[data-testid="auth-error"]')
+      .first()
+      .textContent()
+      .catch(() => null);
+
+    console.error('========== [auth.fixture] SIGN-IN FAILED ==========');
+    console.error(`url=${url}`);
+    console.error(`title=${title}`);
+    console.error(`visible-error="${(visibleErr || '').trim() || '(none)'}"`);
+    console.error(`supabase auth/v1/token responses: ${authResponses.length}`);
+    for (const r of authResponses) {
+      console.error(`  [${r.status}] ${r.url}`);
+      console.error(`    body: ${r.body}`);
+    }
+    if (authResponses.length === 0) {
+      console.error('  No /auth/v1/token requests captured. Either the click did not trigger signInWithPassword (page rendering issue), or the page is making auth calls to a different host. Check PRANAN_APP_ORIGIN.');
+    }
+    console.error('====================================================');
+
+    // Save a screenshot so the artifact upload step has something to
+    // attach. CI was uploading empty playwright-report/ because the
+    // throw happened before the test runner could write its trace.
+    try {
+      const fs2 = await import('node:fs/promises');
+      await fs2.mkdir('test-results', { recursive: true });
+      await page.screenshot({ path: 'test-results/auth-failure.png', fullPage: true });
+      console.error('Screenshot saved: test-results/auth-failure.png');
+    } catch (e) {
+      console.error('Screenshot save failed:', e);
+    }
+
     throw err;
   }
   // Capture the storage state (cookies + localStorage)
