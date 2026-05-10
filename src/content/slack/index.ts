@@ -221,8 +221,8 @@ function injectSlackPromptBar() {
     gap: 8px;
     padding: 6px 12px;
     margin: 4px 16px 8px 16px;
-    background: rgba(250,250,250,0.04);
-    border: 1px solid rgba(167, 139, 250, 0.12);
+    background: linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97));
+    border: 1px solid rgba(167, 139, 250, 0.45); box-shadow: 0 2px 8px rgba(109,40,217,0.15);
     border-radius: 8px;
     cursor: text;
     transition: all 0.15s ease;
@@ -230,12 +230,12 @@ function injectSlackPromptBar() {
   `;
 
   bar.addEventListener('mouseenter', () => {
-    bar.style.borderColor = 'rgba(167, 139, 250, 0.3)';
-    bar.style.background = 'rgba(250,250,250,0.06)';
+    bar.style.borderColor = 'rgba(167, 139, 250, 0.7)';
+    bar.style.background = 'linear-gradient(135deg, rgba(26,12,42,0.98), rgba(20,12,40,0.98))';
   });
   bar.addEventListener('mouseleave', () => {
-    bar.style.borderColor = 'rgba(167, 139, 250, 0.12)';
-    bar.style.background = 'rgba(250,250,250,0.04)';
+    bar.style.borderColor = 'rgba(167, 139, 250, 0.45)';
+    bar.style.background = 'linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97))';
   });
 
   // Pranan icon

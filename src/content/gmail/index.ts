@@ -293,8 +293,8 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
     gap: 8px;
     padding: 6px 12px;
     margin: 4px 0;
-    background: rgba(250,250,250,0.04);
-    border: 1px solid rgba(167, 139, 250, 0.12);
+    background: linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97));
+    border: 1px solid rgba(167, 139, 250, 0.45); box-shadow: 0 2px 8px rgba(109,40,217,0.15);
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.15s ease;
@@ -302,12 +302,12 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
   `;
 
   bar.addEventListener('mouseenter', () => {
-    bar.style.borderColor = 'rgba(167, 139, 250, 0.3)';
-    bar.style.background = 'rgba(250,250,250,0.06)';
+    bar.style.borderColor = 'rgba(167, 139, 250, 0.7)';
+    bar.style.background = 'linear-gradient(135deg, rgba(26,12,42,0.98), rgba(20,12,40,0.98))';
   });
   bar.addEventListener('mouseleave', () => {
-    bar.style.borderColor = 'rgba(167, 139, 250, 0.12)';
-    bar.style.background = 'rgba(250,250,250,0.04)';
+    bar.style.borderColor = 'rgba(167, 139, 250, 0.45)';
+    bar.style.background = 'linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97))';
   });
 
   // Pranan icon
@@ -630,8 +630,8 @@ function injectThreadPromptBar(threadContainer: Element) {
     gap: 8px;
     padding: 8px 14px;
     margin: 8px 0 4px 0;
-    background: rgba(250,250,250,0.04);
-    border: 1px solid rgba(167, 139, 250, 0.12);
+    background: linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97));
+    border: 1px solid rgba(167, 139, 250, 0.45); box-shadow: 0 2px 8px rgba(109,40,217,0.15);
     border-radius: 8px;
     cursor: text;
     transition: all 0.15s ease;
@@ -639,12 +639,12 @@ function injectThreadPromptBar(threadContainer: Element) {
   `;
 
   bar.addEventListener('mouseenter', () => {
-    bar.style.borderColor = 'rgba(167, 139, 250, 0.3)';
-    bar.style.background = 'rgba(250,250,250,0.06)';
+    bar.style.borderColor = 'rgba(167, 139, 250, 0.7)';
+    bar.style.background = 'linear-gradient(135deg, rgba(26,12,42,0.98), rgba(20,12,40,0.98))';
   });
   bar.addEventListener('mouseleave', () => {
-    bar.style.borderColor = 'rgba(167, 139, 250, 0.12)';
-    bar.style.background = 'rgba(250,250,250,0.04)';
+    bar.style.borderColor = 'rgba(167, 139, 250, 0.45)';
+    bar.style.background = 'linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97))';
   });
 
   // Pranan icon
@@ -968,6 +968,39 @@ document.addEventListener('mouseup', () => {
 
 // ---------------------------------------------------------------------------
 // Message listener (for draft injection from side panel)
+
+/**
+ * Click Gmail's Reply button in the active thread view to open the
+ * reply compose. Returns true if clicked, false if not found.
+ *
+ * Used by the INSERT_DRAFT handler when the user clicks Insert in the
+ * sidepanel before manually clicking Reply. Without this, Insert
+ * appears broken — sidepanel had a draft ready, Gmail had no compose
+ * to inject into, the call silently failed.
+ */
+function openGmailReply(): boolean {
+  // Find the visible thread view (most recent .h7)
+  const threads = findThreadViews();
+  if (threads.length === 0) return false;
+  const visible = threads[threads.length - 1];
+
+  // The Reply button is inside the threadReplyButtons row, structured
+  // as <span class="ams bkH" role="link">Reply</span> or similar. Try
+  // a few variants since Gmail rotates classes.
+  const replyRow = findOne('gmail.threadReplyButtons', SELECTORS.gmail.threadReplyButtons, visible);
+  if (!replyRow) return false;
+
+  // First role=link, first role=button, or first .ams that says Reply.
+  const candidates = Array.from(replyRow.querySelectorAll<HTMLElement>(
+    '[role="button"], [role="link"], .ams'
+  ));
+  const reply = candidates.find(el => /^reply\b/i.test(el.textContent?.trim() || '')) || candidates[0];
+  if (!reply) return false;
+
+  reply.click();
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -977,13 +1010,43 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message.type === 'INSERT_DRAFT') {
+    const draftText = message.payload.text || message.payload.draft;
     const composeWindows = findComposeWindows();
     if (composeWindows.length > 0) {
-      const success = injectDraft(composeWindows[0], message.payload.text || message.payload.draft);
+      const success = injectDraft(composeWindows[0], draftText);
       sendResponse({ success });
-    } else {
-      sendResponse({ success: false, error: 'No compose window found' });
+      return true;
     }
+    // No compose window open. User is reading a thread and Pranan
+    // pre-generated a draft (the most common Insert flow). Click
+    // Gmail's Reply button programmatically, wait briefly for compose
+    // to appear, then inject. Bug fix v0.5.5: previously this branch
+    // just returned 'No compose window found' and the Insert button
+    // appeared broken to users.
+    const replyClicked = openGmailReply();
+    if (!replyClicked) {
+      sendResponse({ success: false, error: 'No compose window and Reply button not found' });
+      return true;
+    }
+    // Async wait + retry. We must return true synchronously to keep
+    // the sendResponse channel open across the timeout.
+    let attempts = 0;
+    const tryInject = () => {
+      const wins = findComposeWindows();
+      if (wins.length > 0) {
+        const success = injectDraft(wins[0], draftText);
+        sendResponse({ success });
+        return;
+      }
+      if (attempts < 20) {
+        attempts++;
+        setTimeout(tryInject, 100);
+      } else {
+        sendResponse({ success: false, error: 'Reply opened but compose did not appear in 2s' });
+      }
+    };
+    setTimeout(tryInject, 200);
+    return true; // keep channel open for async sendResponse
   }
   if (message.type === 'DISMISS_POPUP') {
     dismissRelationshipPopup();
