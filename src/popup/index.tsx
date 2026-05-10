@@ -205,11 +205,15 @@ function Popup() {
           border: '1px solid rgba(167,139,250,0.2)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect x="2" y="2" width="20" height="20" rx="4" stroke="#a78bfa" strokeWidth="1.5" opacity="0.3"/>
-            <rect x="5" y="5" width="14" height="14" rx="3" stroke="#a78bfa" strokeWidth="1.5" opacity="0.5"/>
-            <rect x="8" y="8" width="8" height="8" rx="2" stroke="#a78bfa" strokeWidth="1.5" opacity="0.7"/>
-            <rect x="10" y="10" width="4" height="4" rx="1" fill="#a78bfa"/>
+          <svg width="16" height="16" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="popupBrandGrad" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#8b5cf6" />
+                <stop offset="100%" stopColor="#4c1d95" />
+              </linearGradient>
+            </defs>
+            <circle cx="60" cy="60" r="33" stroke="url(#popupBrandGrad)" strokeWidth="7" fill="none" />
+            <circle cx="60" cy="60" r="16" fill="url(#popupBrandGrad)" />
           </svg>
         </div>
         <div>
