@@ -95,21 +95,37 @@ const SELECTORS = {
     'button.comments-comment-box__submit-button',
   ],
   // Feed post container (for extracting post context for comments)
+  // Broadened 2026-05-10 — LinkedIn rotates these class names; the data-id
+  // attribute is the most stable anchor, the rest are class-name fallbacks.
   feedPost: [
+    '[data-id^="urn:li:activity"]',
+    '[data-urn^="urn:li:activity"]',
     '.feed-shared-update-v2',
     '.occludable-update',
+    '[data-finite-scroll-hotkey-context="FEED"]',
   ],
   // Post author info
   postAuthor: [
     '.update-components-actor__title span[aria-hidden="true"]',
     '.feed-shared-actor__title span[aria-hidden="true"]',
     '.update-components-actor__name span[aria-hidden="true"]',
+    '.update-components-actor__name',
+    '.feed-shared-actor__name',
+    'span[class*="actor__title"] span[aria-hidden="true"]',
+    'span[class*="actor__name"] span[aria-hidden="true"]',
   ],
   // Post body text
+  // Order matters — most specific selectors first so we get the actual
+  // post body, not stray text from comments or reactions.
   postBody: [
+    '.update-components-update-v2__commentary',
+    '.feed-shared-update-v2__commentary',
     '.feed-shared-update-v2__description .break-words',
-    '.feed-shared-text .break-words',
+    '.feed-shared-inline-show-more-text',
     '.update-components-text .break-words',
+    '.feed-shared-text .break-words',
+    '.update-components-text',
+    '[data-test-id="main-feed-activity-card-text"]',
   ],
   // InMail indicator
   inMailIndicator: [
@@ -270,6 +286,16 @@ function getCommentPostContext(commentInput: Element): {
   const linkEl = postContainer.querySelector('a[href*="/feed/update/"]') as HTMLAnchorElement | null;
   const postUrl = linkEl?.href || null;
 
+  if (!postText) {
+    // LinkedIn shifted DOM and our selectors couldn't find the post body.
+    // Log so we know to update SELECTORS.postBody. Without this log the
+    // backend silently falls back to "(post text not available)" and the
+    // user gets a generic comment that doesn't reference the post.
+    console.warn('[Pranan] LinkedIn post body not found — selectors may be stale. Comment will be generic.', {
+      postContainer: postContainer?.className,
+      hasAuthor: !!postAuthor,
+    });
+  }
   return { postAuthor, postAuthorUrl, postText, postUrl };
 }
 
@@ -536,14 +562,32 @@ function injectCommentPromptBars() {
 
     const triggerCommentDraft = () => {
       const prompt = input.value.trim() || undefined;
+      // Re-extract post context at click time. The user may have scrolled
+      // or LinkedIn may have re-rendered the post since the bar was
+      // injected — refresh values so we don't ship stale or null context.
+      const live = getCommentPostContext(commentInput);
+      if (!live.postText && !prompt) {
+        // No post context AND no user prompt — the AI has nothing to
+        // anchor on, would produce a generic 'great post!' that defeats
+        // the purpose. Surface a hint instead of silently failing.
+        input.placeholder = 'Couldn\'t read the post. Type a prompt to draft anyway...';
+        input.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+        setTimeout(() => {
+          input.style.borderColor = '';
+          input.placeholder = live.postAuthor
+            ? `Comment on ${live.postAuthor}'s post with Pranan...`
+            : 'Draft comment with Pranan...';
+        }, 3500);
+        return;
+      }
       chrome.runtime.sendMessage({
         type: 'COMMENT_DRAFT_REQUEST',
         payload: {
           platform: 'linkedin',
-          postAuthor,
-          postAuthorUrl,
-          postText,
-          postUrl,
+          postAuthor: live.postAuthor,
+          postAuthorUrl: live.postAuthorUrl,
+          postText: live.postText,
+          postUrl: live.postUrl,
           prompt,
           composeType: 'comment',
         },

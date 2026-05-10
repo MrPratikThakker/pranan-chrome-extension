@@ -333,14 +333,20 @@ function AppInner() {
   // about. We defer to the persisted lastKnownAuthValid hint and only
   // hard-render the unauth screen once the first check has actually
   // resolved unauthenticated.
+  // Auth gate fix (v0.5.2): always show Loading until isAuthChecked
+  // resolves. Previously the gate fell through to AuthPanel when
+  // lastKnownAuthValid was false, but lastKnownAuthValid is hydrated
+  // asynchronously from chrome.storage and starts false on every
+  // fresh component mount, so first paint always rendered AuthPanel
+  // for ~500ms before checkAuth() finished. That was the flicker.
+  if (!isAuthChecked) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-brand-bg text-brand-text">
+        <div className="text-xs text-brand-text-3 animate-pulse">Loading...</div>
+      </div>
+    );
+  }
   if (!isAuthenticated) {
-    if (!isAuthChecked && lastKnownAuthValid) {
-      return (
-        <div className="h-screen flex items-center justify-center bg-brand-bg text-brand-text">
-          <div className="text-xs text-brand-text-3 animate-pulse">Loading...</div>
-        </div>
-      );
-    }
     return (
       <div className="h-screen flex flex-col bg-brand-bg text-brand-text">
         <AuthPanel onConnect={handleConnect} />
