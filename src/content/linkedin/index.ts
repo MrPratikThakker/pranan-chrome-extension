@@ -996,12 +996,24 @@ function init() {
       detectActiveCompose();
     }, 150);
   };
-  const observer = new MutationObserver(debouncedDetect);
+  const observer = new MutationObserver((mutations) => {
+    // Pause heavy detection while tab is hidden — saves CPU on
+    // long-lived background tabs.
+    if (document.hidden) return;
+    debouncedDetect();
+  });
 
   observer.observe(document.body, {
     childList: true,
     subtree: true,
   });
+
+  // Disconnect on tab unload so the observer doesn't outlive the page
+  // (defensive — content scripts are reaped automatically, but this makes
+  // the cleanup explicit and safe against multi-page SPA edge cases).
+  window.addEventListener('beforeunload', () => {
+    observer.disconnect();
+  }, { once: true });
 
   // Monitor focus events
   document.addEventListener('focusin', (e) => {
