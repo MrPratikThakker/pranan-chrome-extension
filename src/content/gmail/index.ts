@@ -429,12 +429,30 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
 
   // Generate handler — fire INLINE_DRAFT_REQUEST. If input has text, treat it
   // as a user prompt; otherwise generate from thread context only.
+  // Loading state resets when:
+  //   (a) INSERT_DRAFT message arrives back (draft was generated + injected), OR
+  //   (b) 30 second safety timeout fires (something went wrong upstream)
+  let resetTimer: ReturnType<typeof setTimeout> | null = null;
+  const setLoading = (loading: boolean) => {
+    if (loading) {
+      genBtn.disabled = true;
+      genBtn.textContent = 'Generating...';
+      genBtn.style.opacity = '0.6';
+      input.style.background = '#f5f3ff';
+      input.disabled = true;
+    } else {
+      genBtn.disabled = false;
+      genBtn.textContent = 'Generate';
+      genBtn.style.opacity = '1';
+      input.style.background = 'white';
+      input.disabled = false;
+    }
+  };
+
   const triggerGenerate = () => {
     const userPrompt = input.value.trim();
     const recipientName = recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
-    genBtn.disabled = true;
-    genBtn.textContent = 'Generating...';
-    genBtn.style.opacity = '0.6';
+    setLoading(true);
     chrome.runtime.sendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
@@ -446,14 +464,36 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
         subject: getSubject(composeWindow),
         userPrompt: userPrompt || null,
       },
-    }).catch((err) => console.warn('[Pranan v6] sendMessage failed:', err));
-    // Reset button after a beat so the user can retry if needed
-    setTimeout(() => {
-      genBtn.disabled = false;
-      genBtn.textContent = 'Generate';
-      genBtn.style.opacity = '1';
-    }, 4000);
+    }).catch((err) => {
+      console.warn('[Pranan v6] sendMessage failed:', err);
+      setLoading(false);
+    });
+    // Safety timeout: if INSERT_DRAFT never arrives back within 30s, reset.
+    if (resetTimer) clearTimeout(resetTimer);
+    resetTimer = setTimeout(() => setLoading(false), 30000);
   };
+
+  // Listen for INSERT_DRAFT — the side-panel pipeline calls this after
+  // generation completes. We reset our loading state.
+  const insertDraftListener = (msg: { type?: string }) => {
+    if (msg?.type === 'INSERT_DRAFT' && resetTimer) {
+      clearTimeout(resetTimer);
+      resetTimer = null;
+      setLoading(false);
+      // Bonus: clear the prompt input so the next thread starts clean
+      input.value = '';
+    }
+  };
+  chrome.runtime.onMessage.addListener(insertDraftListener);
+  // Clean up listener when the bar is removed from DOM (compose closed)
+  const cleanupObserver = new MutationObserver(() => {
+    if (!document.contains(bar)) {
+      chrome.runtime.onMessage.removeListener(insertDraftListener);
+      cleanupObserver.disconnect();
+      if (resetTimer) clearTimeout(resetTimer);
+    }
+  });
+  cleanupObserver.observe(document.body, { childList: true, subtree: true });
 
   genBtn.addEventListener('click', (e) => {
     e.stopPropagation();

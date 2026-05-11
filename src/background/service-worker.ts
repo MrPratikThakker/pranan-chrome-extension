@@ -410,6 +410,24 @@ async function handleMessage(
     }
 
     // --- Phase 4: Open side panel ---
+    // --- v0.6 Inline composer: relationship chip + tone hints ---
+    case 'GET_RELATIONSHIP_TIER': {
+      const { email } = (message.payload as { email?: string }) || {};
+      if (!email) return { tier: null };
+      try {
+        const ctx = await getCachedContactContext({ email });
+        if (!ctx) return { tier: 'unknown', name: null };
+        return {
+          tier: ctx.tier || 'unknown',
+          name: ctx.style?.contactName || null,
+          tone: ctx.style?.tone || null,
+        };
+      } catch (err) {
+        console.warn('[Pranan SW] GET_RELATIONSHIP_TIER failed:', err);
+        return { tier: 'unknown', name: null };
+      }
+    }
+
     case 'OPEN_SIDE_PANEL': {
       const tab = sender.tab;
       if (tab?.id) {
