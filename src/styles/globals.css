@@ -3,39 +3,63 @@
 @tailwind utilities;
 
 :root {
+  /* v0.7.1 — Light theme as default. Dark via [data-theme="dark"]. */
+
   /* Background & Surface */
-  --color-bg: #09090b;
-  --color-surface: rgba(250, 250, 250, 0.025);
-  --color-surface-2: rgba(250, 250, 250, 0.04);
-  --color-surface-3: rgba(250, 250, 250, 0.06);
-  --glass-bg: rgba(9, 9, 11, 0.8);
+  --color-bg: #ffffff;
+  --color-surface: rgba(10, 10, 11, 0.025);
+  --color-surface-2: rgba(10, 10, 11, 0.04);
+  --color-surface-3: rgba(10, 10, 11, 0.06);
+  --glass-bg: rgba(255, 255, 255, 0.85);
 
   /* Text */
-  --color-text: #fafafa;
-  --color-text-2: rgba(250, 250, 250, 0.70);
-  --color-text-3: rgba(250, 250, 250, 0.35);
+  --color-text: #0a0a0b;
+  --color-text-2: rgba(10, 10, 11, 0.70);
+  --color-text-3: rgba(10, 10, 11, 0.45);
 
   /* Borders */
-  --color-border: rgba(250, 250, 250, 0.07);
-  --color-border-strong: rgba(250, 250, 250, 0.14);
+  --color-border: rgba(10, 10, 11, 0.08);
+  --color-border-strong: rgba(10, 10, 11, 0.16);
 
-  /* Accent */
-  --color-accent: #a78bfa;
-  --color-accent-bright: #c4b5fd;
-  --color-accent-deep: #6d28d9;
-  --color-on-accent: #0a0a0b;
-  --color-glow: rgba(167, 139, 250, 0.08);
+  /* Accent — slightly deeper on light bg for AA contrast */
+  --color-accent: #7c3aed;
+  --color-accent-bright: #8b5cf6;
+  --color-accent-deep: #4c1d95;
+  --color-on-accent: #ffffff;
+  --color-glow: rgba(124, 58, 237, 0.10);
 
-  /* Status */
-  --color-green: #34d399;
-  --color-amber: #f59e0b;
-  --color-red: #ef4444;
+  /* Status — slightly darker than dark-theme variants for AA contrast on white */
+  --color-green: #10b981;
+  --color-amber: #d97706;
+  --color-red: #dc2626;
 
   /* Radius */
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
 
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --color-bg: #09090b;
+  --color-surface: rgba(250, 250, 250, 0.025);
+  --color-surface-2: rgba(250, 250, 250, 0.04);
+  --color-surface-3: rgba(250, 250, 250, 0.06);
+  --glass-bg: rgba(9, 9, 11, 0.8);
+  --color-text: #fafafa;
+  --color-text-2: rgba(250, 250, 250, 0.70);
+  --color-text-3: rgba(250, 250, 250, 0.35);
+  --color-border: rgba(250, 250, 250, 0.07);
+  --color-border-strong: rgba(250, 250, 250, 0.14);
+  --color-accent: #a78bfa;
+  --color-accent-bright: #c4b5fd;
+  --color-accent-deep: #6d28d9;
+  --color-on-accent: #0a0a0b;
+  --color-glow: rgba(167, 139, 250, 0.08);
+  --color-green: #34d399;
+  --color-amber: #f59e0b;
+  --color-red: #ef4444;
   color-scheme: dark;
 }
 
@@ -58,16 +82,16 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(250, 250, 250, 0.08);
+  background: rgba(10, 10, 11, 0.18);
   border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(250, 250, 250, 0.16);
+  background: rgba(10, 10, 11, 0.28);
 }
 
 /* Selection */
 ::selection {
-  background: rgba(167, 139, 250, 0.25);
+  background: rgba(124, 58, 237, 0.22);
 }
 
 /* Section label -- matches Pranan app's // PREFIX style */

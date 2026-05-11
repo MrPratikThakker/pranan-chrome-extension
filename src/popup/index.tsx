@@ -187,14 +187,14 @@ function Popup() {
 
   const snap = state.snapshot;
   const voiceArrow = snap?.voiceDirection === 'up' ? '↑' : snap?.voiceDirection === 'down' ? '↓' : '→';
-  const voiceColor = snap?.voiceDirection === 'up' ? '#34d399' : snap?.voiceDirection === 'down' ? '#f87171' : 'rgba(250,250,250,0.5)';
+  const voiceColor = snap?.voiceDirection === 'up' ? '#34d399' : snap?.voiceDirection === 'down' ? '#f87171' : 'rgba(10,10,11,0.5)';
 
   return (
     <div style={{
       width: 320,
       fontFamily: "'Inter', -apple-system, system-ui, sans-serif",
-      background: '#09090b',
-      color: '#fafafa',
+      background: '#ffffff',
+      color: '#0a0a0b',
       padding: 16,
     }}>
       {/* Header */}
@@ -218,7 +218,7 @@ function Popup() {
         </div>
         <div>
           <div style={{ fontSize: 13, fontWeight: 300, letterSpacing: '-0.04em', fontFamily: "'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>Pranan</div>
-          <div style={{ fontSize: 10, color: 'rgba(250,250,250,0.4)' }}>{platformLabel}</div>
+          <div style={{ fontSize: 10, color: 'rgba(10,10,11,0.4)' }}>{platformLabel}</div>
         </div>
         {state.isAuthenticated && snap && (() => {
           // Status semantics, friendlier than the previous binary badge:
@@ -263,7 +263,7 @@ function Popup() {
             height: 8,
             margin: '0 auto 10px',
             borderRadius: 4,
-            background: 'rgba(250,250,250,0.06)',
+            background: 'rgba(10,10,11,0.06)',
             animation: 'pranan-pulse 1.4s ease-in-out infinite',
           }} />
           <div style={{
@@ -271,7 +271,7 @@ function Popup() {
             height: 8,
             margin: '0 auto',
             borderRadius: 4,
-            background: 'rgba(250,250,250,0.06)',
+            background: 'rgba(10,10,11,0.06)',
             animation: 'pranan-pulse 1.4s ease-in-out infinite',
           }} />
         </div>
@@ -280,10 +280,10 @@ function Popup() {
       {/* Not authenticated — only after first check has actually resolved unauthenticated */}
       {state.isAuthChecked && !state.isAuthenticated && (
         <div style={{ textAlign: 'center', padding: '12px 0' }}>
-          <p style={{ fontSize: 12, color: 'rgba(250,250,250,0.6)', marginBottom: 4, fontWeight: 500 }}>
+          <p style={{ fontSize: 12, color: 'rgba(10,10,11,0.6)', marginBottom: 4, fontWeight: 500 }}>
             Sign in to Pranan
           </p>
-          <p style={{ fontSize: 11, color: 'rgba(250,250,250,0.4)', marginBottom: 12 }}>
+          <p style={{ fontSize: 11, color: 'rgba(10,10,11,0.4)', marginBottom: 12 }}>
             Already have an account? Click below to reconnect.
           </p>
           <button onClick={openLogin} style={{
@@ -382,7 +382,7 @@ function Popup() {
               <div style={{ fontSize: 12, fontWeight: 500, marginTop: 4, marginBottom: 6 }}>
                 Reply to {snap.topNudge.recipient}
               </div>
-              <div style={{ fontSize: 11, color: 'rgba(250,250,250,0.5)' }}>
+              <div style={{ fontSize: 11, color: 'rgba(10,10,11,0.5)' }}>
                 {snap.topNudge.subject}
               </div>
             </div>
@@ -409,11 +409,11 @@ function Popup() {
           </div>
 
           {/* Divider */}
-          <div style={{ height: 1, background: 'rgba(250,250,250,0.06)', margin: '8px 0' }} />
+          <div style={{ height: 1, background: 'rgba(10,10,11,0.06)', margin: '8px 0' }} />
 
           {/* Usage */}
           {state.user?.tier === 'free' && state.user.rateLimit && (
-            <div style={{ fontSize: 10, color: 'rgba(250,250,250,0.35)', marginBottom: 8 }}>
+            <div style={{ fontSize: 10, color: 'rgba(10,10,11,0.35)', marginBottom: 8 }}>
               {state.user.rateLimit.draftsUsedToday}/{state.user.rateLimit.draftsPerDay} drafts today
             </div>
           )}
@@ -422,9 +422,9 @@ function Popup() {
           <button onClick={openSidePanel} style={{
             width: '100%', padding: '6px 12px',
             fontSize: 11, fontWeight: 500,
-            color: 'rgba(250,250,250,0.6)',
-            background: 'rgba(250,250,250,0.04)',
-            border: '1px solid rgba(250,250,250,0.08)',
+            color: 'rgba(10,10,11,0.6)',
+            background: 'rgba(10,10,11,0.04)',
+            border: '1px solid rgba(10,10,11,0.08)',
             borderRadius: 6, cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
           }}>
@@ -439,7 +439,7 @@ function Popup() {
       {/* Keyboard shortcut hint */}
       <div style={{
         marginTop: 12, textAlign: 'center',
-        fontSize: 9, color: 'rgba(250,250,250,0.2)',
+        fontSize: 9, color: 'rgba(10,10,11,0.2)',
       }}>
         Ctrl+Shift+P to toggle side panel
       </div>
@@ -449,8 +449,8 @@ function Popup() {
 
 const tileBtn: React.CSSProperties = {
   padding: '10px 12px',
-  background: 'rgba(250,250,250,0.04)',
-  border: '1px solid rgba(250,250,250,0.08)',
+  background: 'rgba(10,10,11,0.04)',
+  border: '1px solid rgba(10,10,11,0.08)',
   borderRadius: 6,
   cursor: 'pointer',
   textAlign: 'left' as const,
@@ -463,19 +463,19 @@ const tileLabel: React.CSSProperties = {
   fontSize: 9, fontWeight: 600,
   letterSpacing: 0.8,
   textTransform: 'uppercase' as const,
-  color: 'rgba(250,250,250,0.4)',
+  color: 'rgba(10,10,11,0.4)',
   marginBottom: 2,
 };
 
 const tileValue: React.CSSProperties = {
   fontSize: 20, fontWeight: 600,
-  color: '#fafafa',
+  color: '#0a0a0b',
   fontVariantNumeric: 'tabular-nums' as const,
 };
 
 const tileSub: React.CSSProperties = {
   fontSize: 10,
-  color: 'rgba(250,250,250,0.35)',
+  color: 'rgba(10,10,11,0.35)',
   marginTop: 2,
 };
 
@@ -485,7 +485,7 @@ const skeletonNumber: React.CSSProperties = {
   marginTop: 1,
   marginBottom: 1,
   borderRadius: 4,
-  background: 'rgba(250,250,250,0.06)',
+  background: 'rgba(10,10,11,0.06)',
   animation: 'pranan-pulse 1.4s ease-in-out infinite',
 };
 
@@ -495,7 +495,7 @@ const skeletonText: React.CSSProperties = {
   marginTop: 4,
   marginBottom: 5,
   borderRadius: 4,
-  background: 'rgba(250,250,250,0.06)',
+  background: 'rgba(10,10,11,0.06)',
   animation: 'pranan-pulse 1.4s ease-in-out infinite',
 };
 
@@ -503,9 +503,9 @@ const actionBtnStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 8,
   width: '100%', padding: '8px 12px',
   fontSize: 12, fontWeight: 500,
-  color: 'rgba(250,250,250,0.8)',
-  background: 'rgba(250,250,250,0.04)',
-  border: '1px solid rgba(250,250,250,0.08)',
+  color: 'rgba(10,10,11,0.8)',
+  background: 'rgba(10,10,11,0.04)',
+  border: '1px solid rgba(10,10,11,0.08)',
   borderRadius: 6, cursor: 'pointer',
   textAlign: 'left' as const,
   fontFamily: 'inherit',
