@@ -117,6 +117,9 @@ const SELECTORS = {
   // Post body text
   // Order matters — most specific selectors first so we get the actual
   // post body, not stray text from comments or reactions.
+  // Refreshed 2026-05-12 — LinkedIn rotated DOM again; added the newer
+  // feed-shared-text + tap-target wrapper variants and a span[dir]
+  // fallback so we degrade gracefully when class names change.
   postBody: [
     '.update-components-update-v2__commentary',
     '.feed-shared-update-v2__commentary',
@@ -126,6 +129,13 @@ const SELECTORS = {
     '.feed-shared-text .break-words',
     '.update-components-text',
     '[data-test-id="main-feed-activity-card-text"]',
+    '.feed-shared-update-v2__description',
+    '.feed-shared-text',
+    '.update-components-text-view',
+    '.update-components-text-view .break-words',
+    'div[dir="ltr"] > span',
+    'span[dir="ltr"]',
+    '.fie-impression-container span[dir="ltr"]',
   ],
   // InMail indicator
   inMailIndicator: [
@@ -390,7 +400,7 @@ function injectMessagingPromptBar() {
   const close = document.createElement('button');
   close.style.cssText = `
     background: none; border: none; cursor: pointer; padding: 2px;
-    color: rgba(250,250,250,0.4); font-size: 14px; line-height: 1; display: flex; align-items: center;
+    color: #94a3b8; font-size: 14px; line-height: 1; display: flex; align-items: center;
   `;
   close.innerHTML = '&times;';
   close.title = 'Dismiss';
@@ -485,10 +495,11 @@ function injectCommentPromptBars() {
       display: flex;
       align-items: center;
       gap: 6px;
-      padding: 4px 10px;
+      padding: 6px 10px;
       margin: 4px 0 2px 0;
-      background: linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97));
-      border: 1px solid rgba(167, 139, 250, 0.45); box-shadow: 0 2px 8px rgba(109,40,217,0.15);
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
       border-radius: 6px;
       cursor: text;
       transition: all 0.15s ease;
@@ -496,12 +507,12 @@ function injectCommentPromptBars() {
     `;
 
     bar.addEventListener('mouseenter', () => {
-      bar.style.borderColor = 'rgba(167, 139, 250, 0.7)';
-      bar.style.background = 'linear-gradient(135deg, rgba(26,12,42,0.98), rgba(20,12,40,0.98))';
+      bar.style.borderColor = '#c4b5fd';
+      bar.style.boxShadow = '0 2px 8px rgba(124, 58, 237, 0.08)';
     });
     bar.addEventListener('mouseleave', () => {
-      bar.style.borderColor = 'rgba(167, 139, 250, 0.45)';
-      bar.style.background = 'linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97))';
+      bar.style.borderColor = '#e5e7eb';
+      bar.style.boxShadow = '0 1px 2px rgba(15, 23, 42, 0.04)';
     });
 
     // Small Pranan icon
@@ -519,13 +530,13 @@ function injectCommentPromptBars() {
       : 'Draft comment with Pranan...';
     input.style.cssText = `
       flex: 1; border: none; background: transparent; outline: none;
-      font-size: 12px; color: #fafafa; font-family: inherit; cursor: text;
+      font-size: 12px; color: #1f2937; font-family: inherit; cursor: text;
       min-width: 0;
     `;
 
     // Placeholder style
     const placeholderStyle = document.createElement('style');
-    placeholderStyle.textContent = `[${PRANAN_LI_COMMENT_BAR_ATTR}] input::placeholder { color: rgba(167, 139, 250, 0.5); }`;
+    placeholderStyle.textContent = `[${PRANAN_LI_COMMENT_BAR_ATTR}] input::placeholder { color: #94a3b8; }`;
     bar.appendChild(placeholderStyle);
 
     // Generate button
@@ -550,7 +561,7 @@ function injectCommentPromptBars() {
     const close = document.createElement('button');
     close.style.cssText = `
       background: none; border: none; cursor: pointer; padding: 1px;
-      color: rgba(250,250,250,0.4); font-size: 12px; line-height: 1; display: flex; align-items: center;
+      color: #94a3b8; font-size: 14px; line-height: 1; display: flex; align-items: center;
     `;
     close.innerHTML = '&times;';
     close.title = 'Dismiss';
