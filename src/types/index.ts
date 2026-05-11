@@ -145,7 +145,10 @@ export type MessageType =
   | 'PING'
   | 'GET_COMPOSE_STATE'
   // v0.6 Inline composer (Surface A)
-  | 'GET_RELATIONSHIP_TIER';
+  | 'GET_RELATIONSHIP_TIER'
+  // v0.7 Compose pop-over (Surface B)
+  | 'GET_PROACTIVE_SUGGESTIONS'
+  | 'OPEN_THREAD';
 
 export interface ExtensionMessage<T = unknown> {
   type: MessageType;
