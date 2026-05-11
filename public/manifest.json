@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pranan for Chrome",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Draft replies in your voice across Gmail, Slack, and LinkedIn. Smart nudges, tone check, and relationship context inline.",
   "permissions": [
     "activeTab",

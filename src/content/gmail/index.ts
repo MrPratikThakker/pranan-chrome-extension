@@ -351,7 +351,18 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     background: white;
     outline: none;
   `;
-  input.addEventListener('focus', () => { input.style.borderColor = '#a78bfa'; });
+  input.addEventListener('focus', () => {
+    input.style.borderColor = '#a78bfa';
+    // v0.7.2 — refresh recipient chip on focus
+    const fresh = extractRecipients(composeWindow);
+    if (fresh.length > 0) {
+      const labelEl = relChip.querySelector('[data-rel-text]') as HTMLElement | null;
+      if (labelEl && /New email|^$/.test(labelEl.textContent || '')) {
+        const name = extractRecipientName(composeWindow, fresh[0]) || fresh[0].split('@')[0];
+        labelEl.textContent = `→ ${name}`;
+      }
+    }
+  });
   input.addEventListener('blur', () => { input.style.borderColor = '#e5e7eb'; });
 
   // Relationship chip (placeholder — real tier comes from contact-styles)
@@ -454,13 +465,20 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
 
   const triggerGenerate = () => {
     const userPrompt = input.value.trim();
-    const recipientName = recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
+    // v0.7.2 — re-extract recipient at click time. The bar is injected as
+    // soon as the compose container mounts, but Gmail's recipient chip
+    // often renders ~50-200ms later. If we captured recipientEmail at
+    // injection time it can be null even on a reply with a real recipient,
+    // which produces the "Generate fires but no draft inserts" bug.
+    const liveRecipients = extractRecipients(composeWindow);
+    const liveRecipientEmail = liveRecipients[0] || recipientEmail || null;
+    const recipientName = liveRecipientEmail ? extractRecipientName(composeWindow, liveRecipientEmail) : null;
     setLoading(true);
     chrome.runtime.sendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
         platform: 'gmail',
-        recipientEmail,
+        recipientEmail: liveRecipientEmail,
         recipientName,
         messageToReplyTo: getThreadContext(composeWindow),
         channelName: null,
@@ -471,6 +489,14 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       console.warn('[Pranan v6] sendMessage failed:', err);
       setLoading(false);
     });
+    // Update chip text live in case it was stuck on "New email"
+    if (liveRecipientEmail) {
+      const labelEl = relChip.querySelector('[data-rel-text]') as HTMLElement | null;
+      if (labelEl && labelEl.textContent === 'New email') {
+        const displayName = recipientName || liveRecipientEmail.split('@')[0] || 'recipient';
+        labelEl.textContent = `→ ${displayName}`;
+      }
+    }
     // Safety timeout: if INSERT_DRAFT never arrives back within 30s, reset.
     if (resetTimer) clearTimeout(resetTimer);
     resetTimer = setTimeout(() => setLoading(false), 30000);
