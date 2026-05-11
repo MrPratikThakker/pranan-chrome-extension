@@ -77,8 +77,28 @@ test('popup renders without console errors', async () => {
   // Hard-fail if anything logged to console.error during mount.
   // Common pre-fix breakages: missing manifest fields, content-script
   // import errors, runtime exceptions in useEffect.
-  expect(errors, `Popup logged console errors:\n${errors.join('\n')}`).toEqual([]);
+  //
+  // Filter out expected-when-unauthenticated noise. The extension fires
+  // a /api/auth fetch on mount; in the E2E sandbox (no logged-in user)
+  // that returns 401, which the browser logs as a resource-load error.
+  // The product behavior is correct (UI falls back to Connect Account);
+  // the test should not flag this. Anything ELSE is a real failure.
+  const realErrors = errors.filter((e) => !isExpectedUnauthError(e));
+  expect(realErrors, `Popup logged console errors:\n${realErrors.join('\n')}`).toEqual([]);
 });
+
+/**
+ * Errors that are expected when the extension is loaded in an unauthenticated
+ * test context. The product code path is correct (gracefully falls back to a
+ * Connect Account UI). These should not fail the smoke test.
+ */
+function isExpectedUnauthError(text: string): boolean {
+  // Resource-load failures from unauthenticated /api/auth or /api/context fetches
+  if (/Failed to load resource.*401/i.test(text)) return true;
+  // Some browsers log the fetch URL alongside the status
+  if (/the server responded with a status of 401/i.test(text)) return true;
+  return false;
+}
 
 test('sidepanel renders without console errors', async () => {
   expect(extensionId).toBeTruthy();
@@ -93,5 +113,8 @@ test('sidepanel renders without console errors', async () => {
   await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
 
   await expect(page.getByText(/Pranan|Connect/i).first()).toBeVisible({ timeout: 5000 });
-  expect(errors, `Sidepanel logged console errors:\n${errors.join('\n')}`).toEqual([]);
+  // Same filter as the popup test — expected-when-unauthenticated noise
+  // does not count as a real failure. See comment in popup test above.
+  const realErrors = errors.filter((e) => !isExpectedUnauthError(e));
+  expect(realErrors, `Sidepanel logged console errors:\n${realErrors.join('\n')}`).toEqual([]);
 });
