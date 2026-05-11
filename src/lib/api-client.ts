@@ -266,6 +266,30 @@ export async function getContactContext(
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/companion/proactive/suggestions -- Surface B's data feed
+// ---------------------------------------------------------------------------
+
+export interface ProactiveSuggestion {
+  thread_id: string;
+  email_id: string;
+  sender_name: string;
+  sender_email: string;
+  subject: string;
+  classification: string;
+  received_at: string;
+  received_ago: string;
+  tier: string;
+  suggested_tone: string;
+  priority: number;
+}
+
+export async function getProactiveSuggestions(): Promise<ProactiveSuggestion[]> {
+  const response = await authedFetchWithRetry(`${API_BASE}/proactive/suggestions`);
+  const data = await handleResponse<{ suggestions: ProactiveSuggestion[] }>(response);
+  return data.suggestions || [];
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/companion/draft -- generate a draft (supports SSE streaming)
 // ---------------------------------------------------------------------------
 

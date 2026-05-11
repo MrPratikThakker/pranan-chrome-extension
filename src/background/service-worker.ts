@@ -11,7 +11,7 @@
  *   side panel opening, intelligence alerts
  */
 
-import { validateAuth, getContactContext, generateDraft, rewriteText, checkGrammar } from '@/lib/api-client';
+import { validateAuth, getContactContext, generateDraft, rewriteText, checkGrammar, getProactiveSuggestions } from '@/lib/api-client';
 import type { ExtensionMessage, Platform, AuthResponse, ContactContext } from '@/types';
 import { bootstrapSentry } from '@/lib/observability';
 import { APP_ORIGIN } from '@/lib/config';
@@ -410,6 +410,32 @@ async function handleMessage(
     }
 
     // --- Phase 4: Open side panel ---
+    // --- v0.7 Compose pop-over (Surface B) ---
+    case 'GET_PROACTIVE_SUGGESTIONS': {
+      try {
+        const suggestions = await getProactiveSuggestions();
+        return { suggestions };
+      } catch (err) {
+        console.warn('[Pranan SW] GET_PROACTIVE_SUGGESTIONS failed:', err);
+        return { suggestions: [], error: (err as Error).message };
+      }
+    }
+
+    case 'OPEN_THREAD': {
+      const { threadId } = (message.payload as { threadId?: string }) || {};
+      if (!threadId) return { ok: false };
+      // Navigate the active tab to the thread URL hash. Gmail interprets
+      // #inbox/<threadId> as "open this thread in current view."
+      if (sender.tab?.id) {
+        try {
+          await chrome.tabs.update(sender.tab.id, { url: `https://mail.google.com/mail/u/0/#inbox/${threadId}` });
+        } catch (err) {
+          console.warn('[Pranan SW] OPEN_THREAD failed:', err);
+        }
+      }
+      return { ok: true };
+    }
+
     // --- v0.6 Inline composer: relationship chip + tone hints ---
     case 'GET_RELATIONSHIP_TIER': {
       const { email } = (message.payload as { email?: string }) || {};

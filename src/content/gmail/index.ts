@@ -714,8 +714,13 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
   shadow.querySelector('.pranan-icon-btn')!.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
+    let v6 = false;
+    try { v6 = window.localStorage.getItem('PRANAN_V6_BAR') === '1'; } catch { /* sandbox */ }
+    if (v6) {
+      openComposePopover(host);
+      return;
+    }
     const recipientName = recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
-    console.log('[Pranan] toolbar icon clicked', { recipientEmail, recipientName });
     chrome.runtime.sendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
@@ -728,6 +733,198 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
       },
     }).catch(() => {});
   });
+}
+
+// ---------------------------------------------------------------------------
+// v0.7 Surface B: Compose-toolbar pop-over with proactive suggestions
+// ---------------------------------------------------------------------------
+
+const POPOVER_ID = 'pranan-compose-popover';
+
+function openComposePopover(anchorHost: HTMLElement) {
+  // Toggle if already open
+  const existing = document.getElementById(POPOVER_ID);
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  // Build pop-over container
+  const popover = document.createElement('div');
+  popover.id = POPOVER_ID;
+  popover.style.cssText = `
+    position: fixed;
+    z-index: 2147483646;
+    width: 540px;
+    max-height: 80vh;
+    background: #ffffff;
+    border-radius: 14px;
+    box-shadow: 0 24px 60px -20px rgba(0,0,0,0.4);
+    border: 1px solid #e5e7eb;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    overflow: hidden;
+    color: #1f2937;
+    display: flex;
+    flex-direction: column;
+  `;
+  // Position above the anchor button
+  const rect = anchorHost.getBoundingClientRect();
+  const top = Math.max(8, rect.top - 520);
+  const left = Math.max(8, Math.min(window.innerWidth - 560, rect.left - 240));
+  popover.style.top = `${top}px`;
+  popover.style.left = `${left}px`;
+
+  popover.innerHTML = `
+    <div style="padding: 18px 22px 12px 22px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 12px;">
+      <svg viewBox="0 0 120 120" width="22" height="22" fill="none">
+        <circle cx="60" cy="60" r="33" stroke="#8b5cf6" stroke-width="7" fill="none"/>
+        <circle cx="60" cy="60" r="16" fill="#8b5cf6"/>
+      </svg>
+      <div style="flex:1;">
+        <div style="font-family: 'Poppins', Inter, sans-serif; font-weight: 500; font-size: 16px; color: #0f172a; letter-spacing: -0.015em;">Draft with Pranan</div>
+        <div style="font-size: 12px; color: #64748b; margin-top: 2px;" data-pranan-subtitle>Loading suggestions...</div>
+      </div>
+      <button data-pranan-close aria-label="Close" style="background: none; border: none; color: #94a3b8; font-size: 20px; cursor: pointer; line-height: 1;">&times;</button>
+    </div>
+    <div data-pranan-suggestions style="padding: 8px 12px; overflow-y: auto; max-height: 320px;">
+      <div style="padding: 36px 16px; text-align: center; color: #94a3b8; font-size: 13px;">Pulling your inbox signals...</div>
+    </div>
+    <div style="padding: 8px 24px; color: #94a3b8; font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; display: flex; align-items: center; gap: 12px;">
+      <span style="flex:1; height: 1px; background: #f1f5f9;"></span>
+      or write something new
+      <span style="flex:1; height: 1px; background: #f1f5f9;"></span>
+    </div>
+    <div style="padding: 4px 24px 14px 24px;">
+      <textarea data-pranan-prompt placeholder='Draft a new email. e.g. "Intro Marshall to Wajee about Singapore"' style="width: 100%; min-height: 64px; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 10px; font-size: 13px; color: #1f2937; background: white; font-family: inherit; resize: vertical; outline: none;"></textarea>
+    </div>
+    <div style="padding: 10px 24px; border-top: 1px solid #f1f5f9; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid #ddd6fe; border-radius: 7px; font-size: 11px; color: #6d28d9; background: #faf5ff;">
+          <span style="width: 5px; height: 5px; border-radius: 50%; background: currentColor;"></span>
+          Writing as you
+        </span>
+        <span style="display: inline-flex; align-items: center; padding: 4px 10px; border: 1px solid #e5e7eb; border-radius: 7px; font-size: 11px; color: #475569; background: white;">Tone: warm</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 6px; color: #94a3b8; font-size: 11px;">
+        <span>Press</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 1px 5px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 3px; color: #64748b;">&#8984;&#9166;</span>
+        <span>to generate</span>
+      </div>
+    </div>
+    <div style="padding: 9px 22px; background: #faf5ff; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #6d28d9;">
+      <span style="display: inline-flex; align-items: center; gap: 6px;">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z" stroke="#6d28d9" stroke-width="2"/></svg>
+        Private workspace &middot; Anthropic
+      </span>
+      <a href="https://app.pranan.ai/settings" target="_blank" style="color: #6d28d9; text-decoration: none;">Settings</a>
+    </div>
+  `;
+
+  document.body.appendChild(popover);
+
+  // Wire close
+  popover.querySelector('[data-pranan-close]')!.addEventListener('click', () => popover.remove());
+  // Close on outside click
+  const outsideClick = (e: MouseEvent) => {
+    if (!popover.contains(e.target as Node) && !anchorHost.contains(e.target as Node)) {
+      popover.remove();
+      document.removeEventListener('mousedown', outsideClick);
+    }
+  };
+  setTimeout(() => document.addEventListener('mousedown', outsideClick), 50);
+  // Close on Escape
+  const escListener = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') { popover.remove(); document.removeEventListener('keydown', escListener); }
+  };
+  document.addEventListener('keydown', escListener);
+
+  // Freeform prompt: ⌘⏎ generates
+  const promptEl = popover.querySelector('[data-pranan-prompt]') as HTMLTextAreaElement;
+  promptEl.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      const text = promptEl.value.trim();
+      if (!text) return;
+      chrome.runtime.sendMessage({
+        type: 'INLINE_DRAFT_REQUEST',
+        payload: {
+          platform: 'gmail',
+          recipientEmail: null,
+          recipientName: null,
+          messageToReplyTo: null,
+          channelName: null,
+          subject: null,
+          userPrompt: text,
+        },
+      }).catch(() => {});
+      popover.remove();
+    }
+  });
+
+  // Fetch suggestions
+  chrome.runtime.sendMessage({ type: 'GET_PROACTIVE_SUGGESTIONS' })
+    .then((res: { suggestions?: Array<Record<string, string>>; error?: string }) => {
+      const sugList = popover.querySelector('[data-pranan-suggestions]') as HTMLElement;
+      const subtitle = popover.querySelector('[data-pranan-subtitle]') as HTMLElement;
+      if (!sugList) return;
+      const suggestions = res?.suggestions || [];
+      if (suggestions.length === 0) {
+        subtitle.textContent = 'Inbox under control';
+        sugList.innerHTML = `
+          <div style="padding: 32px 16px; text-align: center;">
+            <div style="width: 48px; height: 48px; margin: 0 auto 12px auto; border-radius: 12px; background: #f5f3ff; display: flex; align-items: center; justify-content: center;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#6d28d9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div style="font-size: 15px; font-weight: 600; color: #1f2937; margin-bottom: 4px;">Inbox under control.</div>
+            <div style="font-size: 12px; color: #64748b;">No follow-ups overdue. Write something new below.</div>
+          </div>
+        `;
+        return;
+      }
+      subtitle.textContent = `${suggestions.length} email${suggestions.length === 1 ? '' : 's'} you were going to write`;
+      sugList.innerHTML = suggestions.map((s, i) => `
+        <div data-pranan-sug-idx="${i}" data-pranan-thread="${escapeAttr(s.thread_id)}" style="padding: 12px 14px; border-radius: 8px; margin-bottom: 4px; cursor: pointer; display: flex; align-items: flex-start; gap: 12px; border: 1px solid transparent;">
+          <div style="width: 32px; height: 32px; border-radius: 8px; background: #f5f3ff; color: #6d28d9; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex-shrink: 0;">${escapeText((s.sender_name || s.sender_email || 'S').charAt(0).toUpperCase())}</div>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-size: 13px; color: #0f172a; font-weight: 500; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeText(s.subject || '(no subject)')}</div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 3px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+              <span>${escapeText(s.received_ago || '')}</span>
+              <span style="width: 3px; height: 3px; border-radius: 50%; background: currentColor;"></span>
+              <span style="color: #6d28d9;">${escapeText('→ ' + (s.sender_name || s.sender_email || '') + ' (' + (s.tier || 'unknown') + ')')}</span>
+              <span style="width: 3px; height: 3px; border-radius: 50%; background: currentColor;"></span>
+              <span>Tone: ${escapeText(s.suggested_tone || 'warm')}</span>
+            </div>
+          </div>
+        </div>
+      `).join('');
+      // Wire click handlers
+      sugList.querySelectorAll<HTMLElement>('[data-pranan-sug-idx]').forEach((row) => {
+        row.addEventListener('mouseenter', () => { row.style.background = '#faf5ff'; row.style.borderColor = '#ddd6fe'; });
+        row.addEventListener('mouseleave', () => { row.style.background = 'transparent'; row.style.borderColor = 'transparent'; });
+        row.addEventListener('click', () => {
+          const threadId = row.getAttribute('data-pranan-thread');
+          if (threadId) {
+            chrome.runtime.sendMessage({ type: 'OPEN_THREAD', payload: { threadId } }).catch(() => {});
+            popover.remove();
+          }
+        });
+      });
+    })
+    .catch((err) => {
+      const sugList = popover.querySelector('[data-pranan-suggestions]') as HTMLElement;
+      const subtitle = popover.querySelector('[data-pranan-subtitle]') as HTMLElement;
+      if (subtitle) subtitle.textContent = 'Could not load suggestions';
+      if (sugList) sugList.innerHTML = `<div style="padding: 20px; color: #b91c1c; font-size: 13px;">${escapeText(String(err))}</div>`;
+    });
+}
+
+function escapeText(s: string): string {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string
+  ));
+}
+function escapeAttr(s: string): string {
+  return escapeText(s);
 }
 
 // ---------------------------------------------------------------------------
