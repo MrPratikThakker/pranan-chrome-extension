@@ -143,7 +143,9 @@ export type MessageType =
   // Auto-context
   | 'THREAD_OPENED'
   | 'PING'
-  | 'GET_COMPOSE_STATE';
+  | 'GET_COMPOSE_STATE'
+  // v0.6 Inline composer (Surface A)
+  | 'GET_RELATIONSHIP_TIER';
 
 export interface ExtensionMessage<T = unknown> {
   type: MessageType;
