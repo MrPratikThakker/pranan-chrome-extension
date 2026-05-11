@@ -285,6 +285,223 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
   // Check parent too
   if (composeContainer.parentElement?.querySelector(`[${PRANAN_BAR_ATTR}]`)) return;
 
+  // v0.6 feature flag — opt-in via localStorage during dogfood.
+  // window.localStorage.setItem('PRANAN_V6_BAR', '1') to enable.
+  let v6Enabled = false;
+  try { v6Enabled = window.localStorage.getItem('PRANAN_V6_BAR') === '1'; } catch { /* sandbox */ }
+
+  if (v6Enabled) {
+    injectPromptBarV6(composeContainer, composeWindow, recipientEmail);
+  } else {
+    injectPromptBarLegacy(composeContainer, composeWindow, recipientEmail);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v0.6 Inline composer bar — Surface A
+// White background, real input + chips + Generate button, three states.
+// Behind localStorage flag PRANAN_V6_BAR=1 for dogfood.
+// ---------------------------------------------------------------------------
+function injectPromptBarV6(composeContainer: Element, composeWindow: Element, recipientEmail: string | null) {
+  const bar = document.createElement('div');
+  bar.setAttribute(PRANAN_BAR_ATTR, 'true');
+  bar.setAttribute('data-pranan-v6', '1');
+  bar.style.cssText = `
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px 10px 12px;
+    margin: 6px 0;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  `;
+
+  // Pranan icon — round atom mark in a small bordered tile
+  const iconWrap = document.createElement('div');
+  iconWrap.style.cssText = `
+    width: 32px; height: 32px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    background: white;
+  `;
+  iconWrap.innerHTML = `<svg width="20" height="20" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="vbg-${Math.random().toString(36).slice(2,8)}" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#4c1d95"/></linearGradient></defs><circle cx="60" cy="60" r="33" stroke="#8b5cf6" stroke-width="7" fill="none"/><circle cx="60" cy="60" r="16" fill="#8b5cf6"/></svg>`;
+
+  // Real input element (replaces the passive span)
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'Draft a reply with Pranan...';
+  input.style.cssText = `
+    flex: 1;
+    min-width: 100px;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: inherit;
+    color: #1f2937;
+    background: white;
+    outline: none;
+  `;
+  input.addEventListener('focus', () => { input.style.borderColor = '#a78bfa'; });
+  input.addEventListener('blur', () => { input.style.borderColor = '#e5e7eb'; });
+
+  // Relationship chip (placeholder — real tier comes from contact-styles)
+  const relChip = document.createElement('span');
+  relChip.style.cssText = `
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px;
+    border: 1px solid #ddd6fe;
+    border-radius: 7px;
+    font-size: 11px;
+    color: #6d28d9;
+    background: #faf5ff;
+    white-space: nowrap;
+    flex-shrink: 0;
+  `;
+  relChip.innerHTML = `<span style="width: 5px; height: 5px; border-radius: 50%; background: currentColor;"></span><span data-rel-text>${recipientEmail ? '→ ' + (recipientEmail.split('@')[0] || 'recipient') : 'New email'}</span>`;
+
+  // Tone chip
+  const toneChip = document.createElement('span');
+  toneChip.style.cssText = `
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px;
+    border: 1px solid #e5e7eb;
+    border-radius: 7px;
+    font-size: 11px;
+    color: #475569;
+    background: white;
+    white-space: nowrap;
+    flex-shrink: 0;
+    cursor: pointer;
+  `;
+  toneChip.textContent = 'Tone: auto';
+
+  // Generate button (primary)
+  const genBtn = document.createElement('button');
+  genBtn.type = 'button';
+  genBtn.style.cssText = `
+    padding: 7px 14px;
+    border: 1px solid #6d28d9;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: white;
+    background: #6d28d9;
+    cursor: pointer;
+    font-family: inherit;
+    flex-shrink: 0;
+  `;
+  genBtn.textContent = 'Generate';
+
+  // More icon (placeholder hook for ⋯ menu — wired in next PR)
+  const moreBtn = document.createElement('button');
+  moreBtn.type = 'button';
+  moreBtn.title = 'More options';
+  moreBtn.style.cssText = `
+    width: 28px; height: 28px;
+    background: none;
+    border: none;
+    color: #94a3b8;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    flex-shrink: 0;
+  `;
+  moreBtn.innerHTML = '&middot;&middot;&middot;';
+  moreBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+  });
+
+  bar.appendChild(iconWrap);
+  bar.appendChild(input);
+  bar.appendChild(relChip);
+  bar.appendChild(toneChip);
+  bar.appendChild(genBtn);
+  bar.appendChild(moreBtn);
+
+  // Generate handler — fire INLINE_DRAFT_REQUEST. If input has text, treat it
+  // as a user prompt; otherwise generate from thread context only.
+  const triggerGenerate = () => {
+    const userPrompt = input.value.trim();
+    const recipientName = recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
+    genBtn.disabled = true;
+    genBtn.textContent = 'Generating...';
+    genBtn.style.opacity = '0.6';
+    chrome.runtime.sendMessage({
+      type: 'INLINE_DRAFT_REQUEST',
+      payload: {
+        platform: 'gmail',
+        recipientEmail,
+        recipientName,
+        messageToReplyTo: getThreadContext(composeWindow),
+        channelName: null,
+        subject: getSubject(composeWindow),
+        userPrompt: userPrompt || null,
+      },
+    }).catch((err) => console.warn('[Pranan v6] sendMessage failed:', err));
+    // Reset button after a beat so the user can retry if needed
+    setTimeout(() => {
+      genBtn.disabled = false;
+      genBtn.textContent = 'Generate';
+      genBtn.style.opacity = '1';
+    }, 4000);
+  };
+
+  genBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    triggerGenerate();
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      triggerGenerate();
+    } else if (e.key === 'Escape') {
+      input.blur();
+      input.value = '';
+    }
+  });
+
+  // Async: try to upgrade the relationship chip with the real tier from the
+  // background script (best-effort; falls back to the simple email-local label).
+  if (recipientEmail) {
+    chrome.runtime.sendMessage({
+      type: 'GET_RELATIONSHIP_TIER',
+      payload: { email: recipientEmail },
+    }).then((res: { tier?: string; name?: string } | undefined) => {
+      if (!res || !res.tier) return;
+      const labelEl = relChip.querySelector('[data-rel-text]') as HTMLElement | null;
+      if (!labelEl) return;
+      const tierLabels: Record<string, string> = {
+        inner_circle: 'inner circle',
+        team: 'team',
+        client: 'client',
+        partner: 'partner',
+        network: 'network',
+        unknown: 'cold sender',
+      };
+      const niceTier = tierLabels[res.tier] || res.tier;
+      const displayName = res.name || (recipientEmail.split('@')[0] || 'recipient');
+      labelEl.textContent = `→ ${displayName} (${niceTier})`;
+    }).catch(() => { /* silent fallback */ });
+  }
+
+  // Insert before the compose container (so it appears above it, like Voila)
+  composeContainer.parentElement?.insertBefore(bar, composeContainer);
+}
+
+// ---------------------------------------------------------------------------
+// Legacy bar — the v0.5.x passive label. Kept default-on until v6 is dogfooded.
+// ---------------------------------------------------------------------------
+function injectPromptBarLegacy(composeContainer: Element, composeWindow: Element, recipientEmail: string | null) {
   const bar = document.createElement('div');
   bar.setAttribute(PRANAN_BAR_ATTR, 'true');
   bar.style.cssText = `
@@ -310,7 +527,6 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
     bar.style.background = 'linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97))';
   });
 
-  // Pranan icon
   const icon = document.createElement('div');
   icon.style.cssText = `
     width: 22px;
@@ -322,7 +538,6 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
   `;
   icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="60" cy="60" r="33" stroke="#a78bfa" stroke-width="7" fill="none"/><circle cx="60" cy="60" r="16" fill="#a78bfa"/></svg>`;
 
-  // Prompt text
   const text = document.createElement('span');
   text.style.cssText = `
     font-size: 13px;
@@ -332,7 +547,6 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
   `;
   text.textContent = 'Draft reply with Pranan...';
 
-  // Close button
   const close = document.createElement('button');
   close.style.cssText = `
     background: none;
@@ -356,10 +570,8 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
   bar.appendChild(text);
   bar.appendChild(close);
 
-  // Click handler: trigger draft
   bar.addEventListener('click', () => {
     const recipientName = recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
-    console.log('[Pranan] prompt-bar clicked', { recipientEmail, recipientName });
     chrome.runtime.sendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
@@ -373,10 +585,8 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
     }).catch((err) => console.warn('[Pranan] sendMessage failed:', err));
   });
 
-  // Insert before the compose container (so it appears above it, like Voila)
   composeContainer.parentElement?.insertBefore(bar, composeContainer);
 }
-
 function injectFloatingIcon(composeWindow: Element, recipientEmail: string | null) {
   // Find Gmail's send toolbar (.btC) — the bottom row with Send + Aa + emoji + attach.
   // Place the Pranan icon RIGHT AFTER the Send button, where Voila / Loom inject.
