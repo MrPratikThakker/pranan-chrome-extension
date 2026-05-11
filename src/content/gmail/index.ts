@@ -285,10 +285,13 @@ function injectPromptBar(composeWindow: Element, recipientEmail: string | null) 
   // Check parent too
   if (composeContainer.parentElement?.querySelector(`[${PRANAN_BAR_ATTR}]`)) return;
 
-  // v0.6 feature flag — opt-in via localStorage during dogfood.
-  // window.localStorage.setItem('PRANAN_V6_BAR', '1') to enable.
-  let v6Enabled = false;
-  try { v6Enabled = window.localStorage.getItem('PRANAN_V6_BAR') === '1'; } catch { /* sandbox */ }
+  // v0.6 inline bar — default ON as of v0.7.1.
+  // Opt-out: window.localStorage.setItem('PRANAN_V6_BAR', '0')
+  let v6Enabled = true;
+  try {
+    const flag = window.localStorage.getItem('PRANAN_V6_BAR');
+    if (flag === '0') v6Enabled = false;
+  } catch { /* sandbox */ }
 
   if (v6Enabled) {
     injectPromptBarV6(composeContainer, composeWindow, recipientEmail);
@@ -714,8 +717,11 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
   shadow.querySelector('.pranan-icon-btn')!.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    let v6 = false;
-    try { v6 = window.localStorage.getItem('PRANAN_V6_BAR') === '1'; } catch { /* sandbox */ }
+    let v6 = true;
+    try {
+      const flag = window.localStorage.getItem('PRANAN_V6_BAR');
+      if (flag === '0') v6 = false;
+    } catch { /* sandbox */ }
     if (v6) {
       openComposePopover(host);
       return;
