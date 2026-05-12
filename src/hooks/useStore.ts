@@ -459,6 +459,7 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           postUrl?: string;
           prompt?: string;
           composeType?: string;
+          originSurface?: 'inline-bar' | 'sidepanel' | 'popover';
         };
         const ctx: ComposeContext = {
           platform: (payload.platform || 'linkedin') as Platform,
@@ -473,6 +474,10 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           linkedinUrl: payload.postAuthorUrl || null,
         } as ComposeContext;
         get().setComposeContext(ctx);
+        // v0.7.4 — same auto-insert pattern as INLINE_DRAFT_REQUEST.
+        // If the LinkedIn comment bar fired this with originSurface='inline-bar',
+        // auto-fire INSERT_COMMENT_DRAFT once the draft is generated.
+        const autoInsert = payload.originSurface === 'inline-bar';
         get().requestDraft({
           recipientName: payload.postAuthor,
           platform: 'linkedin',
@@ -480,7 +485,19 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           prompt: payload.prompt,
           composeType: 'comment',
           postUrl: payload.postUrl,
-        });
+        }).then(() => {
+          if (!autoInsert) return;
+          const draft = get().currentDraft?.draft;
+          if (!draft) return;
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const tabId = tabs[0]?.id;
+            if (!tabId) return;
+            chrome.tabs.sendMessage(tabId, {
+              type: 'INSERT_COMMENT_DRAFT',
+              payload: { text: draft },
+            }).catch(() => { /* tab navigated away or content script gone */ });
+          });
+        }).catch(() => { /* requestDraft already logs + sets error state */ });
         break;
       }
       // Phase 3: Grammar suggestions from inline monitor
