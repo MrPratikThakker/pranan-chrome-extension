@@ -506,13 +506,29 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
 
   // Listen for INSERT_DRAFT — the side-panel pipeline calls this after
   // generation completes. We reset our loading state.
-  const insertDraftListener = (msg: { type?: string }) => {
+  // v0.8.1 — also listen for DRAFT_SKIPPED so the bar doesn't hang when the
+  // backend refuses to draft (cold prospect, automated sender, etc.).
+  const insertDraftListener = (msg: { type?: string; payload?: { message?: string } }) => {
     if (msg?.type === 'INSERT_DRAFT' && resetTimer) {
       clearTimeout(resetTimer);
       resetTimer = null;
       setLoading(false);
-      // Bonus: clear the prompt input so the next thread starts clean
       input.value = '';
+    } else if (msg?.type === 'DRAFT_SKIPPED' && resetTimer) {
+      clearTimeout(resetTimer);
+      resetTimer = null;
+      setLoading(false);
+      // Show the skip reason inline as a transient placeholder so the user
+      // sees WHY nothing happened. Auto-clear after 5 seconds.
+      const skipMsg = msg.payload?.message || 'Draft skipped.';
+      input.value = '';
+      const origPlaceholder = input.placeholder;
+      input.placeholder = skipMsg.length > 90 ? skipMsg.slice(0, 87) + '...' : skipMsg;
+      input.style.borderColor = '#fbbf24';
+      setTimeout(() => {
+        input.placeholder = origPlaceholder;
+        input.style.borderColor = '#e5e7eb';
+      }, 5000);
     }
   };
   chrome.runtime.onMessage.addListener(insertDraftListener);

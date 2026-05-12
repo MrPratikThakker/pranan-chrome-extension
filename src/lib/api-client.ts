@@ -352,7 +352,7 @@ export async function* streamDraft(
   // Detect via Content-Type: if it's application/json, parse as a single DraftResponse
   if (contentType.includes('application/json')) {
     console.log('[API] streamDraft: server returned JSON (not SSE), yielding as single done event');
-    const json = await response.json() as DraftResponse;
+    const json = await response.json() as DraftResponse & { skipped?: boolean; reason?: string; message?: string };
     yield {
       type: 'done',
       text: json.draft || '',
@@ -360,6 +360,9 @@ export async function* streamDraft(
         confidence: json.confidence,
         voiceMatch: json.voiceMatch,
         alternativeTones: json.alternativeTones,
+        skipped: json.skipped,
+        skipReason: json.reason,
+        skipMessage: json.message,
       },
     };
     return;
