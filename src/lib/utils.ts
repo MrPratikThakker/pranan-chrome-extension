@@ -45,6 +45,7 @@ export interface TierStyle {
  * Keys match the values returned by the backend relationship engine.
  */
 export const TIER_LABELS: Record<string, TierStyle> = {
+  self:         { label: 'You',          bg: 'bg-brand-accent/15',   text: 'text-brand-accent',   border: 'border-brand-accent/30' },
   inner_circle: { label: 'Inner Circle', bg: 'bg-brand-glow',        text: 'text-brand-accent',   border: 'border-brand-accent/30' },
   vip:          { label: 'VIP',          bg: 'bg-brand-glow',        text: 'text-brand-accent',   border: 'border-brand-accent/30' },
   team:         { label: 'Team',         bg: 'bg-blue-500/10',       text: 'text-blue-400',       border: 'border-blue-400/30' },
@@ -125,6 +126,7 @@ export function formatLastInteraction(dateStr: string | null | undefined): strin
 // ---------------------------------------------------------------------------
 
 export const TIER_CSS_COLORS: Record<string, { bg: string; text: string; border: string; label: string }> = {
+  self:         { bg: 'rgba(139, 92, 246, 0.15)', text: '#a78bfa', border: 'rgba(139, 92, 246, 0.3)', label: 'You' },
   inner_circle: { bg: 'rgba(139, 92, 246, 0.1)', text: '#a78bfa', border: 'rgba(139, 92, 246, 0.3)', label: 'Inner Circle' },
   vip:          { bg: 'rgba(139, 92, 246, 0.1)', text: '#a78bfa', border: 'rgba(139, 92, 246, 0.3)', label: 'VIP' },
   team:         { bg: 'rgba(59, 130, 246, 0.1)', text: '#60a5fa', border: 'rgba(59, 130, 246, 0.3)', label: 'Team' },
