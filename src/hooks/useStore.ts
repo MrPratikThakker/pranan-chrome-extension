@@ -263,6 +263,11 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           confidence: meta.confidence ?? 0,
           voiceMatch: meta.voiceMatch ?? 0,
           alternativeTones: meta.alternativeTones || [],
+          // v0.8.1 — propagate skip metadata so the inline-bar auto-insert
+          // path can short-circuit cleanly instead of leaving the bar stuck.
+          skipped: (meta as { skipped?: boolean }).skipped,
+          skipReason: (meta as { skipReason?: string }).skipReason,
+          skipMessage: (meta as { skipMessage?: string }).skipMessage,
           ...meta,
         };
         set({ currentDraft: draft, isDraftLoading: false, isDraftStreaming: false, streamingDraftText: '' });
@@ -413,7 +418,25 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           messageToReplyTo: payload.messageToReplyTo,
         }).then(() => {
           if (!autoInsert) return;
-          const draft = get().currentDraft?.draft;
+          const cur = get().currentDraft;
+          // v0.8.1 — handle backend skip cleanly. Inline bar must reset its
+          // loading state and surface the reason instead of hanging until
+          // the 30s safety timer fires.
+          if (cur?.skipped) {
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+              const tabId = tabs[0]?.id;
+              if (!tabId) return;
+              chrome.tabs.sendMessage(tabId, {
+                type: 'DRAFT_SKIPPED',
+                payload: {
+                  reason: cur.skipReason || 'skipped',
+                  message: cur.skipMessage || 'Draft skipped.',
+                },
+              }).catch(() => { /* tab navigated away or content script gone */ });
+            });
+            return;
+          }
+          const draft = cur?.draft;
           if (!draft) return;
           chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             const tabId = tabs[0]?.id;
@@ -488,7 +511,22 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           postUrl: payload.postUrl,
         }).then(() => {
           if (!autoInsert) return;
-          const draft = get().currentDraft?.draft;
+          const cur = get().currentDraft;
+          if (cur?.skipped) {
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+              const tabId = tabs[0]?.id;
+              if (!tabId) return;
+              chrome.tabs.sendMessage(tabId, {
+                type: 'DRAFT_SKIPPED',
+                payload: {
+                  reason: cur.skipReason || 'skipped',
+                  message: cur.skipMessage || 'Draft skipped.',
+                },
+              }).catch(() => {});
+            });
+            return;
+          }
+          const draft = cur?.draft;
           if (!draft) return;
           chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             const tabId = tabs[0]?.id;

@@ -51,6 +51,10 @@ export interface ContactContext {
 
 export interface DraftResponse {
   draft: string;
+  /** v0.8.1 — when the backend refuses to draft (cold prospect, automated sender) */
+  skipped?: boolean;
+  skipReason?: string;
+  skipMessage?: string;
   confidence: number;
   voiceMatch: number;
   alternativeTones: Array<{
@@ -114,6 +118,7 @@ export type MessageType =
   | 'REQUEST_REWRITE'
   | 'REQUEST_GRAMMAR'
   | 'INSERT_DRAFT'
+  | 'DRAFT_SKIPPED'
   | 'AUTH_STATUS'
   | 'SIDE_PANEL_READY'
   | 'PLATFORM_DETECTED'
