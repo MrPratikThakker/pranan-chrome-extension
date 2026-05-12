@@ -472,6 +472,20 @@ function AppInner() {
                   </p>
                 </div>
 
+                {/* v0.8.6 — Contact Context moved to TOP. When the user has a thread open
+                    or a compose context, the contact is the most relevant info. Intelligence
+                    + Quick Actions follow. */}
+                {contactContext && (
+                  <div className="space-y-2">
+                    <p className="section-label">Contact Context</p>
+                    <ContactCard
+                      context={contactContext}
+                      recipientName={contactContextLookup?.name ?? null}
+                      recipientEmail={contactContextLookup?.email ?? null}
+                    />
+                  </div>
+                )}
+
                 {/* Intelligence cards */}
                 <div className="space-y-2">
                   <p className="section-label">Intelligence</p>
@@ -581,18 +595,6 @@ function AppInner() {
                     </a>
                   </div>
                 </div>
-
-                {/* Thread context card (when reading an email, not composing) */}
-                {contactContext && (
-                  <div className="space-y-2">
-                    <p className="section-label">Contact Context</p>
-                    <ContactCard
-                      context={contactContext}
-                      recipientName={contactContextLookup?.name ?? null}
-                      recipientEmail={contactContextLookup?.email ?? null}
-                    />
-                  </div>
-                )}
 
                 {/* Keyboard shortcut hint */}
                 <div className="pt-2">
