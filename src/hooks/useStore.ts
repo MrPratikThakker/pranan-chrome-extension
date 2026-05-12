@@ -381,6 +381,8 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           isDM?: boolean;
           messageToReplyTo?: string;
           currentText?: string;
+          originSurface?: 'inline-bar' | 'sidepanel' | 'popover';
+          composeType?: 'comment' | 'reply' | 'new';
         };
         // Set compose context and trigger draft
         const ctx: ComposeContext = {
@@ -394,13 +396,33 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           selectedText: null,
         };
         get().setComposeContext(ctx);
+        // v0.7.3 — if the request came from the inline bar (Surface A),
+        // auto-fire INSERT_DRAFT once generation completes. Previously the
+        // user had to manually click "Draft reply" in the sidepanel after
+        // hitting Generate inline, which made the inline bar feel broken.
+        const autoInsert = payload.originSurface === 'inline-bar';
+        const insertMessageType = payload.composeType === 'comment'
+          ? 'INSERT_COMMENT_DRAFT'
+          : 'INSERT_DRAFT';
         get().requestDraft({
           recipientEmail: payload.recipientEmail,
           recipientName: payload.recipientName,
           platform: payload.platform,
           channelName: payload.channelName,
           messageToReplyTo: payload.messageToReplyTo,
-        });
+        }).then(() => {
+          if (!autoInsert) return;
+          const draft = get().currentDraft?.draft;
+          if (!draft) return;
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const tabId = tabs[0]?.id;
+            if (!tabId) return;
+            chrome.tabs.sendMessage(tabId, {
+              type: insertMessageType,
+              payload: { text: draft },
+            }).catch(() => { /* tab navigated away or content script gone */ });
+          });
+        }).catch(() => { /* requestDraft already logs + sets error state */ });
         break;
       }
       case 'INLINE_REWRITE_REQUEST': {
