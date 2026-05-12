@@ -227,6 +227,7 @@ export interface AppState {
   currentPlatform: Platform;
   composeContext: ComposeContext | null;
   contactContext: ContactContext | null;
+  contactContextLookup: { email?: string; name?: string; linkedinUrl?: string } | null;
 
   // Draft
   currentDraft: DraftResponse | null;

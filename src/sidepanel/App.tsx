@@ -76,6 +76,7 @@ function AppInner() {
     currentPlatform,
     composeContext,
     contactContext,
+    contactContextLookup,
     currentDraft,
     isDraftLoading,
     isDraftStreaming,
@@ -473,7 +474,7 @@ function AppInner() {
 
                 {/* Intelligence cards */}
                 <div className="space-y-2">
-                  <p className="section-label">// Intelligence</p>
+                  <p className="section-label">Intelligence</p>
 
                   {/* Meeting briefings */}
                   <button
@@ -550,7 +551,7 @@ function AppInner() {
 
                 {/* Quick actions */}
                 <div className="space-y-2">
-                  <p className="section-label">// Quick Actions</p>
+                  <p className="section-label">Quick Actions</p>
                   <div className="grid grid-cols-2 gap-2">
                     <a
                       href={appUrl("/relationships")}
@@ -584,11 +585,11 @@ function AppInner() {
                 {/* Thread context card (when reading an email, not composing) */}
                 {contactContext && (
                   <div className="space-y-2">
-                    <p className="section-label">// Contact Context</p>
+                    <p className="section-label">Contact Context</p>
                     <ContactCard
                       context={contactContext}
-                      recipientName={null}
-                      recipientEmail={null}
+                      recipientName={contactContextLookup?.name ?? null}
+                      recipientEmail={contactContextLookup?.email ?? null}
                     />
                   </div>
                 )}

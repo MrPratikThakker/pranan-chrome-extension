@@ -92,6 +92,7 @@ const initialState: AppState = {
   currentPlatform: 'unknown',
   composeContext: null,
   contactContext: null,
+  contactContextLookup: null,
   currentDraft: null,
   isDraftLoading: false,
   isDraftStreaming: false,
@@ -211,7 +212,7 @@ export const useStore = create<AppState & Actions>((set, get) => ({
 
   loadContactContext: async (email, name, linkedinUrl) => {
     if (!email && !name && !linkedinUrl) return;
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, error: null, contactContextLookup: { email, name, linkedinUrl } });
     try {
       const context = await getContactContext({ email, name, linkedinUrl });
       set({ contactContext: context, isLoading: false, viewMode: 'context' });
