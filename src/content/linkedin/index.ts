@@ -421,6 +421,8 @@ function injectMessagingPromptBar() {
         prompt,
         isInMail,
         profileHeadline: headline,
+        originSurface: 'inline-bar',
+        composeType: 'reply',
       },
     }).catch(() => {});
     input.value = '';
@@ -601,6 +603,7 @@ function injectCommentPromptBars() {
           postUrl: live.postUrl,
           prompt,
           composeType: 'comment',
+          originSurface: 'inline-bar',
         },
       }).catch(() => {});
       input.value = '';

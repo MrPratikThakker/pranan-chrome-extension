@@ -334,6 +334,8 @@ function injectSlackPromptBar() {
         isDM,
         messageToReplyTo: messageContext,
         prompt,
+        originSurface: 'inline-bar',
+        composeType: 'reply',
       },
     }).catch(() => {});
     input.value = '';
@@ -400,6 +402,8 @@ function injectComposeButtons() {
           isDM: isDirectMessage(),
           messageToReplyTo: threadContext || channelContext,
           currentText: getMessageInputContent(),
+          originSurface: 'inline-bar',
+          composeType: 'reply',
         },
       }).catch(() => {});
     },
@@ -483,6 +487,8 @@ function renderPopup(data: RelationshipPopupData) {
           recipientName: data.contactName,
           isDM: true,
           messageToReplyTo: threadContext || channelContext,
+          originSurface: 'inline-bar',
+          composeType: 'reply',
         },
       }).catch(() => {});
     },
