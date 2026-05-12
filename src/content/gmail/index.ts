@@ -484,6 +484,8 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
         channelName: null,
         subject: getSubject(composeWindow),
         userPrompt: userPrompt || null,
+        originSurface: 'inline-bar',
+        composeType: getThreadContext(composeWindow) ? 'reply' : 'new',
       },
     }).catch((err) => {
       console.warn('[Pranan v6] sendMessage failed:', err);
