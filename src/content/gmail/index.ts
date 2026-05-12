@@ -607,7 +607,7 @@ function injectPromptBarLegacy(composeContainer: Element, composeWindow: Element
     align-items: center;
     justify-content: center;
   `;
-  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="60" cy="60" r="33" stroke="#a78bfa" stroke-width="7" fill="none"/><circle cx="60" cy="60" r="16" fill="#a78bfa"/></svg>`;
+  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="60" cy="60" r="33" stroke="#8b5cf6" stroke-width="7" fill="none"/><circle cx="60" cy="60" r="16" fill="#8b5cf6"/></svg>`;
 
   const text = document.createElement('span');
   text.style.cssText = `
@@ -1109,10 +1109,11 @@ function injectThreadPromptBar(threadContainer: Element) {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 14px;
+    padding: 10px 14px;
     margin: 8px 0 4px 0;
-    background: linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97));
-    border: 1px solid rgba(167, 139, 250, 0.45); box-shadow: 0 2px 8px rgba(109,40,217,0.15);
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
     border-radius: 8px;
     cursor: text;
     transition: all 0.15s ease;
@@ -1120,12 +1121,12 @@ function injectThreadPromptBar(threadContainer: Element) {
   `;
 
   bar.addEventListener('mouseenter', () => {
-    bar.style.borderColor = 'rgba(167, 139, 250, 0.7)';
-    bar.style.background = 'linear-gradient(135deg, rgba(26,12,42,0.98), rgba(20,12,40,0.98))';
+    bar.style.borderColor = '#c4b5fd';
+    bar.style.boxShadow = '0 2px 8px rgba(124, 58, 237, 0.08)';
   });
   bar.addEventListener('mouseleave', () => {
-    bar.style.borderColor = 'rgba(167, 139, 250, 0.45)';
-    bar.style.background = 'linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97))';
+    bar.style.borderColor = '#e5e7eb';
+    bar.style.boxShadow = '0 1px 2px rgba(15, 23, 42, 0.04)';
   });
 
   // Pranan icon
@@ -1152,13 +1153,13 @@ function injectThreadPromptBar(threadContainer: Element) {
     background: transparent;
     outline: none;
     font-size: 13px;
-    color: #fafafa;
+    color: #1f2937;
     font-family: inherit;
     cursor: text;
   `;
   // Inject a <style> tag for placeholder color (can't set pseudo-element via .style)
   const placeholderStyle = document.createElement('style');
-  placeholderStyle.textContent = `[${PRANAN_THREAD_BAR_ATTR}] input::placeholder { color: rgba(167, 139, 250, 0.5); }`;
+  placeholderStyle.textContent = `[${PRANAN_THREAD_BAR_ATTR}] input::placeholder { color: #94a3b8; }`;
   bar.appendChild(placeholderStyle);
 
   // Send / generate button
