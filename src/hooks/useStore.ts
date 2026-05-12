@@ -259,16 +259,18 @@ export const useStore = create<AppState & Actions>((set, get) => ({
         }
         console.log('[Store] requestDraft: stream complete, text length:', fullText.length);
         const draft: DraftResponse = {
+          // v0.8.2 — spread meta FIRST so skip metadata flows through, then
+          // overwrite with explicit defaults so undefined meta fields don't
+          // clobber required arrays/numbers and crash the renderer with
+          // 'Cannot read properties of undefined (reading length)'.
+          ...meta,
           draft: fullText,
           confidence: meta.confidence ?? 0,
           voiceMatch: meta.voiceMatch ?? 0,
           alternativeTones: meta.alternativeTones || [],
-          // v0.8.1 — propagate skip metadata so the inline-bar auto-insert
-          // path can short-circuit cleanly instead of leaving the bar stuck.
           skipped: (meta as { skipped?: boolean }).skipped,
           skipReason: (meta as { skipReason?: string }).skipReason,
           skipMessage: (meta as { skipMessage?: string }).skipMessage,
-          ...meta,
         };
         set({ currentDraft: draft, isDraftLoading: false, isDraftStreaming: false, streamingDraftText: '' });
       } catch (streamErr) {
