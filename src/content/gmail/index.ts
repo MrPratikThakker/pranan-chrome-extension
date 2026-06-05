@@ -29,6 +29,10 @@ import { findAll, findOne, SELECTORS } from '../selectors';
 
 bootstrapSentry('content-gmail');
 
+// Reference to the active inline bar's Generate trigger, so the popup's
+// "Quick Draft" action (TRIGGER_INLINE_DRAFT) can fire the same flow.
+let activeInlineGenerate: (() => void) | null = null;
+
 const COMPOSE_SELECTORS = {
   // Gmail compose window container
   composeContainer: '.T-I.T-I-KE.L3',
@@ -503,6 +507,9 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     if (resetTimer) clearTimeout(resetTimer);
     resetTimer = setTimeout(() => setLoading(false), 30000);
   };
+
+  // Expose this compose bar's trigger so the popup's Quick Draft can fire it.
+  activeInlineGenerate = triggerGenerate;
 
   // Listen for INSERT_DRAFT — the side-panel pipeline calls this after
   // generation completes. We reset our loading state.
@@ -1505,6 +1512,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // Liveness check from service worker (for SPA re-injection)
   if (message.type === 'PING') {
     sendResponse({ alive: true });
+    return true;
+  }
+  // Popup "Quick Draft" — fire the active inline bar's Generate flow.
+  if (message.type === 'TRIGGER_INLINE_DRAFT') {
+    if (activeInlineGenerate) activeInlineGenerate();
+    sendResponse({ ok: true, triggered: !!activeInlineGenerate });
+    return true;
+  }
+  // Popup "Quick Grammar" — grammar runs in the side panel (the popup opens
+  // it). Acknowledge so the sender's sendMessage does not reject.
+  if (message.type === 'TRIGGER_INLINE_GRAMMAR') {
+    sendResponse({ ok: true });
     return true;
   }
   if (message.type === 'INSERT_DRAFT') {
