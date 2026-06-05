@@ -19,12 +19,13 @@ window.addEventListener('message', (event) => {
 
   const token = event.data.token;
   if (!token || typeof token !== 'string') return;
+  const refreshToken = typeof event.data.refreshToken === 'string' ? event.data.refreshToken : undefined;
 
   console.log('[Pranan Content Script] Received token via postMessage, forwarding to service worker...');
 
   // Forward to service worker
   chrome.runtime.sendMessage(
-    { type: 'AUTH_TOKEN_FROM_WEB', token },
+    { type: 'AUTH_TOKEN_FROM_WEB', token, refreshToken },
     (response) => {
       if (chrome.runtime.lastError) {
         console.warn('[Pranan Companion] Failed to send token to service worker:', chrome.runtime.lastError.message);
