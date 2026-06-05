@@ -152,6 +152,7 @@ export type MessageType =
   | 'GET_COMPOSE_STATE'
   // v0.6 Inline composer (Surface A)
   | 'GET_RELATIONSHIP_TIER'
+  | 'GET_REPLY_INTENTS'
   // v0.7 Compose pop-over (Surface B)
   | 'GET_PROACTIVE_SUGGESTIONS'
   | 'OPEN_THREAD';
