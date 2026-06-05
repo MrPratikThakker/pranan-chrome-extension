@@ -161,6 +161,13 @@ function Popup() {
     window.close();
   };
 
+  const disconnect = () => {
+    // Clears the extension's stored Bearer + refresh tokens so it no longer
+    // acts as you. (Web sign-out does not revoke the extension's own session.)
+    chrome.runtime.sendMessage({ type: 'DISCONNECT' }).catch(() => {});
+    window.close();
+  };
+
   const quickDraft = () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
@@ -432,6 +439,16 @@ function Popup() {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="9 18 15 12 9 6"/>
             </svg>
+          </button>
+
+          {/* Disconnect — clears the extension's stored tokens (F-13). */}
+          <button onClick={disconnect} style={{
+            width: '100%', padding: '6px 12px', marginTop: 6,
+            fontSize: 11, fontWeight: 500,
+            color: 'rgba(248,113,113,0.85)',
+            background: 'transparent', border: 'none', cursor: 'pointer',
+          }}>
+            Disconnect
           </button>
         </>
       )}

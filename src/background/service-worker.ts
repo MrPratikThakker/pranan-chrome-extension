@@ -524,6 +524,15 @@ async function handleMessage(
       }
     }
 
+    case 'DISCONNECT': {
+      // Clear the extension's own session (Bearer + refresh tokens). Web
+      // sign-out does not revoke this, so the user needs an explicit control.
+      try { await chrome.storage.local.remove(['authToken', 'refreshToken']); } catch { /* pass */ }
+      cachedAuth = null;
+      broadcastToSidePanel({ type: 'AUTH_STATUS', payload: { valid: false } });
+      return { ok: true };
+    }
+
     default:
       return { error: `Unknown message type: ${message.type}` };
   }
