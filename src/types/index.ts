@@ -124,6 +124,7 @@ export type MessageType =
   | 'PLATFORM_DETECTED'
   | 'AUTH_TOKEN'
   | 'AUTH_TOKEN_FROM_WEB'
+  | 'DISCONNECT'
   | 'AUTH_EXPIRED'
   | 'AUTH_RECOVERED'
   // Phase 1: Inline compose buttons
