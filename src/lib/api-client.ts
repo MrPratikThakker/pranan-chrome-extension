@@ -409,6 +409,32 @@ export async function generateDraft(request: DraftRequest, signal?: AbortSignal)
  * This makes streaming a transparent upgrade -- works whether or not
  * the server supports it.
  */
+// ---------------------------------------------------------------------------
+// POST /api/companion/intents -- one-tap reply intents for a thread
+// ---------------------------------------------------------------------------
+
+export interface IntentsRequest {
+  platform?: string;
+  recipientEmail?: string | null;
+  recipientName?: string | null;
+  subject?: string | null;
+  messageToReplyTo?: string | null;
+}
+
+export async function getReplyIntents(request: IntentsRequest): Promise<string[]> {
+  try {
+    const response = await authedFetch(`${API_BASE}/intents`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) return [];
+    const data = (await response.json()) as { intents?: string[] };
+    return Array.isArray(data.intents) ? data.intents.slice(0, 3) : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function* streamDraft(
   request: DraftRequest,
   signal?: AbortSignal

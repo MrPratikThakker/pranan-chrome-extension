@@ -590,6 +590,47 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
 
   // Insert before the compose container (so it appears above it, like Voila)
   composeContainer.parentElement?.insertBefore(bar, composeContainer);
+
+  // One-tap reply intents (reply threads only). We surface up to 3 short,
+  // in-your-voice intent chips below the bar; tapping one steers the draft.
+  const threadForIntents = getThreadContext(composeWindow);
+  if (threadForIntents) {
+    const chipsRow = document.createElement('div');
+    chipsRow.setAttribute('data-pranan-intents', '1');
+    chipsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0 0;padding:0 2px;';
+    const liveRecipients = extractRecipients(composeWindow);
+    const intentRecipient = liveRecipients[0] || recipientEmail || null;
+    const intentRecipientName = intentRecipient ? extractRecipientName(composeWindow, intentRecipient) : null;
+    chrome.runtime.sendMessage({
+      type: 'GET_REPLY_INTENTS',
+      payload: {
+        platform: 'gmail',
+        recipientEmail: intentRecipient,
+        recipientName: intentRecipientName,
+        subject: getSubject(composeWindow),
+        messageToReplyTo: threadForIntents,
+      },
+    }).then((res: { intents?: string[] } | undefined) => {
+      const intents = (res?.intents || []).slice(0, 3);
+      if (!intents.length || !document.contains(bar)) return;
+      for (const intent of intents) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.textContent = intent;
+        chip.style.cssText = 'font:500 12px/1.1 inherit;color:#6d28d9;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:999px;padding:5px 11px;cursor:pointer;white-space:nowrap;';
+        chip.addEventListener('mouseenter', () => { chip.style.background = '#ede9fe'; });
+        chip.addEventListener('mouseleave', () => { chip.style.background = '#f5f3ff'; });
+        chip.addEventListener('click', (e) => {
+          e.stopPropagation();
+          input.value = intent;
+          triggerGenerate();
+          chipsRow.remove();
+        });
+        chipsRow.appendChild(chip);
+      }
+      bar.insertAdjacentElement('afterend', chipsRow);
+    }).catch(() => { /* intents are best-effort */ });
+  }
 }
 
 // ---------------------------------------------------------------------------

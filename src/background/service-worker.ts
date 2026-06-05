@@ -11,7 +11,7 @@
  *   side panel opening, intelligence alerts
  */
 
-import { validateAuth, getContactContext, generateDraft, rewriteText, checkGrammar, getProactiveSuggestions } from '@/lib/api-client';
+import { validateAuth, getContactContext, generateDraft, rewriteText, checkGrammar, getProactiveSuggestions, getReplyIntents } from '@/lib/api-client';
 import type { ExtensionMessage, Platform, AuthResponse, ContactContext } from '@/types';
 import { bootstrapSentry } from '@/lib/observability';
 import { APP_ORIGIN } from '@/lib/config';
@@ -521,6 +521,15 @@ async function handleMessage(
           payload: { valid: false },
         });
         return { error: 'Token invalid' };
+      }
+    }
+
+    case 'GET_REPLY_INTENTS': {
+      try {
+        const intents = await getReplyIntents((message as { payload?: Record<string, unknown> }).payload || {});
+        return { intents };
+      } catch {
+        return { intents: [] };
       }
     }
 
