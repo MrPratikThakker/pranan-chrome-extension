@@ -26,7 +26,7 @@ let authExpiryInFlight = false;
 // Config
 // ---------------------------------------------------------------------------
 
-import { API_BASE } from './config';
+import { API_BASE, APP_ORIGIN } from './config';
 
 // ---------------------------------------------------------------------------
 // Auth passthrough — v0.4.0+
@@ -54,8 +54,90 @@ async function getLegacyAuthToken(): Promise<string | null> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Bearer refresh (Option A) — keep the access token fresh without cookies.
+//
+// Companion requests are cross-site (extension -> app.pranan.ai), so the
+// SameSite=Lax session cookie is never sent. The extension therefore relies
+// on the Bearer access token, which expires (~1h). When it nears expiry we
+// mint a fresh one server-side via POST /api/companion/refresh using the
+// stored refresh token. Supabase credentials stay on the server.
+// ---------------------------------------------------------------------------
+
+async function getRefreshToken(): Promise<string | null> {
+  try {
+    const r = await chrome.storage.local.get('refreshToken');
+    return r.refreshToken || null;
+  } catch {
+    return null;
+  }
+}
+
+function jwtExpMs(token: string): number | null {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    const json = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof json.exp === 'number' ? json.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+// Dedup concurrent refreshes so a burst of requests triggers exactly one.
+let refreshInFlight: Promise<string | null> | null = null;
+
+export async function refreshAccessToken(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const refreshToken = await getRefreshToken();
+    if (!refreshToken) return null;
+    try {
+      const res = await fetch(`${APP_ORIGIN}/api/companion/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) {
+        // 401 => refresh token itself is dead; clear so the UI prompts reconnect.
+        if (res.status === 401) {
+          try { await chrome.storage.local.remove(['authToken', 'refreshToken']); } catch { /* pass */ }
+        }
+        return null;
+      }
+      const data = await res.json();
+      if (data?.token) {
+        await chrome.storage.local.set({
+          authToken: data.token,
+          refreshToken: data.refreshToken || refreshToken,
+        });
+        return data.token as string;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  })().finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+}
+
+/**
+ * Return a valid access token, refreshing first if the stored one is missing
+ * an exp, expired, or within 2 minutes of expiry. Falls back to the existing
+ * token (or null) when no refresh token is available (legacy/cookie clients),
+ * so behaviour never regresses for them.
+ */
+async function ensureValidToken(): Promise<string | null> {
+  const token = await getLegacyAuthToken();
+  if (!token) return null;
+  const expMs = jwtExpMs(token);
+  if (expMs && expMs - Date.now() > 120_000) return token;
+  const refreshed = await refreshAccessToken();
+  return refreshed || token;
+}
+
 async function authedFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const legacyToken = await getLegacyAuthToken();
+  const legacyToken = await ensureValidToken();
   const headers = new Headers(init.headers || {});
   if (!headers.has('Content-Type') && init.body) {
     headers.set('Content-Type', 'application/json');
@@ -80,7 +162,7 @@ async function authedFetchWithRetry(
   init: RequestInit = {},
   opts: { retries?: number } = {}
 ): Promise<Response> {
-  const legacyToken = await getLegacyAuthToken();
+  const legacyToken = await ensureValidToken();
   const headers = new Headers(init.headers || {});
   if (!headers.has('Content-Type') && init.body) {
     headers.set('Content-Type', 'application/json');

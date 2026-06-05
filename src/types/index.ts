@@ -159,6 +159,7 @@ export interface ExtensionMessage<T = unknown> {
   type: MessageType;
   payload?: T;
   token?: string;
+  refreshToken?: string;
   tabId?: number;
 }
 

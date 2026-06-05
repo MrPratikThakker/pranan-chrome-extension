@@ -485,7 +485,11 @@ async function handleMessage(
       }
 
       console.log('[SW] AUTH_TOKEN_FROM_WEB: storing token and validating...');
-      await chrome.storage.local.set({ authToken: token });
+      const refreshTokenFromWeb = (message as { refreshToken?: string }).refreshToken;
+      await chrome.storage.local.set({
+        authToken: token,
+        ...(refreshTokenFromWeb ? { refreshToken: refreshTokenFromWeb } : {}),
+      });
 
       try {
         cachedAuth = await deduplicatedValidateAuth();
