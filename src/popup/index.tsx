@@ -164,7 +164,7 @@ function Popup() {
   const quickDraft = () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'TRIGGER_INLINE_DRAFT' });
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'TRIGGER_INLINE_DRAFT' }).catch(() => {});
         chrome.sidePanel.open({ tabId: tabs[0].id });
         window.close();
       }
@@ -174,7 +174,7 @@ function Popup() {
   const quickGrammar = () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'TRIGGER_INLINE_GRAMMAR' });
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'TRIGGER_INLINE_GRAMMAR' }).catch(() => {});
         chrome.sidePanel.open({ tabId: tabs[0].id });
         window.close();
       }
