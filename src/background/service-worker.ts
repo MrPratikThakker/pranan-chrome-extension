@@ -286,9 +286,78 @@ async function handleMessage(
 
     // --- Phase 1: Inline compose buttons ---
     case 'INLINE_DRAFT_REQUEST': {
-      // Open side panel FIRST, then broadcast after a delay so the
-      // panel's message listener has time to initialize.
       const tab = sender.tab;
+      const inlinePayload = message.payload as {
+        platform?: string;
+        recipientEmail?: string;
+        recipientName?: string;
+        channelName?: string;
+        messageToReplyTo?: string;
+        userPrompt?: string;
+        originSurface?: 'inline-bar' | 'sidepanel' | 'popover';
+        composeType?: 'comment' | 'reply' | 'new';
+      };
+
+      // v0.8.9 (F-15b) — Gmail inline bar: generate the draft HERE in the
+      // service worker and insert it directly into the compose, independent
+      // of the side panel. The previous flow routed generation through the
+      // panel (sidePanel.open -> panel requestDraft -> auto-INSERT_DRAFT),
+      // which made one-tap intermittently fail when the panel was not open
+      // or had not mounted in time (chrome.sidePanel.open() from the worker
+      // is unreliable after the content-script gesture hop). Generating here
+      // removes that dependency and is faster. The content script already
+      // has a top-level INSERT_DRAFT handler that injects the text (and even
+      // opens Reply if no compose is open). Scoped to gmail (the surface QA'd
+      // live); other platforms keep the existing panel path below.
+      if (
+        inlinePayload.originSurface === 'inline-bar' &&
+        inlinePayload.platform === 'gmail' &&
+        tab?.id
+      ) {
+        const tabId = tab.id;
+        const insertType = inlinePayload.composeType === 'comment'
+          ? 'INSERT_COMMENT_DRAFT'
+          : 'INSERT_DRAFT';
+        (async () => {
+          try {
+            const resp = await generateDraft({
+              recipientEmail: inlinePayload.recipientEmail || undefined,
+              recipientName: inlinePayload.recipientName || undefined,
+              messageToReplyTo: inlinePayload.messageToReplyTo || undefined,
+              platform: inlinePayload.platform,
+              channelName: inlinePayload.channelName || undefined,
+              prompt: inlinePayload.userPrompt || undefined,
+            });
+            if (resp?.skipped) {
+              chrome.tabs.sendMessage(tabId, {
+                type: 'DRAFT_SKIPPED',
+                payload: {
+                  reason: resp.skipReason || 'skipped',
+                  message: resp.skipMessage || 'Draft skipped.',
+                },
+              }).catch(() => { /* tab gone */ });
+              return;
+            }
+            if (resp?.draft) {
+              chrome.tabs.sendMessage(tabId, {
+                type: insertType,
+                payload: { text: resp.draft },
+              }).catch(() => { /* tab gone */ });
+            }
+          } catch (err) {
+            console.warn('[SW] inline gmail generateDraft failed:', err);
+            chrome.tabs.sendMessage(tabId, {
+              type: 'DRAFT_SKIPPED',
+              payload: { reason: 'error', message: 'Draft failed to generate. Try again.' },
+            }).catch(() => { /* tab gone */ });
+          }
+        })();
+        return { ok: true };
+      }
+
+      // Default path (non-gmail inline surfaces): open the side panel and let
+      // the panel generate. Open FIRST, then broadcast after a delay so the
+      // panel's message listener has time to initialize.
       if (tab?.id) {
         try { await chrome.sidePanel.open({ tabId: tab.id }); } catch { /* may already be open */ }
       }
