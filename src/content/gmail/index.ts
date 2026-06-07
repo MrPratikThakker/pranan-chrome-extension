@@ -478,8 +478,23 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     // injection time it can be null even on a reply with a real recipient,
     // which produces the "Generate fires but no draft inserts" bug.
     const liveRecipients = extractRecipients(composeWindow);
-    const liveRecipientEmail = liveRecipients[0] || recipientEmail || null;
-    const recipientName = liveRecipientEmail ? extractRecipientName(composeWindow, liveRecipientEmail) : null;
+    let liveRecipientEmail = liveRecipients[0] || recipientEmail || null;
+    let recipientName = liveRecipientEmail ? extractRecipientName(composeWindow, liveRecipientEmail) : null;
+    // R1 (relationship grounding): in the reading view there is no compose, so
+    // recipient extraction comes up empty and generation used to run with NO
+    // relationship context (a decline to a bike-ride invite read like declining
+    // a services pitch). Fall back to the thread's most recent sender, which is
+    // who the reply targets anyway.
+    if (!liveRecipientEmail) {
+      const threadsForSender = findThreadViews();
+      if (threadsForSender.length > 0) {
+        const sender = extractThreadSender(threadsForSender[threadsForSender.length - 1]);
+        if (sender.email || sender.name) {
+          liveRecipientEmail = sender.email;
+          recipientName = sender.name;
+        }
+      }
+    }
     setLoading(true);
     chrome.runtime.sendMessage({
       type: 'INLINE_DRAFT_REQUEST',
