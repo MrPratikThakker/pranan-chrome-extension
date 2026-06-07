@@ -421,6 +421,25 @@ export interface IntentsRequest {
   messageToReplyTo?: string | null;
 }
 
+/**
+ * R2: one-click tier correction from the side panel / inline pill. Sets a
+ * manual tier override server-side; the classifier never overwrites manual
+ * rows, so the correction sticks and becomes training signal.
+ */
+export async function setTierOverride(contactEmail: string, tier: string): Promise<{ ok: boolean; tier?: string }> {
+  try {
+    const response = await authedFetch(`${API_BASE}/tier-override`, {
+      method: 'POST',
+      body: JSON.stringify({ contactEmail, tier }),
+    });
+    if (!response.ok) return { ok: false };
+    const data = (await response.json()) as { ok?: boolean; tier?: string };
+    return { ok: !!data.ok, tier: data.tier };
+  } catch {
+    return { ok: false };
+  }
+}
+
 export async function getReplyIntents(request: IntentsRequest): Promise<string[]> {
   try {
     const response = await authedFetch(`${API_BASE}/intents`, {

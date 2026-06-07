@@ -387,6 +387,70 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   const isReplyCompose = !!getThreadContext(composeWindow);
   relChip.innerHTML = `<span style="width: 5px; height: 5px; border-radius: 50%; background: currentColor;"></span><span data-rel-text>${recipientEmail ? '→ ' + (recipientEmail.split('@')[0] || 'recipient') : (isReplyCompose ? 'Reply' : 'New email')}</span>`;
 
+  // R2: one-click tier correction. The pill is tappable; picking a tier sets a
+  // manual override server-side that the auto-classifier never overwrites.
+  relChip.style.cursor = 'pointer';
+  relChip.title = 'Click to correct the relationship tier';
+  const TIER_OPTIONS: Array<[string, string]> = [
+    ['inner_circle', 'Inner circle'],
+    ['team', 'Team'],
+    ['client', 'Client'],
+    ['prospect', 'Prospect'],
+    ['vendor', 'Vendor'],
+    ['network', 'Network'],
+  ];
+  const resolveTargetContact = (): string | null => {
+    const live = extractRecipients(composeWindow);
+    if (live[0]) return live[0];
+    if (recipientEmail) return recipientEmail;
+    const threadsForPill = findThreadViews();
+    if (threadsForPill.length > 0) {
+      const sender = extractThreadSender(threadsForPill[threadsForPill.length - 1]);
+      if (sender.email) return sender.email;
+    }
+    return null;
+  };
+  relChip.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const existing = document.querySelector('[data-pranan-tier-menu]');
+    if (existing) { existing.remove(); return; }
+    const target = resolveTargetContact();
+    if (!target) return;
+    const menu = document.createElement('div');
+    menu.setAttribute('data-pranan-tier-menu', '1');
+    menu.style.cssText = 'position:absolute;z-index:99999;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(15,23,42,0.12);padding:4px;display:flex;flex-direction:column;min-width:140px;font-family:inherit;';
+    const rect = relChip.getBoundingClientRect();
+    menu.style.left = `${rect.left + window.scrollX}px`;
+    menu.style.top = `${rect.bottom + window.scrollY + 4}px`;
+    for (const [value, label] of TIER_OPTIONS) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.textContent = label;
+      item.style.cssText = 'text-align:left;font:500 12px/1.2 inherit;color:#1f2937;background:none;border:none;border-radius:6px;padding:7px 10px;cursor:pointer;';
+      item.addEventListener('mouseenter', () => { item.style.background = '#f5f3ff'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'none'; });
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.remove();
+        const labelEl = relChip.querySelector('[data-rel-text]') as HTMLElement | null;
+        chrome.runtime.sendMessage({ type: 'SET_TIER_OVERRIDE', payload: { email: target, tier: value } })
+          .then((res: { ok?: boolean } | undefined) => {
+            if (labelEl) {
+              const namePart = (labelEl.textContent || '').split('(')[0].replace('→', '').trim() || target.split('@')[0];
+              labelEl.textContent = res?.ok ? `→ ${namePart} (${label.toLowerCase()} ✓)` : `→ ${namePart}`;
+            }
+          })
+          .catch(() => { /* silent */ });
+      });
+      menu.appendChild(item);
+    }
+    document.body.appendChild(menu);
+    const dismiss = (e: MouseEvent) => {
+      if (!menu.contains(e.target as Node)) { menu.remove(); document.removeEventListener('mousedown', dismiss); }
+    };
+    setTimeout(() => document.addEventListener('mousedown', dismiss), 0);
+  });
+
   // Tone chip
   const toneChip = document.createElement('span');
   toneChip.style.cssText = `
