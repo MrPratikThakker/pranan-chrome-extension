@@ -153,6 +153,7 @@ export type MessageType =
   // v0.6 Inline composer (Surface A)
   | 'GET_RELATIONSHIP_TIER'
   | 'GET_REPLY_INTENTS'
+  | 'SET_TIER_OVERRIDE'
   // v0.7 Compose pop-over (Surface B)
   | 'GET_PROACTIVE_SUGGESTIONS'
   | 'OPEN_THREAD';
