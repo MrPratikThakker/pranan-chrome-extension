@@ -318,7 +318,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     align-items: center;
     gap: 10px;
     padding: 10px 14px 10px 12px;
-    margin: 6px 0;
+    margin: 10px 0 6px;
     background: #ffffff;
     border: 1px solid #e5e7eb;
     border-radius: 10px;
@@ -361,7 +361,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     const fresh = extractRecipients(composeWindow);
     if (fresh.length > 0) {
       const labelEl = relChip.querySelector('[data-rel-text]') as HTMLElement | null;
-      if (labelEl && /New email|^$/.test(labelEl.textContent || '')) {
+      if (labelEl && /New email|Reply|^$/.test(labelEl.textContent || '')) {
         const name = extractRecipientName(composeWindow, fresh[0]) || fresh[0].split('@')[0];
         labelEl.textContent = `→ ${name}`;
       }
@@ -382,7 +382,10 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     white-space: nowrap;
     flex-shrink: 0;
   `;
-  relChip.innerHTML = `<span style="width: 5px; height: 5px; border-radius: 50%; background: currentColor;"></span><span data-rel-text>${recipientEmail ? '→ ' + (recipientEmail.split('@')[0] || 'recipient') : 'New email'}</span>`;
+  // v0.8.10 UI QA: never label a reply compose "New email". If the compose has
+  // thread context it is a reply; use "Reply" until the real recipient resolves.
+  const isReplyCompose = !!getThreadContext(composeWindow);
+  relChip.innerHTML = `<span style="width: 5px; height: 5px; border-radius: 50%; background: currentColor;"></span><span data-rel-text>${recipientEmail ? '→ ' + (recipientEmail.split('@')[0] || 'recipient') : (isReplyCompose ? 'Reply' : 'New email')}</span>`;
 
   // Tone chip
   const toneChip = document.createElement('span');
@@ -498,7 +501,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     // Update chip text live in case it was stuck on "New email"
     if (liveRecipientEmail) {
       const labelEl = relChip.querySelector('[data-rel-text]') as HTMLElement | null;
-      if (labelEl && labelEl.textContent === 'New email') {
+      if (labelEl && /^(New email|Reply)$/.test(labelEl.textContent || '')) {
         const displayName = recipientName || liveRecipientEmail.split('@')[0] || 'recipient';
         labelEl.textContent = `→ ${displayName}`;
       }
@@ -591,13 +594,52 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // Insert before the compose container (so it appears above it, like Voila)
   composeContainer.parentElement?.insertBefore(bar, composeContainer);
 
+  // v0.8.10 UI QA: align the bar (and chips) with Gmail's compose CONTENT edge.
+  // The bar is injected at the container's outer width while Gmail insets the
+  // compose body for the avatar gutter (~80px), so the bar visually hung left
+  // of the card below it. Measure the real inset and match it.
+  const alignWithCompose = () => {
+    const body = composeWindow.querySelector(
+      '[contenteditable="true"][aria-label="Message Body"], .Am.aiL [contenteditable="true"]'
+    ) as HTMLElement | null;
+    if (!body || !document.contains(bar)) return;
+    const delta = Math.round(body.getBoundingClientRect().left - bar.getBoundingClientRect().left);
+    if (delta > 4 && delta < 200) {
+      const current = parseFloat(bar.style.marginLeft) || 0;
+      bar.style.marginLeft = `${current + delta}px`;
+      const chipsEl = bar.nextElementSibling as HTMLElement | null;
+      if (chipsEl?.hasAttribute('data-pranan-intents')) chipsEl.style.marginLeft = bar.style.marginLeft;
+    }
+  };
+  requestAnimationFrame(alignWithCompose);
+  setTimeout(alignWithCompose, 600);
+
+  // v0.8.10 UI QA: the recipient pill used to sit on "New email" until the
+  // user hit Generate, because Gmail mounts recipient chips a beat after the
+  // compose container. Retry extraction a few times and update the pill as
+  // soon as the real recipient exists.
+  const refreshPill = () => {
+    if (!document.contains(bar)) return;
+    const fresh = extractRecipients(composeWindow);
+    if (fresh.length > 0) {
+      const labelEl = relChip.querySelector('[data-rel-text]') as HTMLElement | null;
+      if (labelEl && /^(New email|Reply)$/.test((labelEl.textContent || '').trim())) {
+        const name = extractRecipientName(composeWindow, fresh[0]) || fresh[0].split('@')[0];
+        labelEl.textContent = `→ ${name}`;
+      }
+    }
+  };
+  [500, 1500, 3000].forEach((ms) => setTimeout(refreshPill, ms));
+
   // One-tap reply intents (reply threads only). We surface up to 3 short,
   // in-your-voice intent chips below the bar; tapping one steers the draft.
   const threadForIntents = getThreadContext(composeWindow);
   if (threadForIntents) {
     const chipsRow = document.createElement('div');
     chipsRow.setAttribute('data-pranan-intents', '1');
-    chipsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0 0;padding:0 2px;';
+    chipsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px 0;padding:0 2px;';
+    // v0.8.10 UI QA: inherit the bar's compose-content alignment (set below).
+    if (bar.style.marginLeft) chipsRow.style.marginLeft = bar.style.marginLeft;
     const liveRecipients = extractRecipients(composeWindow);
     const intentRecipient = liveRecipients[0] || recipientEmail || null;
     const intentRecipientName = intentRecipient ? extractRecipientName(composeWindow, intentRecipient) : null;
