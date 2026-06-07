@@ -670,6 +670,11 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
         });
         chipsRow.appendChild(chip);
       }
+      // v0.8.11: inherit the bar's compose-content alignment at INSERTION time.
+      // The creation-time check ran before alignWithCompose had measured the
+      // inset (chips insert after the intents API responds), so the chips row
+      // missed the margin and sat 81px left of the bar.
+      if (bar.style.marginLeft) chipsRow.style.marginLeft = bar.style.marginLeft;
       bar.insertAdjacentElement('afterend', chipsRow);
     }).catch(() => { /* intents are best-effort */ });
   }
