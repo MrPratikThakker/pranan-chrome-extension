@@ -43,37 +43,7 @@ window.addEventListener('message', (event) => {
   );
 });
 
-// Fallback: check for token in a hidden DOM element (polling for 5 seconds)
-function checkDomToken() {
-  const el = document.getElementById('pranan-companion-token');
-  if (!el) return false;
-
-  const token = el.getAttribute('data-token');
-  if (!token) return false;
-
-  console.log('[Pranan Content Script] Found token in DOM element, forwarding to service worker...');
-
-  chrome.runtime.sendMessage(
-    { type: 'AUTH_TOKEN_FROM_WEB', token },
-    (response) => {
-      if (chrome.runtime.lastError) return;
-      if (response?.ok) {
-        const ack = document.createElement('div');
-        ack.id = 'pranan-companion-ack';
-        ack.style.display = 'none';
-        document.body.appendChild(ack);
-      }
-    }
-  );
-
-  return true;
-}
-
-// Poll for the DOM token element (the page might still be rendering)
-let attempts = 0;
-const interval = setInterval(() => {
-  attempts++;
-  if (checkDomToken() || attempts >= 10) {
-    clearInterval(interval);
-  }
-}, 500);
+// NOTE: the legacy DOM-element token fallback (#pranan-companion-token) was
+// removed 2026-06-08 (audit finding 5). The app no longer renders that
+// element, and a token in the DOM would be readable by any page script.
+// postMessage (origin-checked above) is the only handoff path.
