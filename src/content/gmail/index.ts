@@ -1572,26 +1572,59 @@ document.addEventListener('mouseup', () => {
  * to inject into, the call silently failed.
  */
 function openGmailReply(): boolean {
-  // Find the visible thread view (most recent .h7)
+  // Primary: structured selector path (fast when Gmail's classes match).
   const threads = findThreadViews();
-  if (threads.length === 0) return false;
-  const visible = threads[threads.length - 1];
+  if (threads.length > 0) {
+    const visible = threads[threads.length - 1];
+    const replyRow = findOne('gmail.threadReplyButtons', SELECTORS.gmail.threadReplyButtons, visible);
+    if (replyRow) {
+      const candidates = Array.from(replyRow.querySelectorAll<HTMLElement>(
+        '[role="button"], [role="link"], .ams'
+      ));
+      const reply = candidates.find(el => /^reply\b/i.test(el.textContent?.trim() || '')) || candidates[0];
+      if (reply) {
+        reply.click();
+        return true;
+      }
+    }
+  }
 
-  // The Reply button is inside the threadReplyButtons row, structured
-  // as <span class="ams bkH" role="link">Reply</span> or similar. Try
-  // a few variants since Gmail rotates classes.
-  const replyRow = findOne('gmail.threadReplyButtons', SELECTORS.gmail.threadReplyButtons, visible);
-  if (!replyRow) return false;
-
-  // First role=link, first role=button, or first .ams that says Reply.
-  const candidates = Array.from(replyRow.querySelectorAll<HTMLElement>(
-    '[role="button"], [role="link"], .ams'
+  // v0.8.12 fallback (reading-view one-tap bug): Gmail rotates classes and the
+  // structured path can come up empty, which silently dropped generated drafts.
+  // Find any VISIBLE Reply control by role + exact text and fire a bubbling
+  // MouseEvent (some Gmail builds ignore a plain .click() here). This exact
+  // approach was verified working against current Gmail.
+  const all = Array.from(document.querySelectorAll<HTMLElement>(
+    'span[role="link"], div[role="button"], span[role="button"]'
   ));
-  const reply = candidates.find(el => /^reply\b/i.test(el.textContent?.trim() || '')) || candidates[0];
-  if (!reply) return false;
+  const reply = all.find(el => /^reply$/i.test((el.textContent || '').trim()) && el.offsetParent !== null);
+  if (reply) {
+    reply.scrollIntoView({ block: 'center' });
+    reply.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    return true;
+  }
+  return false;
+}
 
-  reply.click();
-  return true;
+// v0.8.12: when a generated draft arrives but no compose can be opened (or the
+// compose never mounts in time), stash it for 60s and inject the moment ANY
+// reply compose appears. Prevents silent draft loss in the reading view.
+let pendingDraftText: string | null = null;
+let pendingDraftTimer: ReturnType<typeof setTimeout> | null = null;
+function stashPendingDraft(text: string) {
+  pendingDraftText = text;
+  if (pendingDraftTimer) clearTimeout(pendingDraftTimer);
+  pendingDraftTimer = setTimeout(() => { pendingDraftText = null; }, 60000);
+  const obs = new MutationObserver(() => {
+    if (!pendingDraftText) { obs.disconnect(); return; }
+    const wins = findComposeWindows();
+    if (wins.length > 0) {
+      const ok = injectDraft(wins[0], pendingDraftText);
+      if (ok) { pendingDraftText = null; obs.disconnect(); }
+    }
+  });
+  obs.observe(document.body, { childList: true, subtree: true });
+  setTimeout(() => obs.disconnect(), 61000);
 }
 
 // ---------------------------------------------------------------------------
@@ -1630,7 +1663,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // appeared broken to users.
     const replyClicked = openGmailReply();
     if (!replyClicked) {
-      sendResponse({ success: false, error: 'No compose window and Reply button not found' });
+      // Keep the draft alive: inject as soon as the user opens a compose.
+      stashPendingDraft(draftText);
+      sendResponse({ success: false, error: 'No compose window and Reply button not found; draft stashed for 60s' });
       return true;
     }
     // Async wait + retry. We must return true synchronously to keep
@@ -1647,7 +1682,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         attempts++;
         setTimeout(tryInject, 100);
       } else {
-        sendResponse({ success: false, error: 'Reply opened but compose did not appear in 2s' });
+        stashPendingDraft(draftText);
+        sendResponse({ success: false, error: 'Reply opened but compose did not appear in 2s; draft stashed for 60s' });
       }
     };
     setTimeout(tryInject, 200);
