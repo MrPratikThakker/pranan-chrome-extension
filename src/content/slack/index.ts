@@ -22,6 +22,12 @@ import { injectMultilineText } from '@/lib/safe-dom';
 import { findOne, findAll, SELECTORS as REGISTRY } from '../selectors';
 import { bootstrapSentry } from '@/lib/observability';
 
+// Smoke-test marker: lets external QA assert "Pranan content script booted
+// on this page" without knowing surface-specific attribute names
+// (2026-06-08 audit round 2 produced a false negative for lack of this).
+try { document.documentElement.setAttribute('data-pranan-injected', chrome.runtime?.getManifest?.().version || 'true'); } catch { /* pass */ }
+
+
 // ---------------------------------------------------------------------------
 // Selectors
 // ---------------------------------------------------------------------------
