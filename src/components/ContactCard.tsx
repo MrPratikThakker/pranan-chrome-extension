@@ -41,6 +41,13 @@ export function ContactCard({ context, recipientName, recipientEmail }: Props) {
         </div>
       </div>
 
+      {/* Pre-contact brief: glanceable one-liner before you reply */}
+      {context.brief && (
+        <div className="rounded-lg border border-brand-accent/20 bg-brand-accent/[0.06] px-3 py-2">
+          <p className="text-[11px] leading-snug text-brand-text-2">{context.brief}</p>
+        </div>
+      )}
+
       {/* Status row: tier badge + health + score */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border ${tier.bg} ${tier.text} ${tier.border}`}>

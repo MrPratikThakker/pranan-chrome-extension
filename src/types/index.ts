@@ -23,6 +23,8 @@ export interface ComposeContext {
 
 export interface ContactContext {
   tier: string;
+  /** One-line pre-contact brief synthesized server-side (deterministic). */
+  brief?: string | null;
   lastInteraction: string | null;
   communicationDNA: {
     formality: number;
