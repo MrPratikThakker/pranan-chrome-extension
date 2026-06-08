@@ -8,7 +8,8 @@ const contentScriptEntries = {
   'content/gmail': resolve(__dirname, 'src/content/gmail/index.ts'),
   'content/slack': resolve(__dirname, 'src/content/slack/index.ts'),
   'content/linkedin': resolve(__dirname, 'src/content/linkedin/index.ts'),
-  'content/universal': resolve(__dirname, 'src/content/universal/index.ts'),
+  // 'content/universal' intentionally NOT built: it is not in manifest.json
+  // content_scripts. Re-add both together or not at all (audit r2 finding 9).
   'content/pranan-app': resolve(__dirname, 'src/content/pranan-app/index.ts'),
 };
 
