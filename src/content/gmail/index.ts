@@ -391,7 +391,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // v0.8.10 UI QA: never label a reply compose "New email". If the compose has
   // thread context it is a reply; use "Reply" until the real recipient resolves.
   const isReplyCompose = !!getThreadContext(composeWindow);
-  relChip.innerHTML = `<span style="width: 5px; height: 5px; border-radius: 50%; background: currentColor;"></span><span data-rel-text>${recipientEmail ? '→ ' + (recipientEmail.split('@')[0] || 'recipient') : (isReplyCompose ? 'Reply' : 'New email')}</span>`;
+  relChip.innerHTML = `<span style="width: 5px; height: 5px; border-radius: 50%; background: currentColor;"></span><span data-rel-text>${recipientEmail ? '→ ' + escapeText(recipientEmail.split('@')[0] || 'recipient') : (isReplyCompose ? 'Reply' : 'New email')}</span>`;
 
   // R2: one-click tier correction. The pill is tappable; picking a tier sets a
   // manual override server-side that the auto-classifier never overwrites.

@@ -183,6 +183,25 @@ chrome.runtime.onMessage.addListener(
   }
 );
 
+/**
+ * SECURITY (sweep 2026-06-09): privileged message types (auth token storage,
+ * tier override) must only be honored from the extension's own UI pages or a
+ * content script running on the Pranan web-app origin. Content scripts on
+ * Gmail/Slack/LinkedIn share the same runtime id, so id alone is not enough;
+ * the discriminator is sender.url / sender.origin. This blocks a malicious or
+ * compromised page on a third-party origin from force-setting a session token
+ * (account swap / session fixation) or corrupting relationship classifications.
+ */
+function isTrustedPrivilegedSender(sender: chrome.runtime.MessageSender): boolean {
+  // Extension's own pages (sidepanel/popup/options) report a chrome-extension:// URL.
+  const fromExtensionUi = typeof sender.url === 'string'
+    && sender.url.startsWith(`chrome-extension://${chrome.runtime.id}/`);
+  // Content script injected into the Pranan web app.
+  const fromAppOrigin = sender.origin === APP_ORIGIN
+    || (typeof sender.url === 'string' && sender.url.startsWith(APP_ORIGIN));
+  return fromExtensionUi || fromAppOrigin;
+}
+
 async function handleMessage(
   message: ExtensionMessage,
   sender: chrome.runtime.MessageSender
@@ -507,6 +526,10 @@ async function handleMessage(
 
     // --- v0.6 Inline composer: relationship chip + tone hints ---
     case 'SET_TIER_OVERRIDE': {
+      if (!isTrustedPrivilegedSender(sender)) {
+        console.warn('[SW] SET_TIER_OVERRIDE rejected: untrusted sender', sender.origin || sender.url);
+        return { ok: false };
+      }
       const { email: overrideEmail, tier: overrideTier } = (message.payload as { email?: string; tier?: string }) || {};
       if (!overrideEmail || !overrideTier) return { ok: false };
       const result = await setTierOverride(overrideEmail, overrideTier);
@@ -554,6 +577,10 @@ async function handleMessage(
 
     // --- Auth token exchange ---
     case 'AUTH_TOKEN_FROM_WEB': {
+      if (!isTrustedPrivilegedSender(sender)) {
+        console.warn('[SW] AUTH_TOKEN_FROM_WEB rejected: untrusted sender', sender.origin || sender.url);
+        return { error: 'Untrusted sender' };
+      }
       const token = message.token;
       if (!token) {
         console.warn('[SW] AUTH_TOKEN_FROM_WEB: no token provided');
