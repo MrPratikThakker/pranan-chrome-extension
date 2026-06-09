@@ -85,7 +85,11 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       broadcastToSidePanel({ type: 'AUTH_STATUS', payload: { valid: false } });
     }
   } catch {
-    // Will retry on next API call
+    // Transient failure (network blip, server waking, laptop resuming). Do NOT
+    // let the refresh cycle die: re-arm so we retry on the next interval
+    // instead of silently stopping until a cold SW start (token-refresh
+    // hardening 2026-06-09).
+    scheduleTokenRefresh();
   }
 });
 
@@ -759,6 +763,14 @@ chrome.webNavigation?.onHistoryStateUpdated.addListener(
 // ---------------------------------------------------------------------------
 // Service Worker Lifecycle
 // ---------------------------------------------------------------------------
+
+// On browser startup, proactively validate + refresh and re-arm the refresh
+// alarm. Without this, after a Chrome restart the token can sit expired until a
+// user action pokes it, which looks like a silent logout (token-refresh
+// hardening 2026-06-09).
+chrome.runtime.onStartup.addListener(() => {
+  initAuth();
+});
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {
