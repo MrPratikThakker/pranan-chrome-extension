@@ -17,6 +17,7 @@
 // Content script -- IIFE bundling handles scope isolation
 
 import { injectMultilineText } from '@/lib/safe-dom';
+import { parseLinkedInPostText } from './post-parse';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
@@ -245,13 +246,74 @@ function getComposeContent(): string {
  * Extract the feed post context when a user is commenting on a post.
  * Finds the nearest parent post container and extracts author + text.
  */
+// ---------------------------------------------------------------------------
+// Stable post-context extraction (2026-06).
+// LinkedIn migrated the feed to fully hashed CSS class names, so the legacy
+// semantic selectors (feed-shared-update-v2, update-components-text, actor__*)
+// match nothing and comments were generated with no post context. We instead
+// anchor on signals that survive class-hash rotation: the mainFeed list
+// container (componentkey), the post wrapper that holds the comment input,
+// profile (/in/) links, and the post's visible text structure parsed by line.
+// ---------------------------------------------------------------------------
+
+
+function findFeedPostWrapper(el: Element): Element | null {
+  const list = document.querySelector('[componentkey*="mainFeed"]');
+  if (list && list.contains(el)) {
+    let n: Element | null = el;
+    while (n && n.parentElement && n.parentElement !== list) n = n.parentElement;
+    if (n && n.parentElement === list) return n;
+  }
+  // Post-detail / modal fallback: nearest ancestor that carries an author
+  // link and a meaningful amount of text (but not the whole feed).
+  let n: Element | null = el;
+  for (let i = 0; i < 14 && n; i++) {
+    const txtLen = (n as HTMLElement).innerText?.length || 0;
+    if (n.querySelector('a[href*="/in/"]') && txtLen > 120 && txtLen < 6000) return n;
+    n = n.parentElement;
+  }
+  return null;
+}
+
+function extractPostContextStable(commentInput: Element): {
+  postAuthor: string | null;
+  postAuthorUrl: string | null;
+  postText: string | null;
+  postUrl: string | null;
+} | null {
+  const wrapper = findFeedPostWrapper(commentInput);
+  if (!wrapper) return null;
+
+  let postAuthorUrl: string | null = null;
+  const a = wrapper.querySelector('a[href*="/in/"]') as HTMLAnchorElement | null;
+  if (a?.href && /linkedin\.com\/in\//i.test(a.href)) {
+    try {
+      const u = new URL(a.href);
+      postAuthorUrl = `${u.origin}${u.pathname.replace(/\/$/, '')}`;
+    } catch { /* ignore */ }
+  }
+
+  const parsed = parseLinkedInPostText((wrapper as HTMLElement).innerText || '');
+  const postAuthor = parsed.author || (a?.innerText || '').trim().split('\n')[0] || null;
+  const postText = parsed.body ? parsed.body.slice(0, 1500) : null;
+
+  const linkEl = wrapper.querySelector('a[href*="/feed/update/"]') as HTMLAnchorElement | null;
+  const postUrl = linkEl?.href || null;
+
+  return { postAuthor: postAuthor || null, postAuthorUrl, postText, postUrl };
+}
+
 function getCommentPostContext(commentInput: Element): {
   postAuthor: string | null;
   postAuthorUrl: string | null;
   postText: string | null;
   postUrl: string | null;
 } {
-  // Walk up from the comment input to find the containing feed post
+  // Primary path: stable extraction that survives LinkedIn's hashed classes.
+  const stable = extractPostContextStable(commentInput);
+  if (stable && stable.postText) return stable;
+
+  // Fallback path: legacy semantic selectors (older surfaces / detail view).
   const postContainer = commentInput.closest(SELECTORS.feedPost.join(', '));
   if (!postContainer) return { postAuthor: null, postAuthorUrl: null, postText: null, postUrl: null };
 
