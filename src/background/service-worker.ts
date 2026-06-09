@@ -11,7 +11,7 @@
  *   side panel opening, intelligence alerts
  */
 
-import { validateAuth, getContactContext, generateDraft, rewriteText, checkGrammar, getProactiveSuggestions, getReplyIntents, setTierOverride } from '@/lib/api-client';
+import { validateAuth, getContactContext, generateDraft, rewriteText, checkGrammar, getProactiveSuggestions, getReplyIntents, setTierOverride, refreshAccessToken } from '@/lib/api-client';
 import type { ExtensionMessage, Platform, AuthResponse, ContactContext } from '@/types';
 import { bootstrapSentry } from '@/lib/observability';
 import { APP_ORIGIN } from '@/lib/config';
@@ -195,6 +195,15 @@ async function handleMessage(
     case 'TEXT_SELECTED':
       broadcastToSidePanel(message);
       return { ok: true };
+
+    // Centralized token refresh: the SW is the SOLE refresher so the single-use
+    // rotating refresh token is never consumed by two racing contexts. Other
+    // contexts send REFRESH_TOKEN; refreshAccessToken() dedups via refreshInFlight
+    // and persists the new token to storage for the caller to re-read.
+    case 'REFRESH_TOKEN': {
+      await refreshAccessToken();
+      return { ok: true };
+    }
 
     case 'AUTH_STATUS':
       return { auth: cachedAuth };

@@ -127,12 +127,36 @@ export async function refreshAccessToken(): Promise<string | null> {
  * token (or null) when no refresh token is available (legacy/cookie clients),
  * so behaviour never regresses for them.
  */
+// Refresh tokens are single-use and rotate server-side, so only ONE context may
+// ever call POST /api/companion/refresh at a time. The popup, side panel, and
+// content scripts each bundle their own copy of this module with their own
+// refreshInFlight, so without coordination two contexts could refresh in
+// parallel, consume the same rotating token, and force a logout. We therefore
+// make the service worker the single owner of refresh: every non-SW context
+// asks the SW to refresh (which persists the new token to storage) and then
+// re-reads the fresh token. (token-refresh centralization 2026-06-09)
+const IS_SERVICE_WORKER = typeof window === 'undefined';
+
+async function refreshViaServiceWorker(): Promise<string | null> {
+  try {
+    await chrome.runtime.sendMessage({ type: 'REFRESH_TOKEN' });
+  } catch {
+    // SW unreachable (rare) -> fall back to a local refresh so auth still works.
+    return refreshAccessToken();
+  }
+  return getLegacyAuthToken();
+}
+
 async function ensureValidToken(): Promise<string | null> {
   const token = await getLegacyAuthToken();
   if (!token) return null;
   const expMs = jwtExpMs(token);
   if (expMs && expMs - Date.now() > 120_000) return token;
-  const refreshed = await refreshAccessToken();
+  // Needs refresh. The SW owns refresh; everyone else delegates to it so the
+  // single-use rotating refresh token is never consumed by two racers.
+  const refreshed = IS_SERVICE_WORKER
+    ? await refreshAccessToken()
+    : await refreshViaServiceWorker();
   return refreshed || token;
 }
 
