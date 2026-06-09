@@ -22,6 +22,22 @@ import { captureError } from '@/lib/observability';
 // Module-level flag to dedup parallel 401 cleanup. See handleResponse 401 branch.
 let authExpiryInFlight = false;
 
+/**
+ * Broadcast that auth has expired so the popup + side panel flip to the
+ * reconnect CTA. Deduped via authExpiryInFlight so concurrent 401s only fire
+ * one cleanup + broadcast. Shared by handleResponse and the snapshot path so
+ * a 401 can never be silently swallowed into a dead, dashed-out UI
+ * (Pranan live-debug 2026-06-09: popup showed "connected" + all "\u2014" because
+ * getTodaySnapshot ate the 401 instead of prompting reconnect).
+ */
+async function notifyAuthExpired(): Promise<void> {
+  if (authExpiryInFlight) return;
+  authExpiryInFlight = true;
+  try { await chrome.storage.local.remove('authToken'); } catch { /* pass */ }
+  try { chrome.runtime.sendMessage({ type: 'AUTH_EXPIRED' }); } catch { /* pass */ }
+  setTimeout(() => { authExpiryInFlight = false; }, 5000);
+}
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -281,18 +297,8 @@ async function handleResponse<T>(response: Response): Promise<T> {
       throw err;
     }
     if (response.status === 401) {
-      // Auth expired. Dedup so concurrent 401s (briefings + nudges + decay
-      // alerts firing in parallel) only trigger one cleanup + one broadcast.
-      if (!authExpiryInFlight) {
-        authExpiryInFlight = true;
-        try { await chrome.storage.local.remove('authToken'); } catch { /* pass */ }
-        try {
-          chrome.runtime.sendMessage({ type: 'AUTH_EXPIRED' });
-        } catch { /* pass — sender may not be a content script */ }
-        // Reset the flag after a short window so future 401s (e.g. after
-        // re-auth then a server hiccup) still trigger the cleanup.
-        setTimeout(() => { authExpiryInFlight = false; }, 5000);
-      }
+      // Auth expired -> broadcast so the UI prompts reconnect (deduped).
+      await notifyAuthExpired();
       const err = new ApiError('Session expired. Please reconnect.', 401, 'UNAUTHORIZED');
       captureError(err, { component: 'api-client', metadata: { url: response.url } });
       throw err;
@@ -651,7 +657,14 @@ export interface TodaySnapshot {
 
 export async function getTodaySnapshot(): Promise<TodaySnapshot | null> {
   try {
-      const response = await authedFetch(`${API_BASE}/today`);
+    const response = await authedFetch(`${API_BASE}/today`);
+    // A 401 here used to be swallowed into null -> the popup rendered four
+    // dashes while still showing "connected", which looks broken. Surface it
+    // so the popup flips to the reconnect CTA (2026-06-09).
+    if (response.status === 401) {
+      await notifyAuthExpired();
+      return null;
+    }
     return safeJsonResponse<TodaySnapshot>(response, null as any);
   } catch {
     return null;
