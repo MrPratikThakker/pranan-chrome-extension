@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pranan: AI Email Assistant in Your Voice",
-  "version": "0.8.14",
+  "version": "0.8.15",
   "description": "Your AI email twin. One-tap replies in your voice in Gmail, with relationship context, tone control, and smart nudges.",
   "permissions": [
     "activeTab",
