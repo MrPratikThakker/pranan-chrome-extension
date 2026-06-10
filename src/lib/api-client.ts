@@ -427,7 +427,22 @@ export async function generateDraft(request: DraftRequest, signal?: AbortSignal)
   console.log('[API] generateDraft: POST', `${API_BASE}/draft`);
   const response = await authedFetchWithRetry(`${API_BASE}/draft`, { method: 'POST', body: JSON.stringify(request), signal });
   console.log('[API] generateDraft: response status', response.status);
-  return handleResponse<DraftResponse>(response);
+  const data = await handleResponse<DraftResponse & { reason?: string; message?: string }>(response);
+  // Normalize skip fields. The server returns a skip as { skipped, reason,
+  // message }, but the SW INLINE_DRAFT_REQUEST handler and the Gmail content
+  // script read skipReason/skipMessage. The streaming path already maps these;
+  // this non-streaming path (used by the one-tap inline bar) did not, so the
+  // specific reason ("This email is addressed to Jigar, you are only copied")
+  // was dropped and the UI fell back to a generic "Draft skipped." Map here so
+  // the real, useful message reaches the user.
+  if (data?.skipped) {
+    return {
+      ...data,
+      skipReason: data.skipReason ?? data.reason,
+      skipMessage: data.skipMessage ?? data.message,
+    };
+  }
+  return data;
 }
 
 /**

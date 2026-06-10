@@ -524,6 +524,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   //   (a) INSERT_DRAFT message arrives back (draft was generated + injected), OR
   //   (b) 30 second safety timeout fires (something went wrong upstream)
   let resetTimer: ReturnType<typeof setTimeout> | null = null;
+  let skipNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   const setLoading = (loading: boolean) => {
     if (loading) {
       genBtn.disabled = true;
@@ -613,17 +614,29 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       clearTimeout(resetTimer);
       resetTimer = null;
       setLoading(false);
-      // Show the skip reason inline as a transient placeholder so the user
-      // sees WHY nothing happened. Auto-clear after 5 seconds.
-      const skipMsg = msg.payload?.message || 'Draft skipped.';
       input.value = '';
-      const origPlaceholder = input.placeholder;
-      input.placeholder = skipMsg.length > 90 ? skipMsg.slice(0, 87) + '...' : skipMsg;
+      // Surface the FULL skip reason in a transient notice directly below the
+      // bar, so the user sees WHY nothing happened AND how to override (e.g.
+      // "addressed to Jigar, you are only copied. Add a prompt or pick an
+      // intent to draft anyway."). The old approach stuffed this into the input
+      // placeholder truncated at 87 chars, which hid the actionable half and
+      // made an intentional skip look like a silent no-op.
+      const skipMsg = msg.payload?.message || 'Pranan stayed out of this one. Add a prompt or pick an intent to draft anyway.';
+      let notice = bar.parentElement?.querySelector('[data-pranan-skip-notice]') as HTMLElement | null;
+      if (!notice) {
+        notice = document.createElement('div');
+        notice.setAttribute('data-pranan-skip-notice', '1');
+        notice.style.cssText = 'margin:6px 0 0;padding:8px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;font:500 12px/1.45 inherit;max-width:560px;';
+        bar.insertAdjacentElement('afterend', notice);
+      }
+      notice.textContent = skipMsg;
+      notice.style.display = 'block';
       input.style.borderColor = '#fbbf24';
-      setTimeout(() => {
-        input.placeholder = origPlaceholder;
+      if (skipNoticeTimer) clearTimeout(skipNoticeTimer);
+      skipNoticeTimer = setTimeout(() => {
+        if (notice) notice.style.display = 'none';
         input.style.borderColor = '#e5e7eb';
-      }, 5000);
+      }, 9000);
     }
   };
   chrome.runtime.onMessage.addListener(insertDraftListener);
@@ -633,6 +646,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       chrome.runtime.onMessage.removeListener(insertDraftListener);
       cleanupObserver.disconnect();
       if (resetTimer) clearTimeout(resetTimer);
+      if (skipNoticeTimer) clearTimeout(skipNoticeTimer);
     }
   });
   cleanupObserver.observe(document.body, { childList: true, subtree: true });
