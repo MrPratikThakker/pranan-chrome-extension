@@ -85,17 +85,20 @@ export async function loginAndCacheStorageState(): Promise<string | null> {
   });
 
   await page.goto(`${APP_ORIGIN}/login`);
-  // Click "Sign in with email" if the form isn't immediately visible
-  const emailInput = page.getByPlaceholder(/email/i).first();
-  await emailInput.waitFor({ state: 'visible', timeout: 10_000 }).catch(async () => {
-    // The login page might have a "Sign in with email" toggle button first
-    const toggle = page.getByRole('button', { name: /sign in with email/i });
-    if (await toggle.count() > 0) await toggle.click();
-    await emailInput.waitFor({ state: 'visible', timeout: 5_000 });
-  });
-  await emailInput.fill(TEST_USER_EMAIL);
+  // The login page defaults to magic-link / Google sign-in. The password form
+  // (used by the e2e test account) is revealed by a "Use a password instead"
+  // toggle — the password field is not in the DOM until it's clicked. The old
+  // fixture looked for a non-existent "Sign in with email" button and then
+  // tried to fill a password field that didn't exist yet, so it timed out.
+  const passwordToggle = page.getByRole('button', { name: /use a password instead/i });
+  await passwordToggle.waitFor({ state: 'visible', timeout: 10_000 });
+  await passwordToggle.click();
+
+  // Now the email + password form is rendered.
+  await page.getByPlaceholder(/email/i).first().fill(TEST_USER_EMAIL);
   await page.getByPlaceholder(/password/i).first().fill(TEST_USER_PASSWORD);
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  // Submit via the form's submit button (unambiguous vs other "Sign in" text).
+  await page.locator('form button[type="submit"]').first().click();
 
   // Race the redirect against the SPECIFIC auth-error testid (the
   // [data-testid=auth-error] div on /login). v0.5.5 fixture used a
