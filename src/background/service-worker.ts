@@ -456,6 +456,67 @@ async function handleMessage(
     // --- Phase 6: LinkedIn comment drafting ---
     case 'COMMENT_DRAFT_REQUEST': {
       const tab = sender.tab;
+      const commentPayload = (message.payload || {}) as {
+        platform?: string;
+        postAuthor?: string;
+        postAuthorUrl?: string;
+        postText?: string;
+        postUrl?: string;
+        prompt?: string;
+        composeType?: 'comment' | 'reply' | 'new';
+        originSurface?: string;
+      };
+
+      // v0.8.17 (QA 2026-06-12) — generate the comment HERE in the service
+      // worker and insert it directly into the LinkedIn comment box, exactly
+      // like the Gmail inline-bar path above. The previous flow only routed
+      // through the side panel (open panel -> COMMENT_DRAFT_REQUEST broadcast
+      // -> panel generates -> INSERT_COMMENT_DRAFT). That depended on
+      // chrome.sidePanel.open() succeeding from the worker after the
+      // content-script gesture hop (unreliable) AND the panel being mounted.
+      // With the panel closed, clicking Draft produced NOTHING (no output,
+      // no error). Generating in the worker removes both dependencies.
+      if (commentPayload.originSurface === 'inline-bar' && tab?.id) {
+        const tabId = tab.id;
+        (async () => {
+          try {
+            const resp = await generateDraft({
+              recipientName: commentPayload.postAuthor || undefined,
+              messageToReplyTo: commentPayload.postText || undefined,
+              platform: commentPayload.platform || 'linkedin',
+              prompt: commentPayload.prompt || undefined,
+              composeType: 'comment',
+              postUrl: commentPayload.postUrl || undefined,
+            });
+            if (resp?.skipped) {
+              chrome.tabs.sendMessage(tabId, {
+                type: 'DRAFT_SKIPPED',
+                payload: {
+                  reason: resp.skipReason || 'skipped',
+                  message: resp.skipMessage || 'Draft skipped.',
+                },
+              }).catch(() => { /* tab gone */ });
+              return;
+            }
+            if (resp?.draft) {
+              chrome.tabs.sendMessage(tabId, {
+                type: 'INSERT_COMMENT_DRAFT',
+                payload: { text: resp.draft },
+              }).catch(() => { /* tab gone */ });
+            }
+          } catch (err) {
+            console.warn('[SW] inline linkedin comment generateDraft failed:', err);
+            chrome.tabs.sendMessage(tabId, {
+              type: 'DRAFT_SKIPPED',
+              payload: { reason: 'error', message: 'Draft failed to generate. Try again.' },
+            }).catch(() => { /* tab gone */ });
+          }
+        })();
+        return { ok: true };
+      }
+
+      // Fallback (non inline-bar surfaces): open the side panel and let the
+      // panel generate, as before.
       if (tab?.id) {
         try { await chrome.sidePanel.open({ tabId: tab.id }); } catch { /* may already be open */ }
       }

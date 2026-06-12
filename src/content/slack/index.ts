@@ -15,6 +15,7 @@
 // Content script -- IIFE bundling handles scope isolation
 
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
+import { slackContextKey, slackBarIsStale } from './context-key';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
@@ -211,16 +212,30 @@ function injectSlackPromptBar() {
   const composeContainer = findOne('slack.composeContainer', REGISTRY.slack.composeContainer);
   if (!composeContainer) return;
 
-  // Don't inject twice
-  if (composeContainer.parentElement?.querySelector(`[${PRANAN_SLACK_BAR_ATTR}]`)) return;
-  if (document.querySelector(`[${PRANAN_SLACK_BAR_ATTR}]`)) return;
-
   const isDM = isDirectMessage();
   const recipientName = isDM ? getDMRecipient() : null;
   const channelName = getChannelName();
 
+  // Context-aware dedupe (QA 2026-06-12 fix for the Slack recipient
+  // off-by-one). Slack is an SPA: when the user switches conversations, the
+  // message input often re-renders BEFORE the header DOM updates, so the
+  // first inject after navigation can capture the previous conversation's
+  // recipient. The old guard returned early whenever ANY Pranan bar existed,
+  // which froze that stale bar in place — every conversation then showed the
+  // PREVIOUS one's recipient. Now we stamp the bar with the context it was
+  // built for and only keep an existing bar if it still matches. If the
+  // conversation changed, we drop the stale bar and rebuild with the live
+  // recipient, which self-heals on the later staggered checks.
+  const ctxKey = slackContextKey(isDM, recipientName, channelName);
+  const existingBar = document.querySelector(`[${PRANAN_SLACK_BAR_ATTR}]`);
+  if (existingBar) {
+    if (!slackBarIsStale(existingBar.getAttribute('data-pranan-ctx'), ctxKey)) return;
+    removeSlackPromptBar();
+  }
+
   const bar = document.createElement('div');
   bar.setAttribute(PRANAN_SLACK_BAR_ATTR, 'true');
+  bar.setAttribute('data-pranan-ctx', ctxKey);
   bar.style.cssText = `
     display: flex;
     align-items: center;
