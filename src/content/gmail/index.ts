@@ -13,7 +13,7 @@
 // Content script -- runs in Chrome's isolated world (no ES module support)
 // IIFE bundling handles scope isolation
 
-import { injectMultilineText } from '@/lib/safe-dom';
+import { injectMultilineText, findGmailQuoteBlock, injectMultilineTextBefore } from '@/lib/safe-dom';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
@@ -251,7 +251,17 @@ function injectDraft(composeWindow: Element, draftText: string): boolean {
   if (!body) return false;
 
   body.focus();
-  injectMultilineText(body, draftText, 'div');
+  // Preserve the Gmail quoted thread on replies so newly-added recipients still
+  // get the conversation history. The old path cleared the whole body, wiping
+  // the quote (QA 2026-06-12: a CC'd colleague received the reply with no
+  // context). Insert the draft ABOVE the quote; fall back to full-body write
+  // only for a fresh compose with no quoted thread.
+  const quoteBlock = findGmailQuoteBlock(body);
+  if (quoteBlock) {
+    injectMultilineTextBefore(body, draftText, quoteBlock, 'div');
+  } else {
+    injectMultilineText(body, draftText, 'div');
+  }
 
   body.dispatchEvent(new Event('input', { bubbles: true }));
   body.dispatchEvent(new Event('change', { bubbles: true }));
