@@ -196,6 +196,13 @@ let popupCache: Map<string, RelationshipPopupData> = new Map();
 const PRANAN_LI_MSG_BAR_ATTR = 'data-pranan-li-msg-bar';
 const PRANAN_LI_COMMENT_BAR_ATTR = 'data-pranan-li-comment-bar';
 
+// Voice auto-capture: remember the last comment WE generated so we never learn
+// from our own output (feedback loop). Only human-written/edited comments are
+// captured as voice samples.
+let lastGeneratedComment = '';
+const capturedComments = new Set<string>();
+function normalizeComment(t: string): string { return (t || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+
 // ---------------------------------------------------------------------------
 // Context Extraction
 // ---------------------------------------------------------------------------
@@ -997,9 +1004,52 @@ function injectCommentDraft(text: string): boolean {
   commentInput.focus();
   injectMultilineText(commentInput, text, 'p');
   commentInput.dispatchEvent(new Event('input', { bubbles: true }));
+  lastGeneratedComment = normalizeComment(text);
 
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// Voice auto-capture (learn the user's real comment voice over time)
+// ---------------------------------------------------------------------------
+
+function readCommentText(fromEl: Element | null): string {
+  if (!fromEl) return '';
+  const sel = SELECTORS.commentCompose.join(', ');
+  const box = (fromEl.closest('.comments-comment-box, .comments-comment-texteditor, form') || document)
+    .querySelector(sel) as HTMLElement | null;
+  return box ? (box.innerText || (box as HTMLInputElement).value || '').trim() : '';
+}
+
+function maybeCaptureComment(text: string): void {
+  const t = (text || '').trim();
+  if (t.length < 25 || t.length > 600) return;              // skip trivial + walls
+  const norm = normalizeComment(t);
+  if (norm === lastGeneratedComment) return;                // never learn from our own draft
+  if (capturedComments.has(norm)) return;                   // already sent this session
+  capturedComments.add(norm);
+  chrome.runtime.sendMessage({ type: 'CAPTURE_VOICE_EXEMPLAR', payload: { comment: t } }).catch(() => {});
+}
+
+// Capture on submit-button click (capture phase so we read text before LinkedIn clears it).
+document.addEventListener('click', (e) => {
+  const target = e.target as Element | null;
+  if (!target) return;
+  const submitSel = SELECTORS.commentSubmitButton.join(', ');
+  const btn = target.closest(submitSel);
+  if (!btn) return;
+  maybeCaptureComment(readCommentText(btn));
+}, true);
+
+// Capture on Enter-to-submit inside a comment editor.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  const target = e.target as Element | null;
+  if (!target) return;
+  const sel = SELECTORS.commentCompose.join(', ');
+  if (!target.matches(sel) && !target.closest(sel)) return;
+  maybeCaptureComment(readCommentText(target));
+}, true);
 
 // ---------------------------------------------------------------------------
 // Selection Monitoring

@@ -159,7 +159,9 @@ export type MessageType =
   | 'SET_TIER_OVERRIDE'
   // v0.7 Compose pop-over (Surface B)
   | 'GET_PROACTIVE_SUGGESTIONS'
-  | 'OPEN_THREAD';
+  | 'OPEN_THREAD'
+  // v0.8.x voice auto-capture
+  | 'CAPTURE_VOICE_EXEMPLAR';
 
 export interface ExtensionMessage<T = unknown> {
   type: MessageType;

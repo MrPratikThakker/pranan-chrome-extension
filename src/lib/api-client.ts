@@ -485,6 +485,25 @@ export async function setTierOverride(contactEmail: string, tier: string): Promi
   }
 }
 
+/**
+ * POST /api/companion/voice-exemplar -- auto-capture a posted LinkedIn comment
+ * as a voice sample. Fire-and-forget; failures are swallowed so capture never
+ * interferes with the user posting their comment.
+ */
+export async function postVoiceExemplar(comment: string): Promise<{ added: boolean }> {
+  try {
+    const response = await authedFetch(`${API_BASE}/voice-exemplar`, {
+      method: 'POST',
+      body: JSON.stringify({ comment }),
+    });
+    if (!response.ok) return { added: false };
+    const data = (await response.json()) as { added?: boolean };
+    return { added: !!data.added };
+  } catch {
+    return { added: false };
+  }
+}
+
 export async function getReplyIntents(request: IntentsRequest): Promise<string[]> {
   try {
     const response = await authedFetch(`${API_BASE}/intents`, {

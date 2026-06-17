@@ -11,7 +11,7 @@
  *   side panel opening, intelligence alerts
  */
 
-import { validateAuth, getContactContext, generateDraft, rewriteText, checkGrammar, getProactiveSuggestions, getReplyIntents, setTierOverride, refreshAccessToken } from '@/lib/api-client';
+import { validateAuth, getContactContext, generateDraft, rewriteText, checkGrammar, getProactiveSuggestions, getReplyIntents, setTierOverride, refreshAccessToken, postVoiceExemplar } from '@/lib/api-client';
 import { draftErrorMessage } from '@/lib/draft-error-message';
 import type { ExtensionMessage, Platform, AuthResponse, ContactContext } from '@/types';
 import { bootstrapSentry } from '@/lib/observability';
@@ -600,6 +600,14 @@ async function handleMessage(
     }
 
     // --- v0.6 Inline composer: relationship chip + tone hints ---
+    case 'CAPTURE_VOICE_EXEMPLAR': {
+      // From the LinkedIn content script when the user posts their own comment.
+      // Non-privileged + fire-and-forget: append to voice exemplars, swallow errors.
+      const captured = (message.payload as { comment?: string } | undefined)?.comment;
+      if (!captured || typeof captured !== 'string') return { added: false };
+      const res = await postVoiceExemplar(captured);
+      return res;
+    }
     case 'SET_TIER_OVERRIDE': {
       if (!isTrustedPrivilegedSender(sender)) {
         console.warn('[SW] SET_TIER_OVERRIDE rejected: untrusted sender', sender.origin || sender.url);
