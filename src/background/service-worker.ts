@@ -12,6 +12,7 @@
  */
 
 import { validateAuth, getContactContext, generateDraft, rewriteText, checkGrammar, getProactiveSuggestions, getReplyIntents, setTierOverride, refreshAccessToken } from '@/lib/api-client';
+import { draftErrorMessage } from '@/lib/draft-error-message';
 import type { ExtensionMessage, Platform, AuthResponse, ContactContext } from '@/types';
 import { bootstrapSentry } from '@/lib/observability';
 import { APP_ORIGIN } from '@/lib/config';
@@ -380,7 +381,7 @@ async function handleMessage(
             console.warn('[SW] inline gmail generateDraft failed:', err);
             chrome.tabs.sendMessage(tabId, {
               type: 'DRAFT_SKIPPED',
-              payload: { reason: 'error', message: 'Draft failed to generate. Try again.' },
+              payload: { reason: 'error', message: draftErrorMessage(err) },
             }).catch(() => { /* tab gone */ });
           }
         })();
@@ -508,7 +509,7 @@ async function handleMessage(
             console.warn('[SW] inline linkedin comment generateDraft failed:', err);
             chrome.tabs.sendMessage(tabId, {
               type: 'DRAFT_SKIPPED',
-              payload: { reason: 'error', message: 'Draft failed to generate. Try again.' },
+              payload: { reason: 'error', message: draftErrorMessage(err) },
             }).catch(() => { /* tab gone */ });
           }
         })();
