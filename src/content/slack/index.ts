@@ -346,6 +346,12 @@ function injectSlackPromptBar() {
   const triggerDraft = () => {
     const prompt = input.value.trim() || undefined;
     const messageContext = getThreadContext() || getRecentChannelMessages();
+    // Show a loading state; keep the prompt text so we can restore it on error.
+    pendingSlackDraft = { input, generateBtn, bar };
+    input.disabled = true;
+    generateBtn.textContent = 'Drafting...';
+    generateBtn.style.opacity = '0.7';
+    generateBtn.style.pointerEvents = 'none';
     chrome.runtime.sendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
@@ -354,14 +360,17 @@ function injectSlackPromptBar() {
         channelName,
         isDM,
         messageToReplyTo: messageContext,
+        // Send under both keys: the service worker reads userPrompt (gmail
+        // convention); keep prompt for any legacy side-panel fallback.
+        userPrompt: prompt,
         prompt,
         originSurface: 'inline-bar',
         composeType: 'reply',
       },
-    }).catch(() => {});
-    input.value = '';
-    generateBtn.style.opacity = '0';
-    generateBtn.style.pointerEvents = 'none';
+    }).catch(() => {
+      // Message send itself failed: restore the bar so the user can retry.
+      restoreSlackPromptBar('Could not reach Pranan. Try again.');
+    });
   };
 
   input.addEventListener('keydown', (e) => {
@@ -392,8 +401,25 @@ function injectSlackPromptBar() {
   composeContainer.parentElement?.insertBefore(bar, composeContainer.nextSibling);
 }
 
+// v0.8.22 (audit P1): track the active prompt bar so we can show a loading
+// state and restore it on error instead of optimistically clearing it.
+let pendingSlackDraft: { input: HTMLInputElement; generateBtn: HTMLButtonElement; bar: HTMLElement } | null = null;
+
 function removeSlackPromptBar() {
   document.querySelectorAll(`[${PRANAN_SLACK_BAR_ATTR}]`).forEach(el => el.remove());
+}
+
+// Restore the active prompt bar from its loading state (e.g. after a skip or
+// error) so the user can edit and retry, surfacing a short reason.
+function restoreSlackPromptBar(message?: string): void {
+  if (!pendingSlackDraft) return;
+  const { input, generateBtn } = pendingSlackDraft;
+  input.disabled = false;
+  generateBtn.textContent = 'Generate';
+  generateBtn.style.opacity = input.value.trim() ? '1' : '0';
+  generateBtn.style.pointerEvents = input.value.trim() ? 'auto' : 'none';
+  if (message) input.placeholder = message;
+  pendingSlackDraft = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -646,7 +672,19 @@ document.addEventListener('mouseup', () => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'INSERT_DRAFT') {
     const success = injectDraft(message.payload.text || message.payload.draft);
+    if (success && pendingSlackDraft) {
+      pendingSlackDraft.bar.remove();
+      pendingSlackDraft = null;
+    } else if (!success) {
+      restoreSlackPromptBar('Could not insert draft. Try again.');
+    }
     sendResponse({ success });
+  }
+
+  // Draft was skipped or errored upstream: restore the prompt with the reason.
+  if (message.type === 'DRAFT_SKIPPED') {
+    restoreSlackPromptBar(message.payload?.message || 'Draft skipped.');
+    sendResponse({ ok: true });
   }
 
   // Service worker asks for current compose state when side panel opens

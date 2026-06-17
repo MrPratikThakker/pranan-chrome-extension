@@ -327,6 +327,8 @@ async function handleMessage(
         channelName?: string;
         messageToReplyTo?: string;
         userPrompt?: string;
+        prompt?: string;
+        isDM?: boolean;
         originSurface?: 'inline-bar' | 'sidepanel' | 'popover';
         composeType?: 'comment' | 'reply' | 'new';
       };
@@ -342,9 +344,14 @@ async function handleMessage(
       // has a top-level INSERT_DRAFT handler that injects the text (and even
       // opens Reply if no compose is open). Scoped to gmail (the surface QA'd
       // live); other platforms keep the existing panel path below.
+      // v0.8.22 (audit P1) — Slack now uses this SAME direct-worker path.
+      // Previously Slack inline fell through to the side-panel handoff below,
+      // which silently produced nothing when the panel was closed while the
+      // content script optimistically cleared the prompt. Gmail and LinkedIn
+      // were already migrated; Slack was the straggler.
       if (
         inlinePayload.originSurface === 'inline-bar' &&
-        inlinePayload.platform === 'gmail' &&
+        (inlinePayload.platform === 'gmail' || inlinePayload.platform === 'slack') &&
         tab?.id
       ) {
         const tabId = tab.id;
@@ -359,7 +366,7 @@ async function handleMessage(
               messageToReplyTo: inlinePayload.messageToReplyTo || undefined,
               platform: inlinePayload.platform,
               channelName: inlinePayload.channelName || undefined,
-              prompt: inlinePayload.userPrompt || undefined,
+              prompt: inlinePayload.userPrompt || inlinePayload.prompt || undefined,
             });
             if (resp?.skipped) {
               chrome.tabs.sendMessage(tabId, {
@@ -378,7 +385,7 @@ async function handleMessage(
               }).catch(() => { /* tab gone */ });
             }
           } catch (err) {
-            console.warn('[SW] inline gmail generateDraft failed:', err);
+            console.warn('[SW] inline gmail/slack generateDraft failed:', err);
             chrome.tabs.sendMessage(tabId, {
               type: 'DRAFT_SKIPPED',
               payload: { reason: 'error', message: draftErrorMessage(err) },
