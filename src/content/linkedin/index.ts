@@ -196,10 +196,22 @@ let popupCache: Map<string, RelationshipPopupData> = new Map();
 const PRANAN_LI_MSG_BAR_ATTR = 'data-pranan-li-msg-bar';
 const PRANAN_LI_COMMENT_BAR_ATTR = 'data-pranan-li-comment-bar';
 
-// Voice auto-capture: remember the last comment WE generated so we never learn
+// Voice auto-capture: remember the comments WE generated so we never learn
 // from our own output (feedback loop). Only human-written/edited comments are
-// captured as voice samples.
-let lastGeneratedComment = '';
+// captured. We keep the last several drafts (not just one) so an earlier draft
+// posted after newer drafts were generated is still recognised and skipped.
+const recentGeneratedComments = new Set<string>();
+const RECENT_GENERATED_CAP = 20;
+function rememberGeneratedComment(text: string): void {
+  const norm = normalizeComment(text);
+  if (!norm) return;
+  recentGeneratedComments.add(norm);
+  while (recentGeneratedComments.size > RECENT_GENERATED_CAP) {
+    const oldest = recentGeneratedComments.values().next().value;
+    if (oldest === undefined) break;
+    recentGeneratedComments.delete(oldest);
+  }
+}
 const capturedComments = new Set<string>();
 function normalizeComment(t: string): string { return (t || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
 
@@ -1004,7 +1016,7 @@ function injectCommentDraft(text: string): boolean {
   commentInput.focus();
   injectMultilineText(commentInput, text, 'p');
   commentInput.dispatchEvent(new Event('input', { bubbles: true }));
-  lastGeneratedComment = normalizeComment(text);
+  rememberGeneratedComment(text);
 
   return true;
 }
@@ -1025,7 +1037,7 @@ function maybeCaptureComment(text: string): void {
   const t = (text || '').trim();
   if (t.length < 25 || t.length > 600) return;              // skip trivial + walls
   const norm = normalizeComment(t);
-  if (norm === lastGeneratedComment) return;                // never learn from our own draft
+  if (recentGeneratedComments.has(norm)) return;            // never learn from one of our own drafts
   if (capturedComments.has(norm)) return;                   // already sent this session
   capturedComments.add(norm);
   chrome.runtime.sendMessage({ type: 'CAPTURE_VOICE_EXEMPLAR', payload: { comment: t } }).catch(() => {});
