@@ -20,6 +20,7 @@ import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relat
 import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
 import { injectMultilineText } from '@/lib/safe-dom';
+import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { findOne, findAll, SELECTORS as REGISTRY } from '../selectors';
 import { bootstrapSentry } from '@/lib/observability';
 
@@ -440,6 +441,9 @@ function injectComposeButtons() {
     onClick: () => {
       const threadContext = getThreadContext();
       const channelContext = getRecentChannelMessages();
+      // Bind to the active message input so the draft can only insert there
+      // even if the user switches channels mid-flight (audit HIGH).
+      const editorId = stampEditor(findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput));
       chrome.runtime.sendMessage({
         type: 'INLINE_DRAFT_REQUEST',
         payload: {
@@ -451,6 +455,7 @@ function injectComposeButtons() {
           currentText: getMessageInputContent(),
           originSurface: 'inline-bar',
           composeType: 'reply',
+          editorId,
         },
       }).catch(() => {});
     },
@@ -631,8 +636,8 @@ function checkForActiveCompose(requireFocus = true) {
 // Draft Injection
 // ---------------------------------------------------------------------------
 
-function injectDraft(text: string): boolean {
-  const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput) as HTMLElement | null;
+function injectDraft(text: string, target?: HTMLElement | null): boolean {
+  const input = target || (findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput) as HTMLElement | null);
   if (!input) return false;
 
   input.focus();
@@ -671,7 +676,29 @@ document.addEventListener('mouseup', () => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'INSERT_DRAFT') {
-    const success = injectDraft(message.payload.text || message.payload.draft);
+    const draftText = message.payload.text || message.payload.draft;
+    // Editor binding (audit HIGH): if this draft was bound to a specific
+    // message input, only insert there. Do NOT fall back to the currently
+    // active input, which may belong to a different channel.
+    const boundEditorId = message.payload.editorId as string | undefined;
+    if (boundEditorId) {
+      const boundEl = resolveEditor(boundEditorId);
+      if (!boundEl || !document.contains(boundEl)) {
+        restoreSlackPromptBar('You switched channels, so Pranan did not insert here. Copy the draft instead.');
+        sendResponse({ success: false, reason: 'editor_changed' });
+        return true;
+      }
+      const ok = injectDraft(draftText, boundEl);
+      if (ok && pendingSlackDraft) {
+        pendingSlackDraft.bar.remove();
+        pendingSlackDraft = null;
+      } else if (!ok) {
+        restoreSlackPromptBar('Could not insert draft. Try again.');
+      }
+      sendResponse({ success: ok, reason: ok ? undefined : 'inject_failed' });
+      return true;
+    }
+    const success = injectDraft(draftText);
     if (success && pendingSlackDraft) {
       pendingSlackDraft.bar.remove();
       pendingSlackDraft = null;

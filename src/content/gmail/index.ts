@@ -15,6 +15,7 @@
 
 import { injectMultilineText, findGmailQuoteBlock, injectMultilineTextBefore } from '@/lib/safe-dom';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
+import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
@@ -577,6 +578,12 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       }
     }
     setLoading(true);
+    // Bind this generation to THIS compose's editable body so the returned
+    // draft can only be inserted here even if the user switches compose/tab
+    // mid-flight (audit HIGH: wrong-place insertion). Stamp the editable body
+    // (preferred) or fall back to the compose window element.
+    const editableBody = (composeWindow.querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null) || composeWindow;
+    const editorId = stampEditor(editableBody);
     chrome.runtime.sendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
@@ -589,6 +596,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
         userPrompt: userPrompt || null,
         originSurface: 'inline-bar',
         composeType: getThreadContext(composeWindow) ? 'reply' : 'new',
+        editorId,
       },
     }).catch((err) => {
       console.warn('[Pranan v6] sendMessage failed:', err);
@@ -650,10 +658,45 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     }
   };
   chrome.runtime.onMessage.addListener(insertDraftListener);
+  // Editor-binding copy fallback (audit HIGH): if the originating compose
+  // changed before the draft returned, the draft was NOT inserted. Reset the
+  // loading state and offer the user a one-click Copy so the work is not lost.
+  const editorChangedListener = (ev: Event) => {
+    const detail = (ev as CustomEvent<{ text?: string }>).detail;
+    if (resetTimer) { clearTimeout(resetTimer); resetTimer = null; }
+    setLoading(false);
+    let notice = bar.parentElement?.querySelector('[data-pranan-skip-notice]') as HTMLElement | null;
+    if (!notice) {
+      notice = document.createElement('div');
+      notice.setAttribute('data-pranan-skip-notice', '1');
+      notice.style.cssText = 'margin:6px 0 0;padding:8px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;font:500 12px/1.45 inherit;max-width:560px;display:flex;align-items:center;gap:10px;justify-content:space-between;';
+      bar.insertAdjacentElement('afterend', notice);
+    }
+    notice.textContent = '';
+    const msg = document.createElement('span');
+    msg.textContent = 'You moved to a different compose, so Pranan did not insert here. Copy the draft instead?';
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = 'Copy draft';
+    copyBtn.style.cssText = 'flex:none;padding:5px 10px;background:#92400e;color:#fff;border:none;border-radius:6px;font:600 12px/1 inherit;cursor:pointer;';
+    copyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const text = detail?.text || '';
+      navigator.clipboard?.writeText(text).then(() => {
+        copyBtn.textContent = 'Copied';
+      }).catch(() => { copyBtn.textContent = 'Copy failed'; });
+    });
+    notice.appendChild(msg);
+    notice.appendChild(copyBtn);
+    notice.style.display = 'flex';
+    if (skipNoticeTimer) clearTimeout(skipNoticeTimer);
+    skipNoticeTimer = setTimeout(() => { if (notice) notice.style.display = 'none'; }, 15000);
+  };
+  window.addEventListener('pranan:editor-changed', editorChangedListener);
   // Clean up listener when the bar is removed from DOM (compose closed)
   const cleanupObserver = new MutationObserver(() => {
     if (!document.contains(bar)) {
       chrome.runtime.onMessage.removeListener(insertDraftListener);
+      window.removeEventListener('pranan:editor-changed', editorChangedListener);
       cleanupObserver.disconnect();
       if (resetTimer) clearTimeout(resetTimer);
       if (skipNoticeTimer) clearTimeout(skipNoticeTimer);
@@ -1758,6 +1801,31 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message.type === 'INSERT_DRAFT') {
     const draftText = message.payload.text || message.payload.draft;
+    // Editor binding (audit HIGH): if this draft was correlated to a specific
+    // compose at request time, it must land THERE or nowhere. Never fall back
+    // to composeWindows[0], which may be a different compose the user switched
+    // to mid-flight.
+    const boundEditorId = message.payload.editorId as string | undefined;
+    if (boundEditorId) {
+      const boundEl = resolveEditor(boundEditorId);
+      const containerSelector = SELECTORS.gmail.composeWindow.join(', ');
+      const boundCompose = boundEl
+        ? (boundEl.closest(containerSelector) || boundEl.closest('.nH, .aoP, .aaZ') || boundEl)
+        : null;
+      if (!boundEl || !boundCompose || !document.contains(boundEl)) {
+        // The originating compose is gone/changed. Surface a copy-fallback in
+        // the inline bar instead of silently inserting into the wrong compose.
+        try {
+          chrome.runtime.onMessage.hasListeners?.();
+        } catch { /* pass */ }
+        window.dispatchEvent(new CustomEvent('pranan:editor-changed', { detail: { text: draftText } }));
+        sendResponse({ success: false, reason: 'editor_changed' });
+        return true;
+      }
+      const success = injectDraft(boundCompose, draftText);
+      sendResponse({ success, reason: success ? undefined : 'inject_failed' });
+      return true;
+    }
     const composeWindows = findComposeWindows();
     if (composeWindows.length > 0) {
       const success = injectDraft(composeWindows[0], draftText);

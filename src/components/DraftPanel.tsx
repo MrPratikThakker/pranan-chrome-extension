@@ -17,7 +17,7 @@ interface Props {
   recipientName?: string | null;
   subject?: string | null;
   error?: string | null;
-  onInsert: (text: string) => void;
+  onInsert: (text: string, onResult?: (ok: boolean) => void) => void;
   onRegenerate: (tone?: string) => void;
   onBack: () => void;
 }
@@ -46,12 +46,16 @@ export function DraftPanel({
   const [editedText, setEditedText] = useState(draft.draft);
   const [selectedTone, setSelectedTone] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // Audit (MEDIUM/LOW): acknowledge whether the content script actually
+  // inserted. 'idle' | 'inserting' | 'ok' | 'fail'.
+  const [insertState, setInsertState] = useState<'idle' | 'inserting' | 'ok' | 'fail'>('idle');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setEditedText(draft.draft);
     setIsEditing(false);
+    setInsertState('idle');
   }, [draft.draft]);
 
   useEffect(() => {
@@ -70,7 +74,11 @@ export function DraftPanel({
   }, [streamingText]);
 
   const handleInsert = () => {
-    onInsert(isEditing ? editedText : draft.draft);
+    setInsertState('inserting');
+    onInsert(isEditing ? editedText : draft.draft, (ok) => {
+      setInsertState(ok ? 'ok' : 'fail');
+      if (ok) setTimeout(() => setInsertState('idle'), 2500);
+    });
   };
 
   const handleToneClick = (tone: string) => {
@@ -244,12 +252,13 @@ export function DraftPanel({
           <div className="flex items-center gap-2">
             <button
               onClick={handleInsert}
-              className="btn-accent flex-1 text-[13px] py-2.5 px-4 flex items-center justify-center gap-2 font-semibold"
+              disabled={insertState === 'inserting'}
+              className="btn-accent flex-1 text-[13px] py-2.5 px-4 flex items-center justify-center gap-2 font-semibold disabled:opacity-60"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <polyline points="9 11 12 14 22 4" />
               </svg>
-              Insert
+              {insertState === 'inserting' ? 'Inserting...' : insertState === 'ok' ? 'Inserted' : 'Insert'}
             </button>
 
             <button
@@ -282,6 +291,20 @@ export function DraftPanel({
               </svg>
             </button>
           </div>
+
+          {/* Audit (MEDIUM/LOW): insertion failed (no compose / editor changed /
+              content script gone). Tell the user and offer copy. */}
+          {insertState === 'fail' && (
+            <div className="flex items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+              <span>Could not insert. Copy the draft instead?</span>
+              <button
+                onClick={handleCopy}
+                className="flex-none rounded bg-amber-700 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-amber-800"
+              >
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          )}
 
           {/* Secondary: copy */}
           <button
