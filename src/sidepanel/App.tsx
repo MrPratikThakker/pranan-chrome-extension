@@ -12,6 +12,7 @@ import { AuthPanel } from '@/components/AuthPanel';
 import { EmptyState } from '@/components/EmptyState';
 import { ContactCard } from '@/components/ContactCard';
 import { DraftPanel } from '@/components/DraftPanel';
+import { sendInsertToActiveTab } from '@/lib/insert-ack';
 import { RewritePanel } from '@/components/RewritePanel';
 import { GrammarPanel } from '@/components/GrammarPanel';
 import { BriefingPanel } from '@/components/BriefingPanel';
@@ -227,18 +228,15 @@ function AppInner() {
     });
   }, [composeContext, requestGrammar]);
 
-  const handleInsertDraft = useCallback((text: string) => {
-    // Send to content script to inject into compose window
-    // Use INSERT_COMMENT_DRAFT for LinkedIn comment drafts
+  const handleInsertDraft = useCallback((text: string, onResult?: (ok: boolean) => void) => {
+    // Send to content script to inject into compose window.
+    // Use INSERT_COMMENT_DRAFT for LinkedIn comment drafts.
+    // Audit (MEDIUM/LOW): this used to be fire-and-forget. sendInsertToActiveTab
+    // reads the content script's sendResponse({ success }) and
+    // chrome.runtime.lastError so the panel can show Inserted / Could not
+    // insert (with copy fallback).
     const messageType = composeContext?.composeType === 'comment' ? 'INSERT_COMMENT_DRAFT' : 'INSERT_DRAFT';
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          type: messageType,
-          payload: { text },
-        });
-      }
-    });
+    sendInsertToActiveTab(messageType, text).then((ok) => onResult?.(ok));
   }, [composeContext?.composeType]);
 
   const handleRegenerateDraft = useCallback((tone?: string) => {

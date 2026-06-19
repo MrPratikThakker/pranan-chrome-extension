@@ -331,6 +331,7 @@ async function handleMessage(
         isDM?: boolean;
         originSurface?: 'inline-bar' | 'sidepanel' | 'popover';
         composeType?: 'comment' | 'reply' | 'new';
+        editorId?: string;
       };
 
       // v0.8.9 (F-15b) — Gmail inline bar: generate the draft HERE in the
@@ -381,7 +382,7 @@ async function handleMessage(
             if (resp?.draft) {
               chrome.tabs.sendMessage(tabId, {
                 type: insertType,
-                payload: { text: resp.draft },
+                payload: { text: resp.draft, editorId: inlinePayload.editorId },
               }).catch(() => { /* tab gone */ });
             }
           } catch (err) {
@@ -473,6 +474,7 @@ async function handleMessage(
         prompt?: string;
         composeType?: 'comment' | 'reply' | 'new';
         originSurface?: string;
+        editorId?: string;
       };
 
       // v0.8.17 (QA 2026-06-12) — generate the comment HERE in the service
@@ -509,7 +511,7 @@ async function handleMessage(
             if (resp?.draft) {
               chrome.tabs.sendMessage(tabId, {
                 type: 'INSERT_COMMENT_DRAFT',
-                payload: { text: resp.draft },
+                payload: { text: resp.draft, editorId: commentPayload.editorId },
               }).catch(() => { /* tab gone */ });
             }
           } catch (err) {
@@ -679,17 +681,24 @@ async function handleMessage(
 
       console.log('[SW] AUTH_TOKEN_FROM_WEB: storing token and validating...');
       const refreshTokenFromWeb = (message as { refreshToken?: string }).refreshToken;
-      await chrome.storage.local.set({
-        authToken: token,
-        ...(refreshTokenFromWeb ? { refreshToken: refreshTokenFromWeb } : {}),
-      });
+      // Audit (LOW): on every auth write, set the refresh token explicitly when
+      // provided and REMOVE any stale one when this fresh auth carries none.
+      // Otherwise a re-auth could leave a dead refresh token behind that the
+      // refresh path keeps trying to use.
+      await chrome.storage.local.set({ authToken: token });
+      if (refreshTokenFromWeb) {
+        await chrome.storage.local.set({ refreshToken: refreshTokenFromWeb });
+      } else {
+        await chrome.storage.local.remove('refreshToken');
+      }
 
       try {
         cachedAuth = await deduplicatedValidateAuth();
         console.log('[SW] validateAuth result:', cachedAuth?.valid, cachedAuth?.userId);
       } catch (err) {
         console.error('[SW] validateAuth failed:', err);
-        await chrome.storage.local.remove('authToken');
+        // Validation failed: clear BOTH tokens so we never keep a half-valid pair.
+        await chrome.storage.local.remove(['authToken', 'refreshToken']);
         cachedAuth = null;
         broadcastToSidePanel({
           type: 'AUTH_STATUS',
@@ -808,14 +817,25 @@ chrome.runtime.onMessageExternal.addListener(
       // to keep the sendResponse channel open (Chrome closes it if the listener returns)
       (async () => {
         console.log('[SW] AUTH_TOKEN (external): storing token...');
+        // Audit (LOW): the external path previously wrote ONLY authToken and
+        // never touched refreshToken, so a re-auth left a stale refresh token.
+        // Write it explicitly when supplied and clear it when this fresh auth
+        // provides none.
+        const externalRefresh = (message as { refreshToken?: string }).refreshToken;
         await chrome.storage.local.set({ authToken: message.token });
+        if (externalRefresh) {
+          await chrome.storage.local.set({ refreshToken: externalRefresh });
+        } else {
+          await chrome.storage.local.remove('refreshToken');
+        }
 
         try {
           cachedAuth = await deduplicatedValidateAuth();
           console.log('[SW] External validateAuth result:', cachedAuth?.valid);
         } catch (err) {
           console.error('[SW] External validateAuth failed:', err);
-          await chrome.storage.local.remove('authToken');
+          // Clear BOTH tokens on validation failure.
+          await chrome.storage.local.remove(['authToken', 'refreshToken']);
           broadcastToSidePanel({
             type: 'AUTH_STATUS',
             payload: { valid: false },

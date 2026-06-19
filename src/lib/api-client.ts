@@ -33,7 +33,9 @@ let authExpiryInFlight = false;
 async function notifyAuthExpired(): Promise<void> {
   if (authExpiryInFlight) return;
   authExpiryInFlight = true;
-  try { await chrome.storage.local.remove('authToken'); } catch { /* pass */ }
+  // Audit (LOW): clear BOTH tokens on auth-expiry. Clearing only authToken left
+  // a stale refreshToken behind, which the refresh path would keep trying.
+  try { await chrome.storage.local.remove(['authToken', 'refreshToken']); } catch { /* pass */ }
   try { chrome.runtime.sendMessage({ type: 'AUTH_EXPIRED' }); } catch { /* pass */ }
   setTimeout(() => { authExpiryInFlight = false; }, 5000);
 }

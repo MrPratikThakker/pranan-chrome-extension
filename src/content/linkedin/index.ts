@@ -17,6 +17,7 @@
 // Content script -- IIFE bundling handles scope isolation
 
 import { injectMultilineText } from '@/lib/safe-dom';
+import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { parseLinkedInPostText } from './post-parse';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
@@ -680,6 +681,9 @@ function injectCommentPromptBars() {
         }, 3500);
         return;
       }
+      // Bind to THIS comment input so the draft can only land here even if
+      // the user scrolls to another post mid-flight (audit HIGH).
+      const editorId = stampEditor(commentInput as HTMLElement);
       chrome.runtime.sendMessage({
         type: 'COMMENT_DRAFT_REQUEST',
         payload: {
@@ -691,6 +695,7 @@ function injectCommentPromptBars() {
           prompt,
           composeType: 'comment',
           originSurface: 'inline-bar',
+          editorId,
         },
       }).catch(() => {});
       input.value = '';
@@ -993,7 +998,18 @@ function injectDraft(text: string): boolean {
 /**
  * Inject a comment draft into the comment input closest to the user's active area.
  */
-function injectCommentDraft(text: string): boolean {
+function injectCommentDraft(text: string, target?: HTMLElement | null): boolean {
+  // Editor binding (audit HIGH): when a bound target is supplied, insert ONLY
+  // there. Never fall back to the focused/last comment input, which may belong
+  // to a different post the user scrolled to mid-flight.
+  if (target !== undefined) {
+    if (!target || !document.contains(target)) return false;
+    target.focus();
+    injectMultilineText(target, text, 'p');
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    rememberGeneratedComment(text);
+    return true;
+  }
   // Find focused or most recent comment input
   const focused = document.activeElement;
   let commentInput: HTMLElement | null = null;
@@ -1090,7 +1106,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ success });
   }
   if (message.type === 'INSERT_COMMENT_DRAFT') {
-    const success = injectCommentDraft(message.payload.text || message.payload.draft);
+    const draftText = message.payload.text || message.payload.draft;
+    const boundEditorId = message.payload.editorId as string | undefined;
+    if (boundEditorId) {
+      const boundEl = resolveEditor(boundEditorId);
+      if (!boundEl || !document.contains(boundEl)) {
+        sendResponse({ success: false, reason: 'editor_changed' });
+        return true;
+      }
+      const success = injectCommentDraft(draftText, boundEl);
+      sendResponse({ success, reason: success ? undefined : 'inject_failed' });
+      return;
+    }
+    const success = injectCommentDraft(draftText);
     sendResponse({ success });
   }
   return true;
