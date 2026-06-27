@@ -1014,7 +1014,7 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
       if (flag === '0') v6 = false;
     } catch { /* sandbox */ }
     if (v6) {
-      openComposePopover(host);
+      openComposePopover(host, composeWindow);
       return;
     }
     const recipientName = recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
@@ -1038,7 +1038,7 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
 
 const POPOVER_ID = 'pranan-compose-popover';
 
-function openComposePopover(anchorHost: HTMLElement) {
+function openComposePopover(anchorHost: HTMLElement, composeWindow?: Element) {
   // Toggle if already open
   const existing = document.getElementById(POPOVER_ID);
   if (existing) {
@@ -1142,16 +1142,27 @@ function openComposePopover(anchorHost: HTMLElement) {
       e.preventDefault();
       const text = promptEl.value.trim();
       if (!text) return;
+      const liveRecipients = composeWindow ? extractRecipients(composeWindow) : [];
+      const recipientEmail = liveRecipients[0] || null;
+      const recipientName = composeWindow && recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
+      const messageToReplyTo = composeWindow ? getThreadContext(composeWindow) : null;
+      const editableBody = composeWindow
+        ? ((composeWindow.querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null) || composeWindow)
+        : null;
+      const editorId = stampEditor(editableBody);
       chrome.runtime.sendMessage({
         type: 'INLINE_DRAFT_REQUEST',
         payload: {
           platform: 'gmail',
-          recipientEmail: null,
-          recipientName: null,
-          messageToReplyTo: null,
+          recipientEmail,
+          recipientName,
+          messageToReplyTo,
           channelName: null,
-          subject: null,
+          subject: composeWindow ? getSubject(composeWindow) : null,
           userPrompt: text,
+          originSurface: 'inline-bar',
+          composeType: messageToReplyTo ? 'reply' : 'new',
+          editorId,
         },
       }).catch(() => {});
       popover.remove();
@@ -1323,6 +1334,13 @@ function attachSuggestionMonitor(composeWindow: Element) {
 
 const PRANAN_THREAD_BAR_ATTR = 'data-pranan-thread-bar';
 
+function isVisibleInjectionTarget(el: Element): boolean {
+  const rect = el.getBoundingClientRect();
+  if (rect.width < 8 || rect.height < 8) return false;
+  const style = window.getComputedStyle(el);
+  return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+}
+
 function extractThreadSender(threadContainer: Element): { email: string | null; name: string | null } {
   // Get the last (most recent) message in the thread
   const messages = threadContainer.querySelectorAll('.gs');
@@ -1356,11 +1374,13 @@ function extractLatestMessageText(threadContainer: Element): string | null {
 function injectThreadPromptBar(threadContainer: Element) {
   // Don't inject twice
   if (threadContainer.querySelector(`[${PRANAN_THREAD_BAR_ATTR}]`)) return;
+  if (!isVisibleInjectionTarget(threadContainer)) return;
 
   // Find the reply/forward button area at the bottom of the thread
   // Gmail uses .amn for the "Reply" / "Reply all" / "Forward" buttons row
   const replyButtonsRow = findOne('gmail.threadReplyButtons', SELECTORS.gmail.threadReplyButtons, threadContainer);
   if (!replyButtonsRow) return;
+  if (!isVisibleInjectionTarget(replyButtonsRow)) return;
 
   const { email: senderEmail, name: senderName } = extractThreadSender(threadContainer);
   const subject = extractThreadSubject(threadContainer);
@@ -1466,6 +1486,8 @@ function injectThreadPromptBar(threadContainer: Element) {
         channelName: null,
         subject,
         prompt,
+        originSurface: 'inline-bar',
+        composeType: 'reply',
       },
     }).catch(() => {});
     // Visual feedback
@@ -2043,7 +2065,6 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
-
 
 
 
