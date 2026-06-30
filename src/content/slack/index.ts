@@ -347,6 +347,7 @@ function injectSlackPromptBar() {
   const triggerDraft = () => {
     const prompt = input.value.trim() || undefined;
     const messageContext = getThreadContext() || getRecentChannelMessages();
+    const editorId = stampEditor(findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput));
     // Show a loading state; keep the prompt text so we can restore it on error.
     pendingSlackDraft = { input, generateBtn, bar };
     input.disabled = true;
@@ -367,6 +368,7 @@ function injectSlackPromptBar() {
         prompt,
         originSurface: 'inline-bar',
         composeType: 'reply',
+        editorId,
       },
     }).catch(() => {
       // Message send itself failed: restore the bar so the user can retry.
@@ -888,7 +890,6 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
-
 
 
 
