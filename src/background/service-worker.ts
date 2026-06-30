@@ -82,7 +82,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (cachedAuth.valid) {
       scheduleTokenRefresh();
     } else {
-      await chrome.storage.local.remove('authToken');
+      await chrome.storage.local.remove(['authToken', 'refreshToken']);
       broadcastToSidePanel({ type: 'AUTH_STATUS', payload: { valid: false } });
     }
   } catch {
@@ -257,7 +257,7 @@ async function handleMessage(
       // broadcast AUTH_STATUS to the side panel so it switches back to the
       // AuthPanel (otherwise the user sits in a stale context view forever).
       try {
-        await chrome.storage.local.remove('authToken');
+        await chrome.storage.local.remove(['authToken', 'refreshToken']);
       } catch { /* pass */ }
       cachedAuth = null;
       broadcastToSidePanel({
@@ -717,7 +717,7 @@ async function handleMessage(
         return { ok: true };
       } else {
         console.warn('[SW] Token stored but validation returned invalid');
-        await chrome.storage.local.remove('authToken');
+        await chrome.storage.local.remove(['authToken', 'refreshToken']);
         broadcastToSidePanel({
           type: 'AUTH_STATUS',
           payload: { valid: false },
@@ -852,7 +852,7 @@ chrome.runtime.onMessageExternal.addListener(
           });
           sendResponse({ ok: true });
         } else {
-          await chrome.storage.local.remove('authToken');
+          await chrome.storage.local.remove(['authToken', 'refreshToken']);
           broadcastToSidePanel({
             type: 'AUTH_STATUS',
             payload: { valid: false },
@@ -923,6 +923,5 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 // + listener block was removed because it ran the same logic with worse
 // timing.
 initAuth();
-
 
 
