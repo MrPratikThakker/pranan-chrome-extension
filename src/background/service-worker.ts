@@ -384,7 +384,19 @@ async function handleMessage(
                 type: insertType,
                 payload: { text: resp.draft, editorId: inlinePayload.editorId },
               }).catch(() => { /* tab gone */ });
+              return;
             }
+            // Response came back OK but carried neither a draft nor a skip flag
+            // (empty draft or unexpected shape). Do NOT leave the inline bar
+            // hanging to a silent 30s reset — surface it so Generate fails loudly.
+            console.warn('[SW] inline gmail/slack: empty draft response', resp);
+            chrome.tabs.sendMessage(tabId, {
+              type: 'DRAFT_SKIPPED',
+              payload: {
+                reason: 'empty',
+                message: "Pranan couldn't draft a reply for this one. Try again, or type a prompt and press Generate.",
+              },
+            }).catch(() => { /* tab gone */ });
           } catch (err) {
             console.warn('[SW] inline gmail/slack generateDraft failed:', err);
             chrome.tabs.sendMessage(tabId, {
@@ -513,7 +525,17 @@ async function handleMessage(
                 type: 'INSERT_COMMENT_DRAFT',
                 payload: { text: resp.draft, editorId: commentPayload.editorId },
               }).catch(() => { /* tab gone */ });
+              return;
             }
+            // OK response with neither draft nor skip -> fail loudly, don't hang.
+            console.warn('[SW] inline linkedin comment: empty draft response', resp);
+            chrome.tabs.sendMessage(tabId, {
+              type: 'DRAFT_SKIPPED',
+              payload: {
+                reason: 'empty',
+                message: "Pranan couldn't draft a comment for this one. Try again, or type a prompt and press Generate.",
+              },
+            }).catch(() => { /* tab gone */ });
           } catch (err) {
             console.warn('[SW] inline linkedin comment generateDraft failed:', err);
             chrome.tabs.sendMessage(tabId, {

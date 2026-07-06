@@ -552,6 +552,26 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     }
   };
 
+  // Transient amber notice below the bar. Central place so no failure path
+  // (skip, empty response, timeout) can leave the bar as a silent no-op.
+  const showInlineNotice = (text: string) => {
+    let notice = bar.parentElement?.querySelector('[data-pranan-skip-notice]') as HTMLElement | null;
+    if (!notice) {
+      notice = document.createElement('div');
+      notice.setAttribute('data-pranan-skip-notice', '1');
+      notice.style.cssText = 'margin:6px 0 0;padding:8px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;font:500 12px/1.45 inherit;max-width:560px;';
+      bar.insertAdjacentElement('afterend', notice);
+    }
+    notice.textContent = text;
+    notice.style.display = 'block';
+    input.style.borderColor = '#fbbf24';
+    if (skipNoticeTimer) clearTimeout(skipNoticeTimer);
+    skipNoticeTimer = setTimeout(() => {
+      if (notice) notice.style.display = 'none';
+      input.style.borderColor = '#e5e7eb';
+    }, 9000);
+  };
+
   const triggerGenerate = () => {
     const userPrompt = input.value.trim();
     // v0.7.2 — re-extract recipient at click time. The bar is injected as
@@ -612,7 +632,12 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     }
     // Safety timeout: if INSERT_DRAFT never arrives back within 30s, reset.
     if (resetTimer) clearTimeout(resetTimer);
-    resetTimer = setTimeout(() => setLoading(false), 30000);
+    resetTimer = setTimeout(() => {
+      setLoading(false);
+      // Nothing came back in 30s (worker never replied / network stalled).
+      // Fail loudly instead of quietly resetting to "Generate".
+      showInlineNotice("This took longer than expected. Check you're signed in at app.pranan.ai, then try Generate again.");
+    }, 30000);
   };
 
   // Expose this compose bar's trigger so the popup's Quick Draft can fire it.
