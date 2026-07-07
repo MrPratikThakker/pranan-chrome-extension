@@ -38,4 +38,54 @@ describe('parseLinkedInPostText', () => {
   it('returns null body for empty input', () => {
     expect(parseLinkedInPostText('').body).toBeNull();
   });
+
+  it('picks the Page name (not a follower row) on a company Page post', () => {
+    const RAW_PAGE = [
+      'Zeck',
+      '12,985 followers',
+      'Promoted',
+      'Most board meetings fail because of process, not strategy.',
+      'Get 5 cheat codes modern CEOs use to keep directors engaged.',
+      '…more',
+      'Joe Pelayo, Rajesh John and 33 other connections follow this Page',
+    ].join('\n');
+    const { author, body } = parseLinkedInPostText(RAW_PAGE);
+    expect(author).toBe('Zeck');
+    expect(body).toContain('Most board meetings fail');
+    expect(author).not.toMatch(/follow this Page/i);
+    expect(body).not.toMatch(/follow this Page/i);
+  });
+
+  it('picks the real author (not the resurfacer) on a "X commented" post', () => {
+    const RAW_RESURFACE = [
+      'Justin Welsh commented on this',
+      'Feed post',
+      'Sahil Bloom',
+      ' • 2nd',
+      'Author, The 5 Types of Wealth',
+      '1d •',
+      'The most underrated skill in business is writing clearly.',
+      '…more',
+      '120',
+    ].join('\n');
+    const { author, body } = parseLinkedInPostText(RAW_RESURFACE);
+    expect(author).toBe('Sahil Bloom');
+    expect(author).not.toMatch(/commented/i);
+    expect(body).toContain('underrated skill');
+  });
+
+  it('does not truncate body prose that uses the words commented/reposted', () => {
+    const RAW_SAFE = [
+      'Feed post',
+      'Dana Lee',
+      ' • 1st',
+      'Head of Product',
+      '2h •',
+      'A customer commented that our onboarding felt slow, so we reposted our roadmap for transparency.',
+      '…more',
+    ].join('\n');
+    const { author, body } = parseLinkedInPostText(RAW_SAFE);
+    expect(author).toBe('Dana Lee');
+    expect(body).toContain('A customer commented that our onboarding felt slow, so we reposted our roadmap');
+  });
 });
