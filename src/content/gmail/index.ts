@@ -580,23 +580,22 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     // injection time it can be null even on a reply with a real recipient,
     // which produces the "Generate fires but no draft inserts" bug.
     const liveRecipients = extractRecipients(composeWindow);
-    let liveRecipientEmail = liveRecipients[0] || recipientEmail || null;
-    let recipientName = liveRecipientEmail ? extractRecipientName(composeWindow, liveRecipientEmail) : null;
-    // R1 (relationship grounding): in the reading view there is no compose, so
-    // recipient extraction comes up empty and generation used to run with NO
-    // relationship context (a decline to a bike-ride invite read like declining
-    // a services pitch). Fall back to the thread's most recent sender, which is
-    // who the reply targets anyway.
-    if (!liveRecipientEmail) {
-      const threadsForSender = findThreadViews();
-      if (threadsForSender.length > 0) {
-        const sender = extractThreadSender(threadsForSender[threadsForSender.length - 1]);
-        if (sender.email || sender.name) {
-          liveRecipientEmail = sender.email;
-          recipientName = sender.name;
-        }
-      }
-    }
+    // The reply is addressed to whoever wrote the message being replied to,
+    // i.e. the newest thread message's sender -- NOT recipients[0]. In a
+    // reply-all where a teammate is listed first in the To field, recipients[0]
+    // is the wrong target: we would greet our own colleague (e.g. "Hi Marshall")
+    // instead of the external person who actually asked (e.g. Jarrell at G2) and
+    // anchor the reply on the wrong message. Prefer the thread's most recent
+    // sender; fall back to the To field only when there is no thread (new email).
+    const threadsForSender = findThreadViews();
+    const threadSender = threadsForSender.length > 0
+      ? extractThreadSender(threadsForSender[threadsForSender.length - 1])
+      : { email: null as string | null, name: null as string | null };
+    let liveRecipientEmail = threadSender.email || liveRecipients[0] || recipientEmail || null;
+    let recipientName =
+      (liveRecipientEmail ? extractRecipientName(composeWindow, liveRecipientEmail) : null)
+      || threadSender.name
+      || null;
     setLoading(true);
     // Bind this generation to THIS compose's editable body so the returned
     // draft can only be inserted here even if the user switches compose/tab
