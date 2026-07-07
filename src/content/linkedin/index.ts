@@ -18,7 +18,7 @@
 
 import { injectMultilineText } from '@/lib/safe-dom';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
-import { parseLinkedInPostText } from './post-parse';
+import { parseLinkedInPostText, pickAuthorProfileUrl } from './post-parse';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
@@ -304,17 +304,21 @@ function extractPostContextStable(commentInput: Element): {
   const wrapper = findFeedPostWrapper(commentInput);
   if (!wrapper) return null;
 
-  let postAuthorUrl: string | null = null;
-  const a = wrapper.querySelector('a[href*="/in/"]') as HTMLAnchorElement | null;
-  if (a?.href && /linkedin\.com\/in\//i.test(a.href)) {
-    try {
-      const u = new URL(a.href);
-      postAuthorUrl = `${u.origin}${u.pathname.replace(/\/$/, '')}`;
-    } catch { /* ignore */ }
-  }
-
   const parsed = parseLinkedInPostText((wrapper as HTMLElement).innerText || '');
-  const postAuthor = parsed.author || (a?.innerText || '').trim().split('\n')[0] || null;
+
+  // Choose the AUTHOR's own profile/company link, not simply the first /in/
+  // link. On company Page posts the first /in/ link is a follower, and on an
+  // "X commented" resurfaced post it is the commenter. Match by the (now
+  // reliable) author name; pickAuthorProfileUrl prefers the matching link.
+  const authorLinks = Array.from(
+    wrapper.querySelectorAll('a[href*="/in/"], a[href*="/company/"]')
+  ).map((el) => ({
+    text: (el as HTMLElement).innerText || '',
+    href: (el as HTMLAnchorElement).href || '',
+  }));
+  const postAuthorUrl = pickAuthorProfileUrl(authorLinks, parsed.author);
+  const postAuthor =
+    parsed.author || (authorLinks[0]?.text || '').trim().split('\n')[0] || null;
   const postText = parsed.body ? parsed.body.slice(0, 1500) : null;
 
   const linkEl = wrapper.querySelector('a[href*="/feed/update/"]') as HTMLAnchorElement | null;
