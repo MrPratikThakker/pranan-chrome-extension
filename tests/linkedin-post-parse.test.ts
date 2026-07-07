@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseLinkedInPostText } from '../src/content/linkedin/post-parse';
+import { parseLinkedInPostText, pickAuthorProfileUrl } from '../src/content/linkedin/post-parse';
 
 // Real captured innerText (2026-06-10) from a feed post with the comment box
 // open — includes the existing comment thread that must NOT leak into the body.
@@ -87,5 +87,39 @@ describe('parseLinkedInPostText', () => {
     const { author, body } = parseLinkedInPostText(RAW_SAFE);
     expect(author).toBe('Dana Lee');
     expect(body).toContain('A customer commented that our onboarding felt slow, so we reposted our roadmap');
+  });
+});
+
+
+describe('pickAuthorProfileUrl', () => {
+  it('strips query + trailing slash and matches the author on a normal post', () => {
+    const links = [{ text: 'Adam Kolb\nSenior Account Executive', href: 'https://www.linkedin.com/in/adam-kolb-0814/?utm=x' }];
+    expect(pickAuthorProfileUrl(links, 'Adam Kolb')).toBe('https://www.linkedin.com/in/adam-kolb-0814');
+  });
+
+  it('skips the commenter on a resurfaced "X commented" post', () => {
+    const links = [
+      { text: 'Justin Welsh', href: 'https://www.linkedin.com/in/justinwelsh' },
+      { text: 'Sahil Bloom', href: 'https://www.linkedin.com/in/sahil-bloom' },
+    ];
+    expect(pickAuthorProfileUrl(links, 'Sahil Bloom')).toBe('https://www.linkedin.com/in/sahil-bloom');
+  });
+
+  it('picks the company link (not a follower) on a Page post', () => {
+    const links = [
+      { text: 'Joe Pelayo', href: 'https://www.linkedin.com/in/joepelayo' },
+      { text: 'Zeck', href: 'https://www.linkedin.com/company/zeck/' },
+    ];
+    expect(pickAuthorProfileUrl(links, 'Zeck')).toBe('https://www.linkedin.com/company/zeck');
+  });
+
+  it('falls back to the first profile link when nothing matches the author', () => {
+    const links = [{ text: 'Someone Else', href: 'https://www.linkedin.com/in/someone' }];
+    expect(pickAuthorProfileUrl(links, 'Nobody Here')).toBe('https://www.linkedin.com/in/someone');
+  });
+
+  it('ignores non-LinkedIn links and returns null when there are no profiles', () => {
+    expect(pickAuthorProfileUrl([{ text: 'x', href: 'https://example.com/foo' }], 'x')).toBeNull();
+    expect(pickAuthorProfileUrl([], 'x')).toBeNull();
   });
 });
