@@ -70,3 +70,46 @@ export function parseLinkedInPostText(raw: string): { author: string | null; bod
 
   return { author: author || null, body: body || null };
 }
+
+
+/** Canonicalize a LinkedIn profile or company URL (strip query + trailing slash). */
+export function canonicalizeLinkedInUrl(href: string): string | null {
+  try {
+    const u = new URL(href);
+    if (!/(^|\.)linkedin\.com$/i.test(u.hostname)) return null;
+    if (!/^\/(in|company)\//i.test(u.pathname)) return null;
+    return `${u.origin}${u.pathname.replace(/\/$/, '')}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pick the post AUTHOR's own profile/company URL from the links in a feed post,
+ * rather than blindly taking the first /in/ link (which on a company Page post
+ * is a follower, and on an "X commented" resurfaced post is the commenter).
+ * Matches by the author name when available; falls back to the first profile.
+ */
+export function pickAuthorProfileUrl(
+  links: Array<{ text: string; href: string }>,
+  authorName: string | null,
+): string | null {
+  const profiles = links
+    .map((l) => ({
+      text: (l.text || '').split('\n')[0].trim(),
+      url: canonicalizeLinkedInUrl(l.href || ''),
+    }))
+    .filter((l): l is { text: string; url: string } => !!l.url);
+  if (profiles.length === 0) return null;
+
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (authorName) {
+    const an = norm(authorName);
+    const match = profiles.find((p) => {
+      const t = norm(p.text);
+      return !!t && (t === an || t.startsWith(an) || an.startsWith(t));
+    });
+    if (match) return match.url;
+  }
+  return profiles[0].url;
+}
