@@ -550,31 +550,34 @@ function injectMessagingPromptBar() {
 // LinkedIn Comment Reply Prompt Bar
 // ---------------------------------------------------------------------------
 
-let knownCommentInputs = new WeakSet<Element>();
-
 function injectCommentPromptBars() {
   const commentInputs = queryAll(SELECTORS.commentCompose);
 
   for (const commentInput of commentInputs) {
-    if (knownCommentInputs.has(commentInput)) continue;
-    knownCommentInputs.add(commentInput);
-
-    // Find the comment form container
+    // Resolve the stable form container FIRST. Do NOT blacklist the
+    // contenteditable before this. LinkedIn's tiptap editor hydrates the
+    // contenteditable a tick before its wrapper attaches, so an early sighting
+    // has no form yet. The previous code added the element to a WeakSet before
+    // this check, which permanently blacklisted it once the wrapper arrived and
+    // was why the bar frequently never appeared. Idempotency is keyed off the
+    // stable form plus a check that the bar sibling still exists, and it
+    // self-heals when LinkedIn re-renders the bar away.
     const commentForm = commentInput.closest(
       '[data-testid="ui-core-tiptap-text-editor-wrapper"], .comments-comment-box, .comments-comment-texteditor'
     );
     if (!commentForm) continue;
 
-    // Don't inject twice on this form. The bar is inserted as a SIBLING
-    // (commentForm.parentElement.insertBefore(bar, commentForm)), not inside,
-    // so checking commentForm itself misses it. Mark the form on inject and
-    // also scan the parent for any existing bar — defends against both
-    // LinkedIn re-rendering the contenteditable (which invalidates the
-    // WeakSet entry) and against the form being reused across nav.
-    if (commentForm.hasAttribute('data-pranan-bar-injected')) continue;
-    if (commentForm.parentElement?.querySelector(`:scope > [${PRANAN_LI_COMMENT_BAR_ATTR}]`)) {
+    const existingBar = commentForm.parentElement?.querySelector(
+      `:scope > [${PRANAN_LI_COMMENT_BAR_ATTR}]`
+    );
+    if (existingBar) {
       commentForm.setAttribute('data-pranan-bar-injected', 'true');
       continue;
+    }
+    // Marked injected but the bar sibling is gone (LinkedIn re-rendered it):
+    // clear the stale marker and fall through to re-inject.
+    if (commentForm.hasAttribute('data-pranan-bar-injected')) {
+      commentForm.removeAttribute('data-pranan-bar-injected');
     }
 
     const { postAuthor, postAuthorUrl, postText, postUrl } = getCommentPostContext(commentInput);
