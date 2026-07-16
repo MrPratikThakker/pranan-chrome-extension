@@ -834,6 +834,14 @@ chrome.runtime.onMessageExternal.addListener(
       return;
     }
 
+    if (message.type === 'PING') {
+      // Lets app.pranan.ai detect the extension (onboarding extension slide
+      // and the /home pairing card, audit 2026-07-17). Synchronous response,
+      // so return without keeping the channel open.
+      sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
+      return;
+    }
+
     if (message.type === 'AUTH_TOKEN') {
       // Handle async work inside a then-chain so we can return true synchronously
       // to keep the sendResponse channel open (Chrome closes it if the listener returns)
@@ -930,6 +938,18 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {
     await chrome.storage.local.set({ hasSeenOnboarding: false, interactionCount: 0 });
+
+    // First-run was previously silent: a Chrome Web Store install produced
+    // nothing visible until the user happened to find the toolbar icon
+    // (audit 2026-07-17 P1-3). Open the app so every install lands somewhere:
+    // signed-out users get login/signup, signed-in users bounce to /home and
+    // the existing auth handoff pairs the extension automatically.
+    try {
+      await chrome.tabs.create({ url: `${APP_ORIGIN}/login?source=extension_install` });
+    } catch {
+      // Tab creation can fail during browser startup/session restore; the
+      // extension still works, the user just gets the old silent behavior.
+    }
   }
 
   // Enable side panel on all supported sites
