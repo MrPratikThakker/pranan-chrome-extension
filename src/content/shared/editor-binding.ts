@@ -23,6 +23,24 @@
 export const EDITOR_ID_ATTR = 'data-pranan-editor-id';
 export const EDITOR_ID_DATASET = 'prananEditorId';
 
+export const EDITOR_HOST_ATTR = 'data-pranan-editor-host-id';
+
+// Compose-container ancestors that survive an editor re-render. HubSpot Sales
+// rebuilds the contenteditable, and Gmail sometimes relayouts it, but these
+// outer boundaries (the compose dialog, the compose <form>, the inline-reply
+// containers) persist. Binding the host lets resolveEditor re-find the SAME
+// compose's current editor instead of falsely reporting a moved compose.
+// Deliberately compose-scoped (never a thread-level container) so the host
+// always holds exactly one editor -> no wrong-place risk.
+const HOST_SELECTOR = '[role="dialog"], form, .iN, .aoI, .aO7, .M9';
+
+function currentEditableIn(host: Element): HTMLElement | null {
+  const el = host.querySelector(
+    '[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]',
+  );
+  return el instanceof HTMLElement ? el : null;
+}
+
 function makeId(): string {
   try {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -42,9 +60,19 @@ function makeId(): string {
 export function stampEditor(el: Element | null | undefined): string | null {
   if (!el || !(el instanceof HTMLElement)) return null;
   const existing = el.getAttribute(EDITOR_ID_ATTR);
-  if (existing) return existing;
-  const id = makeId();
-  el.setAttribute(EDITOR_ID_ATTR, id);
+  const id = existing || makeId();
+  if (!existing) el.setAttribute(EDITOR_ID_ATTR, id);
+  // Also bind a stable compose-container ancestor so the binding survives the
+  // editor element being re-rendered/replaced (HubSpot Sales, Gmail relayout).
+  // Best-effort: if no host matches, behavior is unchanged.
+  try {
+    const host = el.closest(HOST_SELECTOR);
+    if (host instanceof HTMLElement && host !== el && !host.getAttribute(EDITOR_HOST_ATTR)) {
+      host.setAttribute(EDITOR_HOST_ATTR, id);
+    }
+  } catch {
+    /* ignore */
+  }
   return id;
 }
 
@@ -54,9 +82,26 @@ export function stampEditor(el: Element | null | undefined): string | null {
  */
 export function resolveEditor(editorId: string | null | undefined): HTMLElement | null {
   if (!editorId) return null;
-  const sel = `[${EDITOR_ID_ATTR}="${(window as unknown as { CSS?: { escape?(s: string): string } }).CSS?.escape ? CSS.escape(editorId) : editorId}"]`;
+  const esc = (window as unknown as { CSS?: { escape?(s: string): string } }).CSS?.escape
+    ? CSS.escape(editorId)
+    : editorId;
   try {
-    return document.querySelector(sel) as HTMLElement | null;
+    const exact = document.querySelector(`[${EDITOR_ID_ATTR}="${esc}"]`);
+    if (exact instanceof HTMLElement) return exact;
+    // The editor element was re-rendered away (e.g. HubSpot Sales rebuilt the
+    // compose body). Recover via the stable host container: return its CURRENT
+    // editable, still the SAME compose the draft was requested from, so there is
+    // no wrong-place risk. If the host is also gone, the user truly switched
+    // compose -> null -> the UI offers copy.
+    const host = document.querySelector(`[${EDITOR_HOST_ATTR}="${esc}"]`);
+    if (host instanceof HTMLElement) {
+      const cur = currentEditableIn(host);
+      if (cur) {
+        cur.setAttribute(EDITOR_ID_ATTR, editorId); // re-stamp so future resolves are O(1)
+        return cur;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
