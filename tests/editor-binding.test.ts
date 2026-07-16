@@ -69,4 +69,47 @@ describe('editor binding correlation token', () => {
     expect(stampEditor(null)).toBeNull();
     expect(stampEditor(undefined)).toBeNull();
   });
+
+  it('recovers after the editor is re-rendered inside the same compose (HubSpot Sales)', () => {
+    const form = document.createElement('form');
+    const editable = document.createElement('div');
+    editable.setAttribute('contenteditable', 'true');
+    editable.setAttribute('role', 'textbox');
+    form.appendChild(editable);
+    document.body.appendChild(form);
+
+    const id = stampEditor(editable);
+    expect(resolveEditor(id)).toBe(editable);
+
+    // HubSpot/Gmail rebuilds the compose body: old editable replaced by a fresh
+    // element with no correlation id; the form container survives.
+    editable.remove();
+    const fresh = document.createElement('div');
+    fresh.setAttribute('contenteditable', 'true');
+    fresh.setAttribute('role', 'textbox');
+    form.appendChild(fresh);
+
+    const resolved = resolveEditor(id);
+    expect(resolved).toBe(fresh);
+    expect(fresh.getAttribute(EDITOR_ID_ATTR)).toBe(id); // re-stamped
+  });
+
+  it('does NOT recover across a genuinely different compose (host also gone)', () => {
+    const form1 = document.createElement('form');
+    const e1 = document.createElement('div');
+    e1.setAttribute('contenteditable', 'true');
+    form1.appendChild(e1);
+    document.body.appendChild(form1);
+    const id = stampEditor(e1);
+
+    // The whole compose (editor + host) is gone; a separate compose appears.
+    form1.remove();
+    const form2 = document.createElement('form');
+    const e2 = document.createElement('div');
+    e2.setAttribute('contenteditable', 'true');
+    form2.appendChild(e2);
+    document.body.appendChild(form2);
+
+    expect(resolveEditor(id)).toBeNull();
+  });
 });
