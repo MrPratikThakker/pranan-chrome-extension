@@ -13,7 +13,7 @@
 // Content script -- runs in Chrome's isolated world (no ES module support)
 // IIFE bundling handles scope isolation
 
-import { injectMultilineText, findGmailQuoteBlock, injectMultilineTextBefore } from '@/lib/safe-dom';
+import { injectMultilineText, findGmailQuoteBlock, injectMultilineTextBefore, normalizeDraftForPlainText } from '@/lib/safe-dom';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
@@ -257,11 +257,12 @@ function injectDraft(composeWindow: Element, draftText: string): boolean {
   // the quote (QA 2026-06-12: a CC'd colleague received the reply with no
   // context). Insert the draft ABOVE the quote; fall back to full-body write
   // only for a fresh compose with no quoted thread.
+  const clean = normalizeDraftForPlainText(draftText);
   const quoteBlock = findGmailQuoteBlock(body);
   if (quoteBlock) {
-    injectMultilineTextBefore(body, draftText, quoteBlock, 'div');
+    injectMultilineTextBefore(body, clean, quoteBlock, 'div');
   } else {
-    injectMultilineText(body, draftText, 'div');
+    injectMultilineText(body, clean, 'div');
   }
 
   body.dispatchEvent(new Event('input', { bubbles: true }));

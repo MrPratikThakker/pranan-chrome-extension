@@ -91,3 +91,32 @@ export function injectMultilineTextBefore(
   spacer.appendChild(document.createElement('br'));
   node.insertBefore(spacer, beforeEl);
 }
+
+/**
+ * Normalize server-generated draft text for insertion into a plain-text editor.
+ * Gmail compose renders our textContent literally, so Markdown emphasis showed
+ * up as raw characters (founding-tester report, Swapnali S. 2026-07-20: drafts
+ * arrived with **bold** and "- " bullets as literal text).
+ *
+ * Conservative on purpose: strips bold and inline-code markers, converts
+ * Markdown bullets to a glyph, flattens ATX headings, and turns [label](url)
+ * into "label (url)". Single * and _ are left untouched so filenames, emails,
+ * and snake_case tokens are never mangled.
+ */
+export function normalizeDraftForPlainText(text: string): string {
+  if (!text) return text;
+  const lines = text.split('\n').map((line) => {
+    // Markdown bullets ("- ", "* ", "+ ") -> bullet glyph, preserving indent.
+    let out = line.replace(/^(\s*)[-*+]\s+/, '$1• ');
+    // ATX headings ("# ", "## ", ...) -> plain line.
+    out = out.replace(/^(\s*)#{1,6}\s+/, '$1');
+    return out;
+  });
+  let out = lines.join('\n');
+  out = out.replace(/\*\*(.+?)\*\*/g, '$1'); // **bold** -> bold
+  out = out.replace(/__(.+?)__/g, '$1');     // __bold__ -> bold
+  out = out.replace(/`([^`]+)`/g, '$1');     // `code` -> code
+  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '$1 ($2)'); // [label](url)
+  out = out.replace(/\*\*/g, '');            // any leftover bold markers
+  return out;
+}
