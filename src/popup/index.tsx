@@ -161,10 +161,18 @@ function Popup() {
     window.close();
   };
 
-  const disconnect = () => {
-    // Clears the extension's stored Bearer + refresh tokens so it no longer
-    // acts as you. (Web sign-out does not revoke the extension's own session.)
-    chrome.runtime.sendMessage({ type: 'DISCONNECT' }).catch(() => {});
+  const disconnect = async () => {
+    // Clear the stored Bearer + refresh tokens DIRECTLY from the popup. Doing the
+    // removal here (not only via a DISCONNECT message to the service worker) fixes
+    // the MV3 race where window.close() tore down the popup's message port before
+    // the message reached the SW, so tokens were never cleared and "Disconnect"
+    // appeared to do nothing (Pratik 2026-07-22). Web sign-out does not revoke the
+    // extension's own session, so this explicit control must be reliable.
+    try { await chrome.storage.local.remove(['authToken', 'refreshToken']); } catch { /* pass */ }
+    // Then notify the SW to drop its cached auth + update the side panel; await so
+    // it is actually delivered before we close. SW asleep is fine -- storage (the
+    // source of truth) is already cleared.
+    try { await chrome.runtime.sendMessage({ type: 'DISCONNECT' }); } catch { /* pass */ }
     window.close();
   };
 
@@ -442,7 +450,7 @@ function Popup() {
           </button>
 
           {/* Disconnect — clears the extension's stored tokens (F-13). */}
-          <button onClick={disconnect} style={{
+          <button onClick={() => { void disconnect(); }} style={{
             width: '100%', padding: '6px 12px', marginTop: 6,
             fontSize: 11, fontWeight: 500,
             color: 'rgba(248,113,113,0.85)',
