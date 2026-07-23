@@ -595,7 +595,19 @@ function checkForActiveCompose(requireFocus = true) {
   const isDM = isDirectMessage();
   const recipient = isDM ? getDMRecipient() : null;
 
-  // Only send if something changed
+  // Always re-ensure the inline affordances (prompt bar + Send-adjacent button)
+  // for the CURRENT context, even when the conversation has not changed. Both
+  // injectors are idempotent (they dedupe on a context-stamped attribute), so
+  // this is a cheap no-op when the bar is already present and correct. Without
+  // this, the bar was only built on a context CHANGE, so after focusout removed
+  // it (or Slack re-rendered the compose area), re-focusing the SAME conversation
+  // never rebuilt it -> "sometimes it activates, sometimes it does not" (Apoorva,
+  // Ipsita, Vanshika, Ananta, Sharmilee 2026-07-21).
+  setTimeout(injectComposeButtons, 300);
+  setTimeout(injectSlackPromptBar, 400);
+
+  // Only notify the side panel + run the heavier per-conversation phases when the
+  // conversation actually changed.
   if (channel !== lastChannel || recipient !== lastRecipient || isDM !== isInDM) {
     lastChannel = channel;
     lastRecipient = recipient;
@@ -619,10 +631,6 @@ function checkForActiveCompose(requireFocus = true) {
         selectedText: null,
       },
     }).catch(() => {});
-
-    // Phase 1: Inject icon button near Send + inline prompt bar
-    setTimeout(injectComposeButtons, 300);
-    setTimeout(injectSlackPromptBar, 400);
 
     // Phase 2: Show popup for DMs
     if (isDM) {
@@ -869,6 +877,13 @@ function init() {
       checkForActiveCompose(false);
     } else if (!input && lastInputDetected) {
       lastInputDetected = false;
+    }
+    // Self-heal: if the user is composing (input focused) but our bar has been
+    // wiped by a Slack virtual-DOM re-render that fired no focus or navigation
+    // event, rebuild it. Idempotent, so a no-op when the bar is already present.
+    if (input && isInputFocused() && !document.querySelector(`[${PRANAN_SLACK_BAR_ATTR}]`)) {
+      injectComposeButtons();
+      injectSlackPromptBar();
     }
   };
   composePollHandle = window.setInterval(pollFn, 3000);

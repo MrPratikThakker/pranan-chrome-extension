@@ -771,6 +771,28 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // Insert before the compose container (so it appears above it, like Voila)
   composeContainer.parentElement?.insertBefore(bar, composeContainer);
 
+  // v0.8.33: on a floating "New Message" popup (not an inline reply), the
+  // injected bar adds height, and Gmail's bottom-anchored popup grows UPWARD, so
+  // its own title bar (minimize / pop-out / close) can clip behind Gmail's top
+  // toolbar and become unclickable (Drishti G. 2026-07-21). Defensive: only when
+  // the floating compose dialog's top edge sits above a safe offset, nudge it
+  // down and cap its height so the title bar stays reachable. Inline replies
+  // (not position:fixed/absolute) are never touched.
+  const keepComposeTitleVisible = () => {
+    if (!document.contains(bar)) return;
+    const dialog = composeWindow.closest('[role="dialog"]') as HTMLElement | null;
+    if (!dialog) return;
+    const pos = getComputedStyle(dialog).position;
+    if (pos !== 'fixed' && pos !== 'absolute') return; // inline reply -> leave alone
+    const SAFE_TOP = 64; // clears Gmail's top toolbar
+    if (dialog.getBoundingClientRect().top < SAFE_TOP) {
+      dialog.style.top = `${SAFE_TOP}px`;
+      dialog.style.maxHeight = `calc(100vh - ${SAFE_TOP + 16}px)`;
+    }
+  };
+  requestAnimationFrame(keepComposeTitleVisible);
+  setTimeout(keepComposeTitleVisible, 600);
+
   // v0.8.10 UI QA: align the bar (and chips) with Gmail's compose CONTENT edge.
   // The bar is injected at the container's outer width while Gmail insets the
   // compose body for the avatar gutter (~80px), so the bar visually hung left
