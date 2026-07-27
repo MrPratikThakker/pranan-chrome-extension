@@ -22,6 +22,7 @@ import { createSuggestionMonitor } from '../shared/inline-suggestions';
 import type { InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
 import { findAll, findOne, SELECTORS } from '../selectors';
+import { bottomOffsetAboveSendRow, bottomOffsetForChips, correctedBottomOffset, shouldHideBar } from '@/lib/compose-layout';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -293,6 +294,101 @@ function injectComposeButtons(composeWindow: Element) {
 
   // --- 2. Small floating icon in compose body (Grammarly position) ---
   injectFloatingIcon(composeWindow, recipientEmail);
+}
+
+/**
+ * Keep our injected bar from stealing the space Gmail allocated to its own
+ * controls.
+ *
+ * Gmail sizes the compose window and never re-flows when a third party inserts
+ * a node. In normal flow our bar pushes Gmail's bottom toolbar down by exactly
+ * its own height (measured: 76px), which in a maximised compose puts the Send
+ * button below the fold entirely -- the user cannot send at all. Reported by
+ * Ancil 2026-07-23 and Drishti 2026-07-27.
+ *
+ * So the bar is taken OUT OF FLOW and pinned just above Gmail's send toolbar.
+ * Gmail's layout is then identical to vanilla and Send lands where Gmail put it.
+ *
+ * Re-runs on resize and on any dialog resize (full screen toggle, pop-out,
+ * window drag). The previous attempt at this class of bug used one-shot timers
+ * and silently stopped applying the moment the user changed compose state,
+ * which is why the bug kept coming back.
+ */
+function pinComposeBarOutOfFlow(bar: HTMLElement, composeWindow: Element) {
+  const host = bar.parentElement as HTMLElement | null;
+  if (!host) return;
+
+  const apply = () => {
+    if (!document.contains(bar)) return true; // detached: stop observing
+    const sendButton = findOne<HTMLElement>('gmail.sendButton', SELECTORS.gmail.sendButton, composeWindow);
+    // Order matters: closest() with a grouped selector returns the NEAREST
+    // matching ancestor, which is the narrow .gU cell, not the toolbar row.
+    // Ask for the row explicitly, widest first, so we clear the whole row.
+    const sendRow = (sendButton?.closest('.btC')
+      || sendButton?.closest('.aoP')
+      || sendButton?.closest('tr')
+      || sendButton?.closest('.gU')) as HTMLElement | null;
+    // Unknown layout: leave the bar exactly as it was rather than guess.
+    if (!sendButton || !sendRow) return false;
+
+    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+
+    let offset = bottomOffsetAboveSendRow(host.getBoundingClientRect(), sendRow.getBoundingClientRect());
+    bar.style.position = 'absolute';
+    bar.style.top = '';
+    bar.style.left = '12px';
+    bar.style.right = '12px';
+    bar.style.bottom = `${offset}px`;
+    bar.style.margin = '0';
+    bar.style.zIndex = '5';
+
+    // Gmail rebuilds the compose on full-screen toggle, so the offset parent is
+    // not always the host we measured from and the bar can land on top of Send.
+    // Measure what actually happened and correct by the observed overlap.
+    const corrected = correctedBottomOffset(
+      offset,
+      bar.getBoundingClientRect(),
+      sendRow.getBoundingClientRect()
+    );
+    if (corrected !== null) {
+      offset = corrected;
+      bar.style.bottom = `${offset}px`;
+    }
+
+    // The chips row lives just above the bar and must come out of flow too,
+    // otherwise it reintroduces the same overlap with a smaller number.
+    const chips = host.querySelector('[data-pranan-intents]') as HTMLElement | null;
+    if (chips) {
+      chips.style.position = 'absolute';
+      chips.style.left = '12px';
+      chips.style.right = '12px';
+      chips.style.margin = '0';
+      chips.style.zIndex = '5';
+      chips.style.bottom = `${bottomOffsetForChips(offset, bar.getBoundingClientRect().height)}px`;
+    }
+
+    // Safety net: our UI must never be the reason Send is unreachable. The bar
+    // is already out of flow here, so hiding it cannot move Send -- this only
+    // fires when the compose is too short to show its own controls.
+    const hide = shouldHideBar(sendButton.getBoundingClientRect(), window.innerHeight);
+    bar.style.display = hide ? 'none' : '';
+    if (chips) chips.style.display = hide ? 'none' : '';
+    return false;
+  };
+
+  apply();
+  requestAnimationFrame(apply);
+  [300, 900, 2000].forEach((ms) => setTimeout(apply, ms));
+
+  window.addEventListener('resize', apply);
+  const dialog = composeWindow.closest('[role="dialog"]');
+  if (dialog && typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => {
+      if (!document.contains(bar)) { ro.disconnect(); return; }
+      apply();
+    });
+    ro.observe(dialog);
+  }
 }
 
 function injectPromptBar(composeWindow: Element, recipientEmail: string | null) {
@@ -770,6 +866,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
 
   // Insert before the compose container (so it appears above it, like Voila)
   composeContainer.parentElement?.insertBefore(bar, composeContainer);
+  pinComposeBarOutOfFlow(bar, composeWindow);
 
   // v0.8.33: on a floating "New Message" popup (not an inline reply), the
   // injected bar adds height, and Gmail's bottom-anchored popup grows UPWARD, so
@@ -782,10 +879,18 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     if (!document.contains(bar)) return;
     const dialog = composeWindow.closest('[role="dialog"]') as HTMLElement | null;
     if (!dialog) return;
-    const pos = getComputedStyle(dialog).position;
-    if (pos !== 'fixed' && pos !== 'absolute') return; // inline reply -> leave alone
+    // v0.8.34: this used to early-return unless the dialog was fixed/absolute.
+    // Gmail's compose dialog computes to position:static, so the guard fired
+    // every time and this protection never ran for anyone. Detect a floating
+    // compose the way it actually presents -- it is the dialog Gmail anchors to
+    // the viewport bottom -- and leave true inline replies alone.
+    const isFloating = dialog.getBoundingClientRect().bottom >= window.innerHeight - 4;
+    if (!isFloating) return; // inline reply -> leave alone
+    // Only rescue a compose whose title bar is genuinely off-screen. A
+    // maximised compose legitimately sits high (top ~40px) and must not be
+    // nudged, or we would be re-breaking the layout we just stopped breaking.
     const SAFE_TOP = 64; // clears Gmail's top toolbar
-    if (dialog.getBoundingClientRect().top < SAFE_TOP) {
+    if (dialog.getBoundingClientRect().top < 0) {
       dialog.style.top = `${SAFE_TOP}px`;
       dialog.style.maxHeight = `calc(100vh - ${SAFE_TOP + 16}px)`;
     }
@@ -798,6 +903,9 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // compose body for the avatar gutter (~80px), so the bar visually hung left
   // of the card below it. Measure the real inset and match it.
   const alignWithCompose = () => {
+    // Pinned (out-of-flow) bars are aligned by their own left/right offsets;
+    // adding a margin here would shove them sideways.
+    if (bar.style.position === 'absolute') return;
     const body = composeWindow.querySelector(
       '[contenteditable="true"][aria-label="Message Body"], .Am.aiL [contenteditable="true"]'
     ) as HTMLElement | null;
@@ -967,6 +1075,7 @@ function injectPromptBarLegacy(composeContainer: Element, composeWindow: Element
   });
 
   composeContainer.parentElement?.insertBefore(bar, composeContainer);
+  pinComposeBarOutOfFlow(bar, composeWindow);
 }
 function injectFloatingIcon(composeWindow: Element, recipientEmail: string | null) {
   // Find Gmail's send toolbar (.btC) — the bottom row with Send + Aa + emoji + attach.
