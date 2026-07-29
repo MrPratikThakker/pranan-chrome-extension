@@ -14,6 +14,7 @@
 // IIFE bundling handles scope isolation
 
 import { injectMultilineText, findGmailQuoteBlock, injectMultilineTextBefore, normalizeDraftForPlainText } from '@/lib/safe-dom';
+import { safeSendMessage } from '@/lib/runtime';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
@@ -23,6 +24,7 @@ import type { InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
 import { findAll, findOne, SELECTORS } from '../selectors';
 import { bottomOffsetAboveSendRow, bottomOffsetForChips, correctedBottomOffset, shouldHideBar, isSendReachable, placementObscuresCompose } from '@/lib/compose-layout';
+import { resolveLiveCompose } from '@/lib/live-compose';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -330,7 +332,13 @@ function injectComposeButtons(composeWindow: Element) {
  * the previous attempt used one-shot timers and stopped applying the moment the
  * user changed compose state, which is why it kept coming back.
  */
-function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
+/**
+ * @param getCompose resolves the compose LIVE on every pass. The bar outlives
+ * the compose it was built against (it is injected into the thread container,
+ * so Gmail and HubSpot Sales can replace the compose subtree underneath it),
+ * and a captured Element silently stops matching anything. See live-compose.ts.
+ */
+function positionComposeBar(bar: HTMLElement, getCompose: () => Element) {
   const host = bar.parentElement as HTMLElement | null;
   if (!host) return;
 
@@ -349,10 +357,20 @@ function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
     }
   };
 
+  /**
+   * Show or hide, restoring the display the element was BUILT with.
+   *
+   * Assigning '' does not mean "default" here, it removes the inline
+   * declaration entirely -- and both the bar and the chips row are constructed
+   * with an inline `display: flex` in their cssText. Clearing it drops them to
+   * `block`, so the icon falls onto its own line, the chips stop sitting in a
+   * row, and the bar grows from 60px to 94px. Measured live on 29 Jul: forcing
+   * flex back took it 94px -> 60px with every child on one row.
+   */
   const setVisible = (visible: boolean) => {
-    bar.style.display = visible ? '' : 'none';
+    bar.style.display = visible ? 'flex' : 'none';
     const chips = chipsOf();
-    if (chips) chips.style.display = visible ? '' : 'none';
+    if (chips) chips.style.display = visible ? 'flex' : 'none';
   };
 
   /**
@@ -371,7 +389,7 @@ function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
    */
   const alignInFlow = () => {
     if (bar.style.position === 'absolute') return;
-    const body = composeWindow.querySelector(
+    const body = getCompose().querySelector(
       '[contenteditable="true"][aria-label="Message Body"], .Am.aiL [contenteditable="true"]'
     ) as HTMLElement | null;
     if (!body || !document.contains(bar)) return;
@@ -390,7 +408,7 @@ function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
   const apply = (): boolean => {
     if (!document.contains(bar)) return true; // detached: stop observing
 
-    const sendButton = findOne<HTMLElement>('gmail.sendButton', SELECTORS.gmail.sendButton, composeWindow);
+    const sendButton = findOne<HTMLElement>('gmail.sendButton', SELECTORS.gmail.sendButton, getCompose());
     const sendRow = (sendButton?.closest('.btC')
       || sendButton?.closest('.aoP')
       || sendButton?.closest('tr')
@@ -413,7 +431,7 @@ function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
       return false;
     }
 
-    const editor = composeWindow.querySelector('[g_editable="true"], [contenteditable="true"][role="textbox"]') as HTMLElement | null;
+    const editor = getCompose().querySelector('[g_editable="true"], [contenteditable="true"][role="textbox"]') as HTMLElement | null;
 
     // 1. In normal flow. Cannot overlay anything, and is correct for the inline
     //    reply that most people use most of the time.
@@ -426,7 +444,7 @@ function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
     // drag the bar back out of flow and on top of the compose again. The
     // out-of-flow trick exists solely for a compose Gmail has pinned to a fixed
     // box: the floating or maximised dialog, where nothing scrolls into view.
-    const inFixedDialog = Boolean(composeWindow.closest('[role="dialog"]'));
+    const inFixedDialog = Boolean(getCompose().closest('[role="dialog"]'));
     if (!inFixedDialog) return false;
 
     if (isSendReachable(sendButton.getBoundingClientRect(), window.innerHeight)) return false;
@@ -485,7 +503,7 @@ function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
   [300, 900, 2000].forEach((ms) => setTimeout(apply, ms));
 
   window.addEventListener('resize', apply);
-  const dialog = composeWindow.closest('[role="dialog"]');
+  const dialog = getCompose().closest('[role="dialog"]');
   if (dialog && typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => {
       if (!document.contains(bar)) { ro.disconnect(); return; }
@@ -551,10 +569,31 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   const bar = document.createElement('div');
   bar.setAttribute(PRANAN_BAR_ATTR, 'true');
   bar.setAttribute('data-pranan-v6', '1');
+
+  /**
+   * The compose, resolved fresh on every read.
+   *
+   * `composeWindow` above is captured once and then goes stale: the bar is
+   * injected into the thread container, so it survives Gmail (and HubSpot
+   * Sales) replacing the compose subtree, and every subsequent read through the
+   * captured Element quietly returns nothing — no recipients, no thread
+   * context, no editable to stamp. Measured live on 29 Jul: Generate ran
+   * against a detached node, sent a reply request with no thread, and left the
+   * editor empty for the full 30s timeout. Falls back to the captured value so
+   * behaviour is unchanged when nothing has moved.
+   */
+  const liveCompose = (): Element =>
+    resolveLiveCompose(bar, composeWindow, SELECTORS.gmail.composeBody.join(', '), SELECTORS.gmail.composeWindow.join(', '))
+    || composeWindow;
   bar.style.cssText = `
     display: flex;
     align-items: center;
     gap: 10px;
+    /* Sized to its contents rather than the full compose width, so it sits as
+       a tidy block above the chips row instead of a very wide, mostly empty
+       panel. Still shrinks on narrow windows. */
+    width: fit-content;
+    max-width: 100%;
     padding: 10px 14px 10px 12px;
     margin: 10px 0 6px;
     background: #ffffff;
@@ -581,8 +620,13 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   input.type = 'text';
   input.placeholder = 'Draft a reply with Pranan...';
   input.style.cssText = `
-    flex: 1;
+    flex: 1 1 auto;
     min-width: 100px;
+    /* Capped so the bar reads as a compact control group. An uncapped flex
+       grow stretched the field to ~1000px on a wide compose and stranded the
+       recipient chip, tone and Generate against the far right edge, with a
+       field of empty white between them. */
+    max-width: 460px;
     height: 36px;
     padding: 0 12px;
     border: 1px solid #e5e7eb;
@@ -596,11 +640,11 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   input.addEventListener('focus', () => {
     input.style.borderColor = '#a78bfa';
     // v0.7.2 — refresh recipient chip on focus
-    const fresh = extractRecipients(composeWindow);
+    const fresh = extractRecipients(liveCompose());
     if (fresh.length > 0) {
       const labelEl = relChip.querySelector('[data-rel-text]') as HTMLElement | null;
       if (labelEl && /New email|Reply|^$/.test(labelEl.textContent || '')) {
-        const name = extractRecipientName(composeWindow, fresh[0]) || fresh[0].split('@')[0];
+        const name = extractRecipientName(liveCompose(), fresh[0]) || fresh[0].split('@')[0];
         labelEl.textContent = `→ ${name}`;
       }
     }
@@ -622,7 +666,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   `;
   // v0.8.10 UI QA: never label a reply compose "New email". If the compose has
   // thread context it is a reply; use "Reply" until the real recipient resolves.
-  const isReplyCompose = !!getThreadContext(composeWindow);
+  const isReplyCompose = !!getThreadContext(liveCompose());
   relChip.innerHTML = `<span style="width: 5px; height: 5px; border-radius: 50%; background: currentColor;"></span><span data-rel-text>${recipientEmail ? '→ ' + escapeText(recipientEmail.split('@')[0] || 'recipient') : (isReplyCompose ? 'Reply' : 'New email')}</span>`;
 
   // R2: one-click tier correction. The pill is tappable; picking a tier sets a
@@ -638,7 +682,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     ['network', 'Network'],
   ];
   const resolveTargetContact = (): string | null => {
-    const live = extractRecipients(composeWindow);
+    const live = extractRecipients(liveCompose());
     if (live[0]) return live[0];
     if (recipientEmail) return recipientEmail;
     const threadsForPill = findThreadViews();
@@ -671,7 +715,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
         e.stopPropagation();
         menu.remove();
         const labelEl = relChip.querySelector('[data-rel-text]') as HTMLElement | null;
-        chrome.runtime.sendMessage({ type: 'SET_TIER_OVERRIDE', payload: { email: target, tier: value } })
+        safeSendMessage({ type: 'SET_TIER_OVERRIDE', payload: { email: target, tier: value } })
           .then((res: { ok?: boolean } | undefined) => {
             if (labelEl) {
               const namePart = (labelEl.textContent || '').split('(')[0].replace('→', '').trim() || target.split('@')[0];
@@ -740,7 +784,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   moreBtn.innerHTML = '&middot;&middot;&middot;';
   moreBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+    safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
   });
 
   bar.appendChild(iconWrap);
@@ -800,7 +844,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     // often renders ~50-200ms later. If we captured recipientEmail at
     // injection time it can be null even on a reply with a real recipient,
     // which produces the "Generate fires but no draft inserts" bug.
-    const liveRecipients = extractRecipients(composeWindow);
+    const liveRecipients = extractRecipients(liveCompose());
     // The reply is addressed to whoever wrote the message being replied to,
     // i.e. the newest thread message's sender -- NOT recipients[0]. In a
     // reply-all where a teammate is listed first in the To field, recipients[0]
@@ -814,7 +858,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       : { email: null as string | null, name: null as string | null };
     let liveRecipientEmail = threadSender.email || liveRecipients[0] || recipientEmail || null;
     let recipientName =
-      (liveRecipientEmail ? extractRecipientName(composeWindow, liveRecipientEmail) : null)
+      (liveRecipientEmail ? extractRecipientName(liveCompose(), liveRecipientEmail) : null)
       || threadSender.name
       || null;
     setLoading(true);
@@ -822,22 +866,33 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     // draft can only be inserted here even if the user switches compose/tab
     // mid-flight (audit HIGH: wrong-place insertion). Stamp the editable body
     // (preferred) or fall back to the compose window element.
-    const editableBody = (composeWindow.querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null) || composeWindow;
+    const editableBody = (liveCompose().querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null) || liveCompose();
     const editorId = stampEditor(editableBody);
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
         platform: 'gmail',
         recipientEmail: liveRecipientEmail,
         recipientName,
-        messageToReplyTo: getThreadContext(composeWindow),
+        messageToReplyTo: getThreadContext(liveCompose()),
         channelName: null,
-        subject: getSubject(composeWindow),
+        subject: getSubject(liveCompose()),
         userPrompt: userPrompt || null,
         originSurface: 'inline-bar',
-        composeType: getThreadContext(composeWindow) ? 'reply' : 'new',
+        composeType: getThreadContext(liveCompose()) ? 'reply' : 'new',
         editorId,
       },
+    }).then((ack) => {
+      // safeSendMessage RESOLVES to null when the extension cannot be reached —
+      // it never rejects, so the .catch below has never once run for the case it
+      // was written for. A dead worker therefore looked identical to a slow one:
+      // the bar sat on "Generating..." for the full 30s and then told the user to
+      // check they were signed in. Treat a missing ack as the failure it is.
+      if (ack === null) {
+        if (resetTimer) { clearTimeout(resetTimer); resetTimer = null; }
+        setLoading(false);
+        showInlineNotice('Pranan lost its connection to the browser extension. Reload this tab and try again.');
+      }
     }).catch((err) => {
       console.warn('[Pranan v6] sendMessage failed:', err);
       setLoading(false);
@@ -967,7 +1022,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // Async: try to upgrade the relationship chip with the real tier from the
   // background script (best-effort; falls back to the simple email-local label).
   if (recipientEmail) {
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'GET_RELATIONSHIP_TIER',
       payload: { email: recipientEmail },
     }).then((res: { tier?: string; name?: string } | undefined) => {
@@ -990,7 +1045,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
 
   // Insert before the compose container (so it appears above it, like Voila)
   composeContainer.parentElement?.insertBefore(bar, composeContainer);
-  positionComposeBar(bar, composeWindow);
+  positionComposeBar(bar, liveCompose);
 
   // v0.8.33: on a floating "New Message" popup (not an inline reply), the
   // injected bar adds height, and Gmail's bottom-anchored popup grows UPWARD, so
@@ -1001,7 +1056,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // (not position:fixed/absolute) are never touched.
   const keepComposeTitleVisible = () => {
     if (!document.contains(bar)) return;
-    const dialog = composeWindow.closest('[role="dialog"]') as HTMLElement | null;
+    const dialog = liveCompose().closest('[role="dialog"]') as HTMLElement | null;
     if (!dialog) return;
     // v0.8.34: this used to early-return unless the dialog was fixed/absolute.
     // Gmail's compose dialog computes to position:static, so the guard fired
@@ -1030,7 +1085,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     // Pinned (out-of-flow) bars are aligned by their own left/right offsets;
     // adding a margin here would shove them sideways.
     if (bar.style.position === 'absolute') return;
-    const body = composeWindow.querySelector(
+    const body = liveCompose().querySelector(
       '[contenteditable="true"][aria-label="Message Body"], .Am.aiL [contenteditable="true"]'
     ) as HTMLElement | null;
     if (!body || !document.contains(bar)) return;
@@ -1051,11 +1106,11 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // soon as the real recipient exists.
   const refreshPill = () => {
     if (!document.contains(bar)) return;
-    const fresh = extractRecipients(composeWindow);
+    const fresh = extractRecipients(liveCompose());
     if (fresh.length > 0) {
       const labelEl = relChip.querySelector('[data-rel-text]') as HTMLElement | null;
       if (labelEl && /^(New email|Reply)$/.test((labelEl.textContent || '').trim())) {
-        const name = extractRecipientName(composeWindow, fresh[0]) || fresh[0].split('@')[0];
+        const name = extractRecipientName(liveCompose(), fresh[0]) || fresh[0].split('@')[0];
         labelEl.textContent = `→ ${name}`;
       }
     }
@@ -1064,23 +1119,23 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
 
   // One-tap reply intents (reply threads only). We surface up to 3 short,
   // in-your-voice intent chips below the bar; tapping one steers the draft.
-  const threadForIntents = getThreadContext(composeWindow);
+  const threadForIntents = getThreadContext(liveCompose());
   if (threadForIntents) {
     const chipsRow = document.createElement('div');
     chipsRow.setAttribute('data-pranan-intents', '1');
     chipsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px 0;padding:0 2px;';
     // v0.8.10 UI QA: inherit the bar's compose-content alignment (set below).
     if (bar.style.marginLeft) chipsRow.style.marginLeft = bar.style.marginLeft;
-    const liveRecipients = extractRecipients(composeWindow);
+    const liveRecipients = extractRecipients(liveCompose());
     const intentRecipient = liveRecipients[0] || recipientEmail || null;
-    const intentRecipientName = intentRecipient ? extractRecipientName(composeWindow, intentRecipient) : null;
-    chrome.runtime.sendMessage({
+    const intentRecipientName = intentRecipient ? extractRecipientName(liveCompose(), intentRecipient) : null;
+    safeSendMessage({
       type: 'GET_REPLY_INTENTS',
       payload: {
         platform: 'gmail',
         recipientEmail: intentRecipient,
         recipientName: intentRecipientName,
-        subject: getSubject(composeWindow),
+        subject: getSubject(liveCompose()),
         messageToReplyTo: threadForIntents,
       },
     }).then((res: { intents?: string[] } | undefined) => {
@@ -1185,7 +1240,7 @@ function injectPromptBarLegacy(composeContainer: Element, composeWindow: Element
 
   bar.addEventListener('click', () => {
     const recipientName = recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
         platform: 'gmail',
@@ -1199,7 +1254,10 @@ function injectPromptBarLegacy(composeContainer: Element, composeWindow: Element
   });
 
   composeContainer.parentElement?.insertBefore(bar, composeContainer);
-  positionComposeBar(bar, composeWindow);
+  positionComposeBar(
+    bar,
+    () => resolveLiveCompose(bar, composeWindow, SELECTORS.gmail.composeBody.join(', '), SELECTORS.gmail.composeWindow.join(', ')) || composeWindow,
+  );
 }
 function injectFloatingIcon(composeWindow: Element, recipientEmail: string | null) {
   // Find Gmail's send toolbar (.btC) — the bottom row with Send + Aa + emoji + attach.
@@ -1231,9 +1289,15 @@ function injectFloatingIcon(composeWindow: Element, recipientEmail: string | nul
 
   const host = document.createElement('div');
   host.setAttribute(PRANAN_FLOAT_ATTR, 'true');
+  // height matches Gmail's own toolbar buttons (36px). Without it the host
+  // shrink-wrapped the 28px button and `vertical-align: middle` aligned it to
+  // the text baseline's middle rather than the row's centre, so it rode a few
+  // pixels above Aa, the paperclip and everything else -- reads as "tilted up".
   host.style.cssText = `
     display: inline-flex;
     align-items: center;
+    justify-content: center;
+    height: 36px;
     margin-left: 8px;
     vertical-align: middle;
   `;
@@ -1241,7 +1305,18 @@ function injectFloatingIcon(composeWindow: Element, recipientEmail: string | nul
   // Place Pranan AFTER all existing toolbar buttons so it lands to the right
   // of Loom and Voila (which both inject after Send). Falls back to "after
   // Send" if the toolbar parent can't be resolved.
-  const toolbarParent: HTMLElement | null = sendButton.parentElement;
+  // The row, not the Send group.
+  //
+  // This used to append to sendButton.parentElement, which is Gmail's `.dC`
+  // wrapper around Send + its dropdown arrow -- not the toolbar. Measured live:
+  // Send group spans x=405..542 and our icon landed at x=518..542, i.e. inside
+  // it. Gmail styles that group as one control, so our button inherited the
+  // blue pill and read as a stray dot welded onto Send, instead of sitting with
+  // Aa / pencil / paperclip like Loom and Voila do.
+  //
+  // `toolbar` is the .btC row and was already resolved above; it just was not
+  // being used for placement.
+  const toolbarParent: HTMLElement | null = toolbar;
   if (toolbarParent) {
     toolbarParent.appendChild(host);
   }
@@ -1254,33 +1329,49 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
 
   shadow.innerHTML = `
     <style>
+      /* Sized and weighted to sit as an equal beside Gmail's own toolbar
+         icons (Aa, attach, link) and the other extensions' buttons. It was
+         24px with a 14px glyph at 45% opacity, which read as small and washed
+         out next to them -- a faint mark rather than a control. */
       .pranan-icon-btn {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 24px;
-        height: 24px;
+        width: 28px;
+        height: 28px;
         padding: 0;
         background: transparent;
         border: none;
         border-radius: 50%;
         cursor: pointer;
-        transition: all 0.15s ease;
-        opacity: 0.45;
+        transition: background 0.15s ease;
       }
       .pranan-icon-btn:hover {
-        opacity: 1;
-        background: rgba(167, 139, 250, 0.08);
+        background: rgba(109, 40, 217, 0.10);
+      }
+      .pranan-icon-btn:focus-visible {
+        outline: 2px solid #6d28d9;
+        outline-offset: 2px;
       }
       .pranan-icon-btn svg {
-        width: 14px;
-        height: 14px;
+        width: 20px;
+        height: 20px;
+      }
+      /* #a78bfa is the accent for Pranan's own dark UI. On Gmail's white
+         toolbar it is far too pale, so use the deep accent -- which is exactly
+         what the app's own light theme does. Flip back on a dark Gmail. */
+      .pranan-icon-btn .mark { stroke: #6d28d9; }
+      .pranan-icon-btn .core { fill: #6d28d9; }
+      @media (prefers-color-scheme: dark) {
+        .pranan-icon-btn .mark { stroke: #a78bfa; }
+        .pranan-icon-btn .core { fill: #a78bfa; }
+        .pranan-icon-btn:hover { background: rgba(167, 139, 250, 0.16); }
       }
     </style>
-    <button class="pranan-icon-btn" title="Draft with Pranan">
-      <svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="60" cy="60" r="33" stroke="#a78bfa" stroke-width="7" fill="none"/>
-          <circle cx="60" cy="60" r="16" fill="#a78bfa"/>
+    <button class="pranan-icon-btn" title="Draft with Pranan" aria-label="Draft with Pranan">
+      <svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <circle class="mark" cx="60" cy="60" r="33" stroke-width="9" fill="none"/>
+          <circle class="core" cx="60" cy="60" r="17"/>
         </svg>
     </button>
   `;
@@ -1298,7 +1389,7 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
       return;
     }
     const recipientName = recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
         platform: 'gmail',
@@ -1318,7 +1409,17 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
 
 const POPOVER_ID = 'pranan-compose-popover';
 
-function openComposePopover(anchorHost: HTMLElement, composeWindow?: Element) {
+function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) {
+  // The popover is opened from the bar, so it inherits the bar's captured
+  // compose reference and inherits its staleness with it. Re-resolve from the
+  // popover's own anchor for the same reason the bar does. See live-compose.ts.
+  const composeWindow = resolveLiveCompose(
+    anchorHost,
+    capturedCompose,
+    SELECTORS.gmail.composeBody.join(', '),
+    SELECTORS.gmail.composeWindow.join(', '),
+  ) || capturedCompose;
+
   // Toggle if already open
   const existing = document.getElementById(POPOVER_ID);
   if (existing) {
@@ -1430,7 +1531,7 @@ function openComposePopover(anchorHost: HTMLElement, composeWindow?: Element) {
         ? ((composeWindow.querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null) || composeWindow)
         : null;
       const editorId = stampEditor(editableBody);
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'INLINE_DRAFT_REQUEST',
         payload: {
           platform: 'gmail',
@@ -1450,7 +1551,7 @@ function openComposePopover(anchorHost: HTMLElement, composeWindow?: Element) {
   });
 
   // Fetch suggestions
-  chrome.runtime.sendMessage({ type: 'GET_PROACTIVE_SUGGESTIONS' })
+  safeSendMessage({ type: 'GET_PROACTIVE_SUGGESTIONS' })
     .then((res: { suggestions?: Array<Record<string, string>>; error?: string }) => {
       const sugList = popover.querySelector('[data-pranan-suggestions]') as HTMLElement;
       const subtitle = popover.querySelector('[data-pranan-subtitle]') as HTMLElement;
@@ -1492,7 +1593,7 @@ function openComposePopover(anchorHost: HTMLElement, composeWindow?: Element) {
         row.addEventListener('click', () => {
           const threadId = row.getAttribute('data-pranan-thread');
           if (threadId) {
-            chrome.runtime.sendMessage({ type: 'OPEN_THREAD', payload: { threadId } }).catch(() => {});
+            safeSendMessage({ type: 'OPEN_THREAD', payload: { threadId } }).catch(() => {});
             popover.remove();
           }
         });
@@ -1528,7 +1629,7 @@ function showComposeRelationshipPopup(composeWindow: Element, recipientEmail: st
   }
 
   // Request context from background
-  chrome.runtime.sendMessage({
+  safeSendMessage({
     type: 'REQUEST_CONTACT_POPUP',
     payload: { email: recipientEmail },
   }).then((response: unknown) => {
@@ -1550,7 +1651,7 @@ function renderRelationshipPopup(composeWindow: Element, data: RelationshipPopup
     data,
     () => {
       // Draft click -- trigger draft generation
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'INLINE_DRAFT_REQUEST',
         payload: {
           platform: 'gmail',
@@ -1564,7 +1665,7 @@ function renderRelationshipPopup(composeWindow: Element, data: RelationshipPopup
     },
     () => {
       // View full -- open side panel
-      chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+      safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
       dismissRelationshipPopup();
     }
   );
@@ -1585,7 +1686,7 @@ function attachSuggestionMonitor(composeWindow: Element) {
     element: body,
     onCheckRequested: async (text) => {
       try {
-        const response = await chrome.runtime.sendMessage({
+        const response = await safeSendMessage({
           type: 'INLINE_GRAMMAR_CHECK',
           payload: {
             text,
@@ -1756,7 +1857,7 @@ function injectThreadPromptBar(threadContainer: Element) {
 
   const triggerDraft = () => {
     const prompt = input.value.trim() || undefined;
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
         platform: 'gmail',
@@ -1865,7 +1966,7 @@ function scanThreadViews() {
       // Send THREAD_OPENED so side panel can show relationship context
       const { email: senderEmail, name: senderName } = extractThreadSender(thread);
       if (senderEmail || senderName) {
-        chrome.runtime.sendMessage({
+        safeSendMessage({
           type: 'THREAD_OPENED',
           payload: {
             platform: 'gmail',
@@ -1909,7 +2010,7 @@ function onComposeDetected(composeWindow: Element) {
     lastDetectedRecipientPerCompose.set(composeWindow, primaryRecipient);
   }
 
-  chrome.runtime.sendMessage({
+  safeSendMessage({
     type: 'COMPOSE_DETECTED',
     payload: {
       platform: 'gmail',
@@ -1943,7 +2044,7 @@ function onComposeDetected(composeWindow: Element) {
 
     if (newPrimary && newPrimary !== lastDetectedRecipientPerCompose.get(composeWindow)) {
       lastDetectedRecipientPerCompose.set(composeWindow, newPrimary);
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'RECIPIENT_CHANGED',
         payload: {
           recipientEmail: newPrimary,
@@ -1993,7 +2094,7 @@ function onComposeClosed(composeWindow: Element) {
 
   lastDetectedRecipientPerCompose.delete(composeWindow);
 
-  chrome.runtime.sendMessage({
+  safeSendMessage({
     type: 'COMPOSE_CLOSED',
     payload: { platform: 'gmail' },
   }).catch(() => {});
@@ -2006,7 +2107,7 @@ function onComposeClosed(composeWindow: Element) {
 document.addEventListener('mouseup', () => {
   const selectedText = getSelectedText();
   if (selectedText && selectedText.length > 5) {
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'TEXT_SELECTED',
       payload: { selectedText, platform: 'gmail' },
     }).catch(() => {});

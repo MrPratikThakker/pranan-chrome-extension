@@ -10,6 +10,8 @@
  * chrome.storage.local and broadcasts to the side panel.
  */
 
+import { safeSendMessage } from '@/lib/runtime';
+
 console.log('[Pranan Content Script] Loaded on', window.location.href);
 
 // Listen for postMessage from the companion-callback page
@@ -24,14 +26,12 @@ window.addEventListener('message', (event) => {
   console.log('[Pranan Content Script] Received token via postMessage, forwarding to service worker...');
 
   // Forward to service worker
-  chrome.runtime.sendMessage(
-    { type: 'AUTH_TOKEN_FROM_WEB', token, refreshToken },
+  // safeSendMessage is promise-based, and it already swallows the dead-context
+  // case that chrome.runtime.lastError was here to report.
+  safeSendMessage<{ ok?: boolean }>(
+    { type: 'AUTH_TOKEN_FROM_WEB', token, refreshToken }
+  ).then(
     (response) => {
-      if (chrome.runtime.lastError) {
-        console.warn('[Pranan Companion] Failed to send token to service worker:', chrome.runtime.lastError.message);
-        return;
-      }
-
       if (response?.ok) {
         // Signal success back to the page
         const ack = document.createElement('div');
