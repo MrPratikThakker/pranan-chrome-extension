@@ -363,8 +363,24 @@ function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
       || sendButton?.closest('.aoP')
       || sendButton?.closest('tr')
       || sendButton?.closest('.gU')) as HTMLElement | null;
-    // Unknown layout: leave the bar exactly as it was rather than guess.
-    if (!sendButton || !sendRow) return false;
+
+    // No send row. Either the layout is one we do not recognise, or -- far more
+    // commonly -- the user discarded the reply and the compose is simply gone.
+    //
+    // The previous guard here said "leave the bar exactly as it was rather than
+    // guess", which is right for an unknown layout and badly wrong for a closed
+    // compose: it strands the bar at a bottom offset computed against a compose
+    // that no longer exists, so it floats over the message body. Observed on
+    // Pratik's inbox 29 Jul with the reply discarded -- no Send button anywhere
+    // on the page, and the bar still position:absolute with bottom:668px.
+    //
+    // Releasing to flow is the safe answer in both cases: in flow the bar can
+    // push layout around but can never sit on top of anything.
+    if (!sendButton || !sendRow) {
+      releaseToFlow();
+      setVisible(true);
+      return false;
+    }
 
     const editor = composeWindow.querySelector('[g_editable="true"], [contenteditable="true"][role="textbox"]') as HTMLElement | null;
 
@@ -446,6 +462,26 @@ function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
       apply();
     });
     ro.observe(dialog);
+  }
+
+  // Discarding a reply fires none of the triggers above: no resize, no dialog
+  // resize, and the timers have long since run. Without this the bar keeps the
+  // absolute position it was given for a compose that no longer exists, which
+  // is exactly what was seen on 29 Jul -- reply discarded, no Send button on the
+  // page, bar still pinned at bottom:668px over the message body.
+  //
+  // Watch the surrounding container for Gmail tearing the compose out, and
+  // re-run. Coalesced through requestAnimationFrame so a burst of Gmail DOM
+  // churn costs one pass, not hundreds.
+  if (typeof MutationObserver !== 'undefined') {
+    let queued = false;
+    const mo = new MutationObserver(() => {
+      if (!document.contains(bar)) { mo.disconnect(); return; }
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; apply(); });
+    });
+    mo.observe(host, { childList: true, subtree: true });
   }
 }
 
