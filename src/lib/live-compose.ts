@@ -32,6 +32,35 @@
  */
 
 /**
+ * Is this bar left over from a compose that no longer exists?
+ *
+ * The bar is injected as a SIBLING of the compose container, inside Gmail's
+ * `.ip.iq` reply wrapper. On send, Gmail tears down the compose but keeps
+ * `.ip.iq` — so the bar survives with nothing to write into. Open a reply again
+ * and Gmail builds a NEW `.ip.iq`, which injectPromptBar's "don't inject twice"
+ * guard cannot see, because that guard only checks the container and its direct
+ * parent. One more bar, every reply cycle, forever.
+ *
+ * Measured in Pratik's "VC/Accelerator Discount Redemption Request" thread on
+ * v0.8.41: two Pranan bars on screen, `[g_editable="true"]` count of zero. Two
+ * Generate buttons and not one compose between them.
+ *
+ * Scoped deliberately to `bar.parentElement` — the compose's own wrapper. A
+ * wider search would find a live compose in a DIFFERENT `.ip.iq` and conclude
+ * the dead bar was fine, which is exactly how the first bar survived.
+ */
+export function isOrphanedComposeBar(
+  bar: Element | null | undefined,
+  bodySelector: string,
+): boolean {
+  // Already off the page: not our problem, and not something to act on.
+  if (!bar || !bar.isConnected) return false;
+  const host = bar.parentElement;
+  if (!host) return false;
+  return !host.querySelector(bodySelector);
+}
+
+/**
  * @param bar        the injected bar, used as the search root
  * @param captured   the compose reference the bar closed over (may be stale)
  * @param bodySelector      comma-joined compose-body chain

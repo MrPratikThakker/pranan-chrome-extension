@@ -24,7 +24,7 @@ import type { InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
 import { findAll, findOne, SELECTORS } from '../selectors';
 import { bottomOffsetAboveSendRow, bottomOffsetForChips, correctedBottomOffset, shouldHideBar, isSendReachable, placementObscuresCompose } from '@/lib/compose-layout';
-import { resolveLiveCompose } from '@/lib/live-compose';
+import { resolveLiveCompose, isOrphanedComposeBar } from '@/lib/live-compose';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -405,8 +405,35 @@ function positionComposeBar(bar: HTMLElement, getCompose: () => Element) {
 
   const flowAndAlign = () => { releaseToFlow(); setVisible(true); alignInFlow(); };
 
+  /**
+   * Gmail keeps the `.ip.iq` reply wrapper after a send but throws the compose
+   * away, so the bar is left on screen with nothing to write into. The next
+   * reply gets a fresh wrapper, which injectPromptBar's dedupe guard cannot
+   * see, and the bars stack up one per cycle. Measured: two bars, zero composes.
+   *
+   * Confirm before removing. Gmail detaches and reattaches the compose during
+   * its own relayouts, and a bar that vanishes mid-render and comes back is a
+   * worse bug than the one being fixed.
+   */
+  let orphanTimer: ReturnType<typeof setTimeout> | null = null;
+  const retireIfOrphaned = (): boolean => {
+    if (!isOrphanedComposeBar(bar, SELECTORS.gmail.composeBody.join(', '))) {
+      if (orphanTimer) { clearTimeout(orphanTimer); orphanTimer = null; }
+      return false;
+    }
+    if (orphanTimer) return false; // already counting down
+    orphanTimer = setTimeout(() => {
+      orphanTimer = null;
+      if (!isOrphanedComposeBar(bar, SELECTORS.gmail.composeBody.join(', '))) return;
+      chipsOf()?.remove();
+      bar.remove();
+    }, 1200);
+    return false;
+  };
+
   const apply = (): boolean => {
     if (!document.contains(bar)) return true; // detached: stop observing
+    retireIfOrphaned();
 
     const sendButton = findOne<HTMLElement>('gmail.sendButton', SELECTORS.gmail.sendButton, getCompose());
     const sendRow = (sendButton?.closest('.btC')

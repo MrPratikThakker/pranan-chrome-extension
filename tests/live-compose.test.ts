@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { resolveLiveCompose } from '../src/lib/live-compose';
+import { resolveLiveCompose, isOrphanedComposeBar } from '../src/lib/live-compose';
 
 // The real chains, so the test breaks if the registry changes underneath it.
 const BODY = '.Am.aiL [contenteditable="true"], [contenteditable="true"][aria-label="Message Body"], [contenteditable="true"][g_editable="true"]';
@@ -126,5 +126,77 @@ describe('resolveLiveCompose', () => {
     const resolved = resolveLiveCompose(bar, null, BODY, CONTAINER);
     expect(resolved).not.toBeNull();
     expect(resolved!.contains(body)).toBe(true);
+  });
+});
+
+/**
+ * Bars accumulating one per reply cycle.
+ *
+ * Measured in Pratik's "VC/Accelerator Discount Redemption Request" thread on
+ * v0.8.41: TWO Pranan bars visible at once, and `[g_editable="true"]` count of
+ * ZERO — two Generate buttons and not a single compose between them.
+ *
+ * The bar is injected as a SIBLING of the compose container, inside Gmail's
+ * `.ip.iq` reply wrapper. When the user sends, Gmail tears down the compose but
+ * keeps `.ip.iq` — so the bar survives with nothing to write into. Open a reply
+ * again and Gmail builds a NEW `.ip.iq`, which the "don't inject twice" guard
+ * (scoped to the container and its parent) cannot see. One more bar, every time.
+ */
+describe('isOrphanedComposeBar', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+
+  const wrapper = (withCompose: boolean) => {
+    const ip = document.createElement('div');
+    ip.className = 'ip iq';
+    const bar = document.createElement('div');
+    bar.setAttribute('data-pranan-bar', 'true');
+    ip.appendChild(bar);
+    if (withCompose) {
+      const m9 = document.createElement('div');
+      m9.className = 'M9';
+      const body = document.createElement('div');
+      body.setAttribute('contenteditable', 'true');
+      body.setAttribute('g_editable', 'true');
+      m9.appendChild(body);
+      ip.appendChild(m9);
+    }
+    document.body.appendChild(ip);
+    return { ip, bar };
+  };
+
+  it('leaves a bar alone while its compose is open', () => {
+    const { bar } = wrapper(true);
+    expect(isOrphanedComposeBar(bar, BODY)).toBe(false);
+  });
+
+  it('reports a bar whose compose was torn down (the send-then-reply case)', () => {
+    const { ip, bar } = wrapper(true);
+    ip.querySelector('.M9')!.remove();
+    expect(isOrphanedComposeBar(bar, BODY)).toBe(true);
+  });
+
+  // The exact measured state: two wrappers, two bars, zero composes. Both bars
+  // must be reported, or the thread keeps one dead Generate button forever.
+  it('reports BOTH bars in the measured two-bar/zero-compose state', () => {
+    const a = wrapper(false);
+    const b = wrapper(false);
+    expect(document.querySelectorAll('[data-pranan-bar]').length).toBe(2);
+    expect(document.querySelectorAll(BODY).length).toBe(0);
+    expect(isOrphanedComposeBar(a.bar, BODY)).toBe(true);
+    expect(isOrphanedComposeBar(b.bar, BODY)).toBe(true);
+  });
+
+  // A live compose somewhere ELSE on the page must not keep a dead bar alive —
+  // that is precisely how the second bar survived the first one's teardown.
+  it('is not fooled by a live compose in a different wrapper', () => {
+    const dead = wrapper(false);
+    wrapper(true);
+    expect(isOrphanedComposeBar(dead.bar, BODY)).toBe(true);
+  });
+
+  it('says nothing about a bar already removed from the page', () => {
+    const { bar } = wrapper(true);
+    bar.remove();
+    expect(isOrphanedComposeBar(bar, BODY)).toBe(false);
   });
 });
