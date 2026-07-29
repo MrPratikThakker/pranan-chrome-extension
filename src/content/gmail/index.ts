@@ -25,6 +25,7 @@ import { bootstrapSentry } from '@/lib/observability';
 import { findAll, findOne, SELECTORS } from '../selectors';
 import { bottomOffsetAboveSendRow, bottomOffsetForChips, correctedBottomOffset, shouldHideBar, isSendReachable, placementObscuresCompose } from '@/lib/compose-layout';
 import { resolveLiveCompose, isOrphanedComposeBar } from '@/lib/live-compose';
+import { formatThreadContext, extractSelfEmail } from '@/lib/thread-context';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -226,11 +227,24 @@ function getThreadContext(composeWindow: Element): string | null {
   if (messageBodies.length === 0) return null;
 
   const recent = Array.from(messageBodies).slice(-3);
-  const combined = recent
-    .map((m: Element) => (m as HTMLElement).innerText?.trim() || m.textContent?.trim() || '')
-    .filter(Boolean)
-    .join('\n\n---\n\n');
 
+  // Attribute every message. Concatenating the bodies with `---` and no sender
+  // left nothing in the prompt that could tell the user's own words from the
+  // counterparty's -- so when the user had sent the newest message, the model
+  // answered it, in the other side's voice. Measured on a live pricing
+  // negotiation: Pratik (the buyer) asked "Can we do $15/user/month?", and
+  // Pranan drafted "Yes, we can offer $15/user/month". See lib/thread-context.
+  const selfEmail = extractSelfEmail(document.title);
+  const messages = recent.map((m: Element) => {
+    const container = m.closest('[data-message-id], .ii.gt, [role="listitem"], .gs') || m.parentElement;
+    const senderEl = container?.querySelector('.gD[email], [email]') as HTMLElement | null;
+    return {
+      sender: senderEl?.getAttribute('email') || senderEl?.getAttribute('name') || null,
+      text: (m as HTMLElement).innerText?.trim() || m.textContent?.trim() || '',
+    };
+  });
+
+  const combined = formatThreadContext(messages, selfEmail);
   if (!combined) return null;
   // Cap at 4000 chars (~1k tokens) so we don't blow the context window.
   return combined.slice(-4000);
