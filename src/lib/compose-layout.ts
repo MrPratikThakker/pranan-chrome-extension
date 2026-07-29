@@ -114,3 +114,34 @@ export function correctedBottomOffset(
   if (overlap <= 0) return null;
   return currentOffset + overlap;
 }
+
+/**
+ * How many vertical pixels do two rects share?
+ *
+ * The rule nothing in this file previously encoded: our bar must never sit on
+ * top of the compose. v0.8.34 took the bar out of flow to stop it pushing Send
+ * off-screen, which fixed the height problem and created an overlay problem --
+ * measured live on 29 Jul, the bar covered the typing area by 16px and Send by
+ * 24px at the same time.
+ *
+ * Every helper here tested arithmetic. None tested the requirement.
+ */
+export function verticalOverlapPx(
+  a: { top: number; bottom: number } | null | undefined,
+  b: { top: number; bottom: number } | null | undefined
+): number {
+  if (!a || !b) return 0;
+  return Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+}
+
+/**
+ * Is this placement acceptable? The bar may sit anywhere that does not cover
+ * the text the user is writing or the button they need to press.
+ */
+export function placementObscuresCompose(
+  bar: { top: number; bottom: number } | null | undefined,
+  editor: { top: number; bottom: number } | null | undefined,
+  sendRow: { top: number; bottom: number } | null | undefined
+): boolean {
+  return verticalOverlapPx(bar, editor) > 0 || verticalOverlapPx(bar, sendRow) > 0;
+}
