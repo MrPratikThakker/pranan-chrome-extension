@@ -355,6 +355,38 @@ function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
     if (chips) chips.style.display = visible ? '' : 'none';
   };
 
+  /**
+   * Match Gmail's compose CONTENT edge while in flow.
+   *
+   * The bar is injected at the container's outer width, but Gmail insets the
+   * compose body by the avatar gutter (~80px), so an unaligned bar hangs to the
+   * left of the card beneath it -- visible as the bar jutting out past the
+   * compose in the 29 Jul screenshots, measured at 81px.
+   *
+   * This has to live here rather than beside the injection code. releaseToFlow
+   * clears `margin` to undo pinning, which also wipes the alignment margin, and
+   * apply() re-runs on rAF, at 300/900/2000ms and on every mutation. So an
+   * alignment applied once from outside gets erased by the next pass. Releasing
+   * and aligning have to happen together, in that order, every time.
+   */
+  const alignInFlow = () => {
+    if (bar.style.position === 'absolute') return;
+    const body = composeWindow.querySelector(
+      '[contenteditable="true"][aria-label="Message Body"], .Am.aiL [contenteditable="true"]'
+    ) as HTMLElement | null;
+    if (!body || !document.contains(bar)) return;
+    const delta = Math.round(body.getBoundingClientRect().left - bar.getBoundingClientRect().left);
+    // Sanity bounds: a real gutter, not a transient layout mid-animation.
+    if (delta > 4 && delta < 200) {
+      const current = parseFloat(bar.style.marginLeft) || 0;
+      bar.style.marginLeft = `${current + delta}px`;
+      const chips = chipsOf();
+      if (chips) chips.style.marginLeft = bar.style.marginLeft;
+    }
+  };
+
+  const flowAndAlign = () => { releaseToFlow(); setVisible(true); alignInFlow(); };
+
   const apply = (): boolean => {
     if (!document.contains(bar)) return true; // detached: stop observing
 
@@ -377,8 +409,7 @@ function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
     // Releasing to flow is the safe answer in both cases: in flow the bar can
     // push layout around but can never sit on top of anything.
     if (!sendButton || !sendRow) {
-      releaseToFlow();
-      setVisible(true);
+      flowAndAlign();
       return false;
     }
 
@@ -386,8 +417,7 @@ function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
 
     // 1. In normal flow. Cannot overlay anything, and is correct for the inline
     //    reply that most people use most of the time.
-    releaseToFlow();
-    setVisible(true);
+    flowAndAlign();
 
     // An inline reply lives in the scrolling thread, so "below the fold" is not
     // "unreachable" -- you scroll to it. Measured on Pratik's own reply: Send
