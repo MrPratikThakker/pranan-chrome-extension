@@ -22,7 +22,7 @@ import { createSuggestionMonitor } from '../shared/inline-suggestions';
 import type { InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
 import { findAll, findOne, SELECTORS } from '../selectors';
-import { bottomOffsetAboveSendRow, bottomOffsetForChips, correctedBottomOffset, shouldHideBar } from '@/lib/compose-layout';
+import { bottomOffsetAboveSendRow, bottomOffsetForChips, correctedBottomOffset, shouldHideBar, isSendReachable, placementObscuresCompose } from '@/lib/compose-layout';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -297,40 +297,112 @@ function injectComposeButtons(composeWindow: Element) {
 }
 
 /**
- * Keep our injected bar from stealing the space Gmail allocated to its own
- * controls.
+ * Place our bar so it never covers what the user needs.
  *
- * Gmail sizes the compose window and never re-flows when a third party inserts
- * a node. In normal flow our bar pushes Gmail's bottom toolbar down by exactly
- * its own height (measured: 76px), which in a maximised compose puts the Send
- * button below the fold entirely -- the user cannot send at all. Reported by
- * Ancil 2026-07-23 and Drishti 2026-07-27.
+ * History, because this has now been wrong in three different ways.
  *
- * So the bar is taken OUT OF FLOW and pinned just above Gmail's send toolbar.
- * Gmail's layout is then identical to vanilla and Send lands where Gmail put it.
+ * Originally the bar sat in normal flow above the compose. Gmail sizes the
+ * compose window and never re-flows when a third party inserts a node, so in a
+ * MAXIMISED compose the bar pushed Gmail's toolbar down and Send fell below the
+ * fold -- reported by Ancil 2026-07-23 and Drishti 2026-07-27.
  *
- * Re-runs on resize and on any dialog resize (full screen toggle, pop-out,
- * window drag). The previous attempt at this class of bug used one-shot timers
- * and silently stopped applying the moment the user changed compose state,
- * which is why the bug kept coming back.
+ * v0.8.34 fixed that by taking the bar OUT of flow and pinning it above the
+ * send row. Gmail's own layout became correct again. But out of flow means
+ * ON TOP OF, and nothing checked what was underneath. Measured live on
+ * 2026-07-29 with v0.8.34 installed, on an ordinary inline reply: the bar
+ * covered the typing area by 16px AND Send by 24px at the same time. It did not
+ * even fix its own bug; it just moved it and added another.
+ *
+ * The rule the earlier attempts were missing is simple, so it is now explicit
+ * and tested (placementObscuresCompose): OUR UI MAY NEVER SIT ON TOP OF THE
+ * TEXT BEING WRITTEN OR THE SEND BUTTON. Priority order:
+ *
+ *   1. never cover the compose
+ *   2. never make Send unreachable
+ *   3. show the bar
+ *
+ * So: stay in normal flow, which cannot overlay anything and is right for the
+ * common inline reply. Only when in-flow genuinely pushes Send out of reach do
+ * we pin out of flow, and if that pinned position would cover the editor or
+ * Send we hide the bar instead of covering them.
+ *
+ * Re-runs on resize and on dialog resize (full screen, pop-out, drag), because
+ * the previous attempt used one-shot timers and stopped applying the moment the
+ * user changed compose state, which is why it kept coming back.
  */
-function pinComposeBarOutOfFlow(bar: HTMLElement, composeWindow: Element) {
+function positionComposeBar(bar: HTMLElement, composeWindow: Element) {
   const host = bar.parentElement as HTMLElement | null;
   if (!host) return;
 
-  const apply = () => {
+  const chipsOf = () => host.querySelector('[data-pranan-intents]') as HTMLElement | null;
+
+  const releaseToFlow = () => {
+    for (const el of [bar, chipsOf()]) {
+      if (!el) continue;
+      el.style.position = '';
+      el.style.top = '';
+      el.style.left = '';
+      el.style.right = '';
+      el.style.bottom = '';
+      el.style.margin = '';
+      el.style.zIndex = '';
+    }
+  };
+
+  const setVisible = (visible: boolean) => {
+    bar.style.display = visible ? '' : 'none';
+    const chips = chipsOf();
+    if (chips) chips.style.display = visible ? '' : 'none';
+  };
+
+  const apply = (): boolean => {
     if (!document.contains(bar)) return true; // detached: stop observing
+
     const sendButton = findOne<HTMLElement>('gmail.sendButton', SELECTORS.gmail.sendButton, composeWindow);
-    // Order matters: closest() with a grouped selector returns the NEAREST
-    // matching ancestor, which is the narrow .gU cell, not the toolbar row.
-    // Ask for the row explicitly, widest first, so we clear the whole row.
     const sendRow = (sendButton?.closest('.btC')
       || sendButton?.closest('.aoP')
       || sendButton?.closest('tr')
       || sendButton?.closest('.gU')) as HTMLElement | null;
-    // Unknown layout: leave the bar exactly as it was rather than guess.
-    if (!sendButton || !sendRow) return false;
 
+    // No send row. Either the layout is one we do not recognise, or -- far more
+    // commonly -- the user discarded the reply and the compose is simply gone.
+    //
+    // The previous guard here said "leave the bar exactly as it was rather than
+    // guess", which is right for an unknown layout and badly wrong for a closed
+    // compose: it strands the bar at a bottom offset computed against a compose
+    // that no longer exists, so it floats over the message body. Observed on
+    // Pratik's inbox 29 Jul with the reply discarded -- no Send button anywhere
+    // on the page, and the bar still position:absolute with bottom:668px.
+    //
+    // Releasing to flow is the safe answer in both cases: in flow the bar can
+    // push layout around but can never sit on top of anything.
+    if (!sendButton || !sendRow) {
+      releaseToFlow();
+      setVisible(true);
+      return false;
+    }
+
+    const editor = composeWindow.querySelector('[g_editable="true"], [contenteditable="true"][role="textbox"]') as HTMLElement | null;
+
+    // 1. In normal flow. Cannot overlay anything, and is correct for the inline
+    //    reply that most people use most of the time.
+    releaseToFlow();
+    setVisible(true);
+
+    // An inline reply lives in the scrolling thread, so "below the fold" is not
+    // "unreachable" -- you scroll to it. Measured on Pratik's own reply: Send
+    // sat at y=774 in a 767px viewport, which isSendReachable calls unreachable
+    // even though it is one scroll away. Applying that test here is what would
+    // drag the bar back out of flow and on top of the compose again. The
+    // out-of-flow trick exists solely for a compose Gmail has pinned to a fixed
+    // box: the floating or maximised dialog, where nothing scrolls into view.
+    const inFixedDialog = Boolean(composeWindow.closest('[role="dialog"]'));
+    if (!inFixedDialog) return false;
+
+    if (isSendReachable(sendButton.getBoundingClientRect(), window.innerHeight)) return false;
+
+    // 2. In flow has pushed Send out of reach -- a maximised or short compose.
+    //    Pin above the send row so Gmail's own layout is untouched.
     if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
 
     let offset = bottomOffsetAboveSendRow(host.getBoundingClientRect(), sendRow.getBoundingClientRect());
@@ -343,21 +415,14 @@ function pinComposeBarOutOfFlow(bar: HTMLElement, composeWindow: Element) {
     bar.style.zIndex = '5';
 
     // Gmail rebuilds the compose on full-screen toggle, so the offset parent is
-    // not always the host we measured from and the bar can land on top of Send.
-    // Measure what actually happened and correct by the observed overlap.
-    const corrected = correctedBottomOffset(
-      offset,
-      bar.getBoundingClientRect(),
-      sendRow.getBoundingClientRect()
-    );
+    // not always the host we measured from. Correct by the observed overlap.
+    const corrected = correctedBottomOffset(offset, bar.getBoundingClientRect(), sendRow.getBoundingClientRect());
     if (corrected !== null) {
       offset = corrected;
       bar.style.bottom = `${offset}px`;
     }
 
-    // The chips row lives just above the bar and must come out of flow too,
-    // otherwise it reintroduces the same overlap with a smaller number.
-    const chips = host.querySelector('[data-pranan-intents]') as HTMLElement | null;
+    const chips = chipsOf();
     if (chips) {
       chips.style.position = 'absolute';
       chips.style.left = '12px';
@@ -367,12 +432,21 @@ function pinComposeBarOutOfFlow(bar: HTMLElement, composeWindow: Element) {
       chips.style.bottom = `${bottomOffsetForChips(offset, bar.getBoundingClientRect().height)}px`;
     }
 
-    // Safety net: our UI must never be the reason Send is unreachable. The bar
-    // is already out of flow here, so hiding it cannot move Send -- this only
-    // fires when the compose is too short to show its own controls.
-    const hide = shouldHideBar(sendButton.getBoundingClientRect(), window.innerHeight);
-    bar.style.display = hide ? 'none' : '';
-    if (chips) chips.style.display = hide ? 'none' : '';
+    // 3. If the pinned position covers the text or the button, do not cover
+    //    them. An invisible bar costs the user a feature; a bar over the Send
+    //    button costs them the ability to send at all.
+    if (placementObscuresCompose(
+      bar.getBoundingClientRect(),
+      editor?.getBoundingClientRect(),
+      sendRow.getBoundingClientRect()
+    )) {
+      releaseToFlow();
+      setVisible(false);
+      return false;
+    }
+
+    // Last safety net: our UI must never be why Send is unreachable.
+    setVisible(!shouldHideBar(sendButton.getBoundingClientRect(), window.innerHeight));
     return false;
   };
 
@@ -388,6 +462,26 @@ function pinComposeBarOutOfFlow(bar: HTMLElement, composeWindow: Element) {
       apply();
     });
     ro.observe(dialog);
+  }
+
+  // Discarding a reply fires none of the triggers above: no resize, no dialog
+  // resize, and the timers have long since run. Without this the bar keeps the
+  // absolute position it was given for a compose that no longer exists, which
+  // is exactly what was seen on 29 Jul -- reply discarded, no Send button on the
+  // page, bar still pinned at bottom:668px over the message body.
+  //
+  // Watch the surrounding container for Gmail tearing the compose out, and
+  // re-run. Coalesced through requestAnimationFrame so a burst of Gmail DOM
+  // churn costs one pass, not hundreds.
+  if (typeof MutationObserver !== 'undefined') {
+    let queued = false;
+    const mo = new MutationObserver(() => {
+      if (!document.contains(bar)) { mo.disconnect(); return; }
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; apply(); });
+    });
+    mo.observe(host, { childList: true, subtree: true });
   }
 }
 
@@ -866,7 +960,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
 
   // Insert before the compose container (so it appears above it, like Voila)
   composeContainer.parentElement?.insertBefore(bar, composeContainer);
-  pinComposeBarOutOfFlow(bar, composeWindow);
+  positionComposeBar(bar, composeWindow);
 
   // v0.8.33: on a floating "New Message" popup (not an inline reply), the
   // injected bar adds height, and Gmail's bottom-anchored popup grows UPWARD, so
@@ -1075,7 +1169,7 @@ function injectPromptBarLegacy(composeContainer: Element, composeWindow: Element
   });
 
   composeContainer.parentElement?.insertBefore(bar, composeContainer);
-  pinComposeBarOutOfFlow(bar, composeWindow);
+  positionComposeBar(bar, composeWindow);
 }
 function injectFloatingIcon(composeWindow: Element, recipientEmail: string | null) {
   // Find Gmail's send toolbar (.btC) — the bottom row with Send + Aa + emoji + attach.

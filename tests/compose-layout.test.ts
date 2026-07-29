@@ -1,12 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  bottomOffsetAboveSendRow,
-  bottomOffsetForChips,
-  isSendReachable,
-  shouldHideBar,
-  BAR_GAP_PX,
-  correctedBottomOffset,
-} from '../src/lib/compose-layout';
+import { bottomOffsetAboveSendRow, bottomOffsetForChips, isSendReachable, shouldHideBar, BAR_GAP_PX, correctedBottomOffset, verticalOverlapPx, placementObscuresCompose } from '../src/lib/compose-layout';
 
 const rect = (top: number, height: number) => ({ top, height, bottom: top + height });
 
@@ -96,5 +89,41 @@ describe('correctedBottomOffset', () => {
     const first = correctedBottomOffset(57, rect2(666, 44), rect2(703, 60))!;
     // after moving up by 13 the bar now ends at 697, clearing 703 by 6
     expect(correctedBottomOffset(first, rect2(653, 44), rect2(703, 60))).toBe(null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The requirement none of the above encoded: never cover the compose.
+// Numbers are the real ones measured in Pratik's Chrome on 29 Jul 2026 with
+// v0.8.34 installed, on an inline Gmail reply.
+// ---------------------------------------------------------------------------
+describe('placementObscuresCompose', () => {
+  const MEASURED_BAR = { top: 668, bottom: 762 };
+  const MEASURED_EDITOR = { top: 599, bottom: 684 };
+  const MEASURED_SEND = { top: 738, bottom: 774 };
+
+  it('rejects the v0.8.34 placement that shipped to every user', () => {
+    expect(verticalOverlapPx(MEASURED_BAR, MEASURED_EDITOR)).toBe(16);
+    expect(verticalOverlapPx(MEASURED_BAR, MEASURED_SEND)).toBe(24);
+    expect(placementObscuresCompose(MEASURED_BAR, MEASURED_EDITOR, MEASURED_SEND)).toBe(true);
+  });
+
+  it('accepts a bar sitting wholly above the compose, which is where it belongs', () => {
+    const above = { top: 500, bottom: 594 };
+    expect(placementObscuresCompose(above, MEASURED_EDITOR, MEASURED_SEND)).toBe(false);
+  });
+
+  it('accepts a bar tucked between the editor and Send when there is room', () => {
+    const between = { top: 690, bottom: 730 };
+    expect(placementObscuresCompose(between, MEASURED_EDITOR, MEASURED_SEND)).toBe(false);
+  });
+
+  it('counts a one-pixel clip as covering, because it is', () => {
+    expect(placementObscuresCompose({ top: 683, bottom: 700 }, MEASURED_EDITOR, MEASURED_SEND)).toBe(true);
+  });
+
+  it('is safe when a rect is missing rather than guessing', () => {
+    expect(verticalOverlapPx(null, MEASURED_EDITOR)).toBe(0);
+    expect(placementObscuresCompose(MEASURED_BAR, null, null)).toBe(false);
   });
 });
