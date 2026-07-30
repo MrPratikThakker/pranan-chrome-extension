@@ -17,12 +17,13 @@
 // Content script -- IIFE bundling handles scope isolation
 
 import { injectMultilineText } from '@/lib/safe-dom';
+import { safeSendMessage } from '@/lib/runtime';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { parseLinkedInPostText, pickAuthorProfileUrl } from './post-parse';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
-import { createSuggestionMonitor } from '../shared/inline-suggestions';
+import { createSuggestionMonitor, type InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
 import { findOne, findAll } from '../selectors';
 
@@ -503,7 +504,7 @@ function injectMessagingPromptBar() {
 
   const triggerDraft = () => {
     const prompt = input.value.trim() || undefined;
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
         platform: 'linkedin',
@@ -691,7 +692,7 @@ function injectCommentPromptBars() {
       // Bind to THIS comment input so the draft can only land here even if
       // the user scrolls to another post mid-flight (audit HIGH).
       const editorId = stampEditor(commentInput as HTMLElement);
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'COMMENT_DRAFT_REQUEST',
         payload: {
           platform: 'linkedin',
@@ -769,7 +770,7 @@ function injectComposeButtons() {
     size: 'sm',
     position: 'before',
     onClick: () => {
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'INLINE_DRAFT_REQUEST',
         payload: {
           platform: 'linkedin',
@@ -787,7 +788,7 @@ function injectComposeButtons() {
         onClick: () => {
           const sel = window.getSelection()?.toString().trim();
           if (sel && sel.length > 5) {
-            chrome.runtime.sendMessage({
+            safeSendMessage({
               type: 'INLINE_REWRITE_REQUEST',
               payload: { text: sel, platform: 'linkedin' },
             }).catch(() => {});
@@ -799,7 +800,7 @@ function injectComposeButtons() {
         onClick: () => {
           const text = getComposeContent();
           if (text.length > 10) {
-            chrome.runtime.sendMessage({
+            safeSendMessage({
               type: 'INLINE_GRAMMAR_REQUEST',
               payload: { text, platform: 'linkedin' },
             }).catch(() => {});
@@ -809,7 +810,7 @@ function injectComposeButtons() {
       {
         label: 'Open side panel',
         onClick: () => {
-          chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+          safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
         },
       },
     ],
@@ -833,10 +834,10 @@ function showComposeRelationshipPopup() {
     return;
   }
 
-  chrome.runtime.sendMessage({
+  safeSendMessage<{ data?: RelationshipPopupData }>({
     type: 'REQUEST_CONTACT_POPUP',
     payload: { name: recipientName, platform: 'linkedin' },
-  }).then((response: { data?: RelationshipPopupData }) => {
+  }).then((response) => {
     if (response?.data) {
       popupCache.set(recipientName, response.data);
       renderPopup(response.data);
@@ -851,7 +852,7 @@ function renderPopup(data: RelationshipPopupData) {
   showRelationshipPopup(header, data,
     // Draft click
     () => {
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'INLINE_DRAFT_REQUEST',
         payload: {
           platform: 'linkedin',
@@ -863,7 +864,7 @@ function renderPopup(data: RelationshipPopupData) {
     },
     // View full click
     () => {
-      chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+      safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
     }
   );
 }
@@ -891,7 +892,7 @@ function attachSuggestionMonitor() {
     debounceMs: 3000,
     onCheckRequested: async (text: string) => {
       try {
-        const response = await chrome.runtime.sendMessage({
+        const response = await safeSendMessage<{ suggestions?: InlineSuggestion[] }>({
           type: 'INLINE_GRAMMAR_CHECK',
           payload: { text, platform: 'linkedin' },
         });
@@ -919,7 +920,7 @@ function detectActiveCompose() {
 
       const { headline, isInMail } = getProfileContext();
 
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'COMPOSE_DETECTED',
         payload: {
           platform: 'linkedin',
@@ -954,7 +955,7 @@ function detectActiveCompose() {
     activeComposeType = 'post';
     lastRecipientName = null;
 
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'COMPOSE_DETECTED',
       payload: {
         platform: 'linkedin',
@@ -1063,7 +1064,7 @@ function maybeCaptureComment(text: string): void {
   if (recentGeneratedComments.has(norm)) return;            // never learn from one of our own drafts
   if (capturedComments.has(norm)) return;                   // already sent this session
   capturedComments.add(norm);
-  chrome.runtime.sendMessage({ type: 'CAPTURE_VOICE_EXEMPLAR', payload: { comment: t } }).catch(() => {});
+  safeSendMessage({ type: 'CAPTURE_VOICE_EXEMPLAR', payload: { comment: t } }).catch(() => {});
 }
 
 // Capture on submit-button click (capture phase so we read text before LinkedIn clears it).
@@ -1095,7 +1096,7 @@ document.addEventListener('mouseup', () => {
   if (selection && !selection.isCollapsed) {
     const text = selection.toString().trim();
     if (text.length > 5) {
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'TEXT_SELECTED',
         payload: { selectedText: text, platform: 'linkedin' },
       }).catch(() => {});
@@ -1218,7 +1219,7 @@ function init() {
         cleanupComposeElements();
         activeComposeType = null;
         lastRecipientName = null;
-        chrome.runtime.sendMessage({
+        safeSendMessage({
           type: 'COMPOSE_CLOSED',
           payload: { platform: 'linkedin' },
         }).catch(() => {});

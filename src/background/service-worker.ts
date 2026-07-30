@@ -361,6 +361,16 @@ async function handleMessage(
           : 'INSERT_DRAFT';
         (async () => {
           try {
+            // Bounded, and bounded BELOW the inline bar's own 30s reset.
+            //
+            // Nothing else in this path has a deadline: generateDraft awaits
+            // ensureValidToken (which can await a token refresh) and then
+            // fetchWithRetry (which retries a stalled request). If any of that
+            // hangs, this async IIFE never reaches a sendMessage, so the content
+            // script hears nothing at all and falls through to its 30s timeout —
+            // whose copy tells the user to check they are signed in. Observed on
+            // Pratik's inbox 29 Jul with a valid session and a healthy API.
+            // 25s leaves the bar time to render a real reason instead.
             const resp = await generateDraft({
               recipientEmail: inlinePayload.recipientEmail || undefined,
               recipientName: inlinePayload.recipientName || undefined,
@@ -368,7 +378,7 @@ async function handleMessage(
               platform: inlinePayload.platform,
               channelName: inlinePayload.channelName || undefined,
               prompt: inlinePayload.userPrompt || inlinePayload.prompt || undefined,
-            });
+            }, AbortSignal.timeout(25_000));
             if (resp?.skipped) {
               chrome.tabs.sendMessage(tabId, {
                 type: 'DRAFT_SKIPPED',

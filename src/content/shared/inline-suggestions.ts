@@ -1,3 +1,5 @@
+import { safeSendMessage } from '../../lib/runtime';
+
 /**
  * Grammarly-Style Inline Suggestions
  *
@@ -71,7 +73,7 @@ export function createSuggestionMonitor(config: SuggestionConfig): () => void {
       // Filter dismissed
       activeSuggestions = suggestions.filter(s => !dismissedIds.has(s.id));
       // Send suggestions to service worker for side panel rendering
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'GRAMMAR_SUGGESTIONS',
         payload: { suggestions: activeSuggestions, platform: 'inline' },
       }).catch(() => {});

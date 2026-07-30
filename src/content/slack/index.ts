@@ -15,10 +15,11 @@
 // Content script -- IIFE bundling handles scope isolation
 
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
+import { safeSendMessage } from '@/lib/runtime';
 import { slackContextKey, slackBarIsStale } from './context-key';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
-import { createSuggestionMonitor } from '../shared/inline-suggestions';
+import { createSuggestionMonitor, type InlineSuggestion } from '../shared/inline-suggestions';
 import { injectMultilineText } from '@/lib/safe-dom';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { findOne, findAll, SELECTORS as REGISTRY } from '../selectors';
@@ -354,7 +355,7 @@ function injectSlackPromptBar() {
     generateBtn.textContent = 'Drafting...';
     generateBtn.style.opacity = '0.7';
     generateBtn.style.pointerEvents = 'none';
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
         platform: 'slack',
@@ -446,7 +447,7 @@ function injectComposeButtons() {
       // Bind to the active message input so the draft can only insert there
       // even if the user switches channels mid-flight (audit HIGH).
       const editorId = stampEditor(findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput));
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'INLINE_DRAFT_REQUEST',
         payload: {
           platform: 'slack',
@@ -467,7 +468,7 @@ function injectComposeButtons() {
         onClick: () => {
           const sel = window.getSelection()?.toString().trim();
           if (sel && sel.length > 5) {
-            chrome.runtime.sendMessage({
+            safeSendMessage({
               type: 'INLINE_REWRITE_REQUEST',
               payload: { text: sel, platform: 'slack' },
             }).catch(() => {});
@@ -479,7 +480,7 @@ function injectComposeButtons() {
         onClick: () => {
           const text = getMessageInputContent();
           if (text.length > 10) {
-            chrome.runtime.sendMessage({
+            safeSendMessage({
               type: 'INLINE_GRAMMAR_REQUEST',
               payload: { text, platform: 'slack' },
             }).catch(() => {});
@@ -489,7 +490,7 @@ function injectComposeButtons() {
       {
         label: 'Open side panel',
         onClick: () => {
-          chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+          safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
         },
       },
     ],
@@ -514,10 +515,10 @@ function showComposeRelationshipPopup() {
   }
 
   // Request contact data from service worker
-  chrome.runtime.sendMessage({
+  safeSendMessage<{ data?: RelationshipPopupData }>({
     type: 'REQUEST_CONTACT_POPUP',
     payload: { name: recipientName, platform: 'slack' },
-  }).then((response: { data?: RelationshipPopupData }) => {
+  }).then((response) => {
     if (response?.data) {
       popupCache.set(recipientName, response.data);
       renderPopup(response.data);
@@ -534,7 +535,7 @@ function renderPopup(data: RelationshipPopupData) {
     () => {
       const threadContext = getThreadContext();
       const channelContext = getRecentChannelMessages();
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'INLINE_DRAFT_REQUEST',
         payload: {
           platform: 'slack',
@@ -548,7 +549,7 @@ function renderPopup(data: RelationshipPopupData) {
     },
     // View full click
     () => {
-      chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+      safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
     }
   );
 }
@@ -572,7 +573,7 @@ function attachSuggestionMonitor() {
     debounceMs: 3000,
     onCheckRequested: async (text: string) => {
       try {
-        const response = await chrome.runtime.sendMessage({
+        const response = await safeSendMessage<{ suggestions?: InlineSuggestion[] }>({
           type: 'INLINE_GRAMMAR_CHECK',
           payload: { text, platform: 'slack' },
         });
@@ -618,7 +619,7 @@ function checkForActiveCompose(requireFocus = true) {
     const channelContext = getRecentChannelMessages();
     const messageContext = threadContext || channelContext;
 
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'COMPOSE_DETECTED',
       payload: {
         platform: 'slack',
@@ -672,7 +673,7 @@ document.addEventListener('mouseup', () => {
   if (selection && !selection.isCollapsed) {
     const text = selection.toString().trim();
     if (text.length > 5) {
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'TEXT_SELECTED',
         payload: { selectedText: text, platform: 'slack' },
       }).catch(() => {});
@@ -848,7 +849,7 @@ function init() {
           removeSlackPromptBar();
           dismissRelationshipPopup();
 
-          chrome.runtime.sendMessage({
+          safeSendMessage({
             type: 'COMPOSE_CLOSED',
             payload: { platform: 'slack' },
           }).catch(() => {});

@@ -13,11 +13,12 @@
 // Content script -- IIFE bundling handles scope isolation
 
 import { injectMultilineText } from '@/lib/safe-dom';
+import { safeSendMessage } from '@/lib/runtime';
 import { monitorForTextFields, type DetectedField } from '../shared/universal-detector';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
 import type { RelationshipPopupData } from '../shared/relationship-popup';
-import { createSuggestionMonitor } from '../shared/inline-suggestions';
+import { createSuggestionMonitor, type InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
 
 // ---------------------------------------------------------------------------
@@ -73,7 +74,7 @@ if (isPlatformPage()) {
       position: anchor === el ? 'after' : 'before',
       onClick: () => {
         const text = el.textContent?.trim() || '';
-        chrome.runtime.sendMessage({
+        safeSendMessage({
           type: 'INLINE_DRAFT_REQUEST',
           payload: {
             platform: field.context.platform || 'universal',
@@ -91,7 +92,7 @@ if (isPlatformPage()) {
           onClick: () => {
             const sel = window.getSelection()?.toString().trim();
             if (sel && sel.length > 5) {
-              chrome.runtime.sendMessage({
+              safeSendMessage({
                 type: 'INLINE_REWRITE_REQUEST',
                 payload: { text: sel, platform: field.context.platform || 'universal' },
               }).catch(() => {});
@@ -103,7 +104,7 @@ if (isPlatformPage()) {
           onClick: () => {
             const text = el.textContent?.trim() || '';
             if (text.length > 10) {
-              chrome.runtime.sendMessage({
+              safeSendMessage({
                 type: 'INLINE_GRAMMAR_REQUEST',
                 payload: { text, platform: field.context.platform || 'universal' },
               }).catch(() => {});
@@ -113,7 +114,7 @@ if (isPlatformPage()) {
         {
           label: 'Open side panel',
           onClick: () => {
-            chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+            safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
           },
         },
       ],
@@ -127,7 +128,7 @@ if (isPlatformPage()) {
         debounceMs: 3000,
         onCheckRequested: async (text: string) => {
           try {
-            const response = await chrome.runtime.sendMessage({
+            const response = await safeSendMessage<{ suggestions?: InlineSuggestion[] }>({
               type: 'INLINE_GRAMMAR_CHECK',
               payload: { text, platform: field.context.platform || 'universal' },
             });
@@ -141,7 +142,7 @@ if (isPlatformPage()) {
     }
 
     // Send compose detected to side panel
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'COMPOSE_DETECTED',
       payload: {
         platform: (field.context.platform || 'universal') as string,
@@ -165,7 +166,7 @@ if (isPlatformPage()) {
     if (selection && !selection.isCollapsed) {
       const text = selection.toString().trim();
       if (text.length > 5) {
-        chrome.runtime.sendMessage({
+        safeSendMessage({
           type: 'TEXT_SELECTED',
           payload: { selectedText: text, platform: 'universal' },
         }).catch(() => {});
