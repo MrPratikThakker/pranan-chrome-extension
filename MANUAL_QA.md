@@ -63,13 +63,66 @@ Placement is not the only thing that can break.
 - [ ] Type a prompt, click **Generate**. A draft appears in the compose.
 - [ ] The draft inserts into the right compose window.
 - [ ] Intent chips appear on a reply and clicking one steers the draft.
+- [ ] **Time it.** A draft should land in about 5 seconds. If Generate sits on
+      "Generating..." for 30 and then tells you to check you're signed in, you
+      are not signed out — something upstream died silently. v0.8.41 shipped
+      exactly that: valid session, healthy API answering in 4.4s, and the bar
+      showing a login error.
 
-### 5. Awkward states
+### 5. The draft is written from YOUR side
+A draft that appears is not a draft that is correct, and this class of bug is
+invisible unless you read what it wrote.
+- [ ] Pick a thread where **you sent the most recent message** — a follow-up,
+      an "any update?". Generate.
+- [ ] The draft continues *your* position. It does not answer your own message
+      as though it were the other party.
+
+      v0.8.42 failed this on a live pricing negotiation: Pratik, the buyer,
+      had asked "Can we do $15/user/month?" and Pranan drafted "Yes, we can
+      offer $15/user/month" — committing to a price from the vendor's side.
+
+- [ ] Read the whole draft. No sentence refers to a person who was never
+      introduced ("They'll be able to dive deeper…").
+
+### 6. Awkward states
 - [ ] Two replies open in different threads at once — each bar belongs to its
       own compose, neither is orphaned.
+- [ ] **Send a reply, then open another one in the same thread.** Exactly one
+      bar. v0.8.41 stacked one more bar per cycle, because the bar outlived the
+      compose it was built for — two Generate buttons, zero composes.
 - [ ] Resize the browser window with a compose open. Nothing ends up on top of
       anything.
 - [ ] A narrow window (~1100px). Still no overlap.
+
+---
+
+## Before you upload: does the build actually contain the fix?
+
+Every check above tests a build on your machine. None of them tests that the
+**zip you upload** is that build.
+
+On 29 Jul, v0.8.36 was submitted and published while five versions of compose-bar
+fixes sat unmerged on a branch. The store got a build with none of them, users
+kept hitting bugs that were already fixed, and nothing in this document caught
+it — because the fixes were never in the artifact being tested.
+
+Build from `main`, in a clean clone, and confirm what came out:
+
+```bash
+git clone <repo> release-build && cd release-build
+npm ci && npm run typecheck && npm test && npm run build
+grep -o '"version"[^,]*' dist/manifest.json    # is this the version you mean?
+(cd dist && zip -r ../pranan-companion-vX.Y.Z.zip .)
+```
+
+- [ ] `main` contains the fixes. Check the PRs are **merged**, not just open.
+- [ ] The clone is fresh. Not your working tree, which may hold uncommitted work
+      that makes a broken `main` look fine.
+- [ ] `dist/manifest.json` shows the version you intend to publish.
+- [ ] Grep the built bundle for one string from each fix in the release. If a fix
+      is in the changelog and not in `dist/`, the release is a lie.
+- [ ] After the store approves it, install the **store** copy and re-run check 4.
+      Approval means it passed review, not that it works.
 
 ---
 
