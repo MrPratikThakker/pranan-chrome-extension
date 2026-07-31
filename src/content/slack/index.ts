@@ -24,6 +24,7 @@ import { injectMultilineText } from '@/lib/safe-dom';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { findOne, findAll, SELECTORS as REGISTRY } from '../selectors';
 import { bootstrapSentry } from '@/lib/observability';
+import { attributeSlackThread, readSelfName, SLACK_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -155,19 +156,13 @@ function isInputFocused(): boolean {
 }
 
 function getThreadContext(): string | null {
-  const threadPane = findOne('slack.threadContainer', REGISTRY.slack.threadContainer);
-  if (!threadPane) return null;
-
-  const messages = findAll('slack.threadMessageBody', REGISTRY.slack.threadMessageBody, threadPane);
-  if (messages.length === 0) return null;
-
-  // Get the last few messages for context
-  const contextMessages = messages
-    .slice(-5)
-    .map((m: Element) => m.textContent?.trim())
-    .filter(Boolean);
-
-  return contextMessages.join('\n---\n').slice(0, 2000);
+  // Attributed, not a bare join. This used to map textContent and glue the
+  // messages together with `---`, so nothing in the prompt could tell the
+  // user's own words from the counterparty's and the model answered whatever
+  // came last -- the wrong-side draft fixed on Gmail in v0.8.43. Sharper here
+  // than on Gmail, because getRecentChannelMessages below already attributes
+  // correctly and every call site prefers THIS one when a thread is open.
+  return attributeSlackThread(readSelfName(SLACK_SELF_NAME_SELECTORS));
 }
 
 /**

@@ -26,6 +26,7 @@ import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor, type InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
 import { findOne, findAll } from '../selectors';
+import { attributeLinkedInHistory, readSelfName, LINKEDIN_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -238,18 +239,14 @@ function getProfileContext(): { headline: string | null; isInMail: boolean } {
 }
 
 function getMessageHistory(): string | null {
-  const messages = document.querySelectorAll(
-    SELECTORS.messageHistory.join(', ')
+  // Attributed, not a bare join. This used to map textContent and glue the
+  // messages together with `---`, leaving nothing in the prompt to separate the
+  // user's own turns from the other person's -- the same defect that made Gmail
+  // draft a reply from the wrong side of a negotiation (fixed in v0.8.43).
+  return attributeLinkedInHistory(
+    readSelfName(LINKEDIN_SELF_NAME_SELECTORS),
+    SELECTORS.messageHistory,
   );
-
-  if (messages.length === 0) return null;
-
-  const history = Array.from(messages)
-    .slice(-5)
-    .map(m => m.textContent?.trim())
-    .filter(Boolean);
-
-  return history.join('\n---\n').slice(0, 2000);
 }
 
 function getComposeContent(): string {
