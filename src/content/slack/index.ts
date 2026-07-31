@@ -25,6 +25,7 @@ import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { findOne, findAll, SELECTORS as REGISTRY } from '../selectors';
 import { bootstrapSentry } from '@/lib/observability';
 import { attributeSlackThread, readSelfName, SLACK_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
+import { generateButtonState } from './generate-affordance';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -307,17 +308,18 @@ function injectSlackPromptBar() {
     transition: all 0.15s ease;
     font-family: inherit;
     white-space: nowrap;
-    opacity: 0;
-    pointer-events: none;
   `;
   generateBtn.textContent = 'Generate';
   generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = 'linear-gradient(135deg, #5b21b6, #8b5cf6)'; });
   generateBtn.addEventListener('mouseleave', () => { generateBtn.style.background = 'linear-gradient(135deg, #6d28d9, #a78bfa)'; });
 
   input.addEventListener('input', () => {
-    const hasText = input.value.trim().length > 0;
-    generateBtn.style.opacity = hasText ? '1' : '0';
-    generateBtn.style.pointerEvents = hasText ? 'auto' : 'none';
+    // Generate stays visible and pressable whether or not a prompt is typed.
+    // It used to vanish on an empty field, so the bar's only usable control was
+    // the dismiss "×" -- see generate-affordance.ts.
+    const state = generateButtonState(input.value);
+    generateBtn.style.opacity = state.opacity;
+    generateBtn.style.pointerEvents = state.pointerEvents;
   });
 
   // Close button
@@ -415,8 +417,9 @@ function restoreSlackPromptBar(message?: string): void {
   const { input, generateBtn } = pendingSlackDraft;
   input.disabled = false;
   generateBtn.textContent = 'Generate';
-  generateBtn.style.opacity = input.value.trim() ? '1' : '0';
-  generateBtn.style.pointerEvents = input.value.trim() ? 'auto' : 'none';
+  const restored = generateButtonState(input.value);
+  generateBtn.style.opacity = restored.opacity;
+  generateBtn.style.pointerEvents = restored.pointerEvents;
   if (message) input.placeholder = message;
   pendingSlackDraft = null;
 }
