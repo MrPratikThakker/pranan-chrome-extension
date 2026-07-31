@@ -24,7 +24,7 @@ import { injectMultilineText } from '@/lib/safe-dom';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { findOne, findAll, SELECTORS as REGISTRY } from '../selectors';
 import { bootstrapSentry } from '@/lib/observability';
-import { attributeSlackThread, readSelfName, SLACK_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
+import { attributeSlackThread, readSelfName, findSenderFor, SLACK_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
 import { generateButtonState } from './generate-affordance';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
@@ -187,11 +187,11 @@ function getRecentChannelMessages(): string | null {
     // Walk up to find the message container, then look for sender
     // closest() needs a comma-joined string — registry chain has the same
     // entries; join them so the fallback semantics match.
-    const messageKit = el.closest(REGISTRY.slack.messageKitContainer.join(', '));
-    const senderEl = messageKit
-      ? findOne('slack.messageSenderName', REGISTRY.slack.messageSenderName, messageKit)
-      : null;
-    const sender = senderEl?.textContent?.trim() || 'Someone';
+    // Same climb the thread path uses. closest() with a comma-joined chain
+    // returns the NEAREST matching ancestor, which is `.c-message_kit__blocks`
+    // -- inside the element that holds the sender button -- so every message
+    // came back as "Someone" on current Slack. See findSenderFor.
+    const sender = findSenderFor(el) || 'Someone';
     const text = el.textContent?.trim();
     if (text) {
       messages.push(`${sender}: ${text}`);

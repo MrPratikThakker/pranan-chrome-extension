@@ -140,3 +140,69 @@ describe('attributeLinkedInHistory', () => {
     expect(attributeLinkedInHistory('Pratik Thakker')).toBeNull();
   });
 });
+
+/**
+ * Measured live in Slack on v0.8.45, in a real thread.
+ *
+ * The thread pane was open and full of messages, and getThreadContext()
+ * returned NOTHING — because threadMessageBody was a chain of exactly one
+ * entry, `.c-message__body`, which matches zero elements in Slack's current
+ * thread DOM. Counted in the open pane:
+ *
+ *   .c-message__body          0
+ *   [data-qa="message-text"]  6
+ *   .p-rich_text_section      6
+ *
+ * Every draft therefore fell through to `threadContext || channelContext` and
+ * drafted from the CHANNEL. Measured side by side: the thread was about an
+ * expired password reset, while the channel's recent messages were about not
+ * marking mail as spam. A reply written from the wrong conversation entirely.
+ *
+ * A registry chain of one cannot degrade. That is the whole point of the chain.
+ */
+describe('attributeSlackThread against current Slack markup', () => {
+  it('reads a thread that uses data-qa="message-text" rather than .c-message__body', () => {
+    document.body.innerHTML = `
+      <div data-qa="threads_flexpane">
+        <div class="c-message_kit__message">
+          <button data-qa="message_sender_name">Tasnimul Moshiur</button>
+          <div class="c-message_kit__blocks">
+            <div data-qa="message-text">My password reset has expired.</div>
+          </div>
+        </div>
+        <div class="c-message_kit__message">
+          <button data-qa="message_sender_name">Pratik Thakker</button>
+          <div class="c-message_kit__blocks">
+            <div data-qa="message-text">Fixed in production.</div>
+          </div>
+        </div>
+      </div>`;
+    const out = attributeSlackThread('Pratik Thakker');
+    expect(out).not.toBeNull();
+    expect(out).toContain('My password reset has expired.');
+    expect(out).toContain('Tasnimul Moshiur');
+  });
+
+  it('still reads the older .c-message__body markup', () => {
+    document.body.innerHTML = `
+      <div data-qa="threads_flexpane">
+        <div class="c-message_kit__message">
+          <button data-qa="message_sender_name">Grace Robinson</button>
+          <div class="c-message__body">Legacy markup still works.</div>
+        </div>
+      </div>`;
+    expect(attributeSlackThread(null)).toContain('Legacy markup still works.');
+  });
+
+  it('does not double-count when a message matches more than one selector', () => {
+    document.body.innerHTML = `
+      <div data-qa="threads_flexpane">
+        <div class="c-message_kit__message">
+          <button data-qa="message_sender_name">Grace Robinson</button>
+          <div class="c-message__body" data-qa="message-text">Only once please.</div>
+        </div>
+      </div>`;
+    const out = attributeSlackThread(null) || '';
+    expect((out.match(/Only once please\./g) || []).length).toBe(1);
+  });
+});

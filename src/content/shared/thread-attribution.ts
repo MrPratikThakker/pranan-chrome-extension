@@ -73,6 +73,31 @@ export const LINKEDIN_SELF_NAME_SELECTORS = [
 ];
 
 /**
+ * The sender of a Slack message, found by climbing from its body.
+ *
+ * `body.closest(chain.join(', '))` looks right and is wrong: closest() returns
+ * the NEAREST ancestor matching ANY selector in the list, so with a chain
+ * containing both `.c-message_kit__message` and `.c-message_kit__blocks` it
+ * lands on `.c-message_kit__blocks` — which sits INSIDE the element that holds
+ * the sender button. The lookup then finds nothing and every message comes back
+ * anonymous.
+ *
+ * Climbing one level at a time and stopping at the first ancestor that actually
+ * contains a sender is immune to the ordering of the chain. Bounded so a miss
+ * cannot walk out to the whole pane and attribute every message to whoever
+ * happens to be first in it.
+ */
+export function findSenderFor(body: Element): string | null {
+  let node: Element | null = body.parentElement;
+  for (let depth = 0; node && depth < 6; depth++, node = node.parentElement) {
+    const senderEl = findOne('slack.messageSenderName', SELECTORS.slack.messageSenderName, node);
+    const name = senderEl?.textContent?.trim();
+    if (name) return name;
+  }
+  return null;
+}
+
+/**
  * Slack thread pane, attributed.
  *
  * @param selfName the signed-in user's display name, or null if unknown — in
@@ -86,18 +111,10 @@ export function attributeSlackThread(selfName: string | null): string | null {
   const bodies = findAll('slack.threadMessageBody', SELECTORS.slack.threadMessageBody, threadPane);
   if (bodies.length === 0) return null;
 
-  const messages = bodies.slice(-CONTEXT_MESSAGES).map((body: Element) => {
-    // Slack only renders the sender on the first message of a run, so walk out
-    // to the message container the same way getRecentChannelMessages does.
-    const container = body.closest(SELECTORS.slack.messageKitContainer.join(', '));
-    const senderEl = container
-      ? findOne('slack.messageSenderName', SELECTORS.slack.messageSenderName, container)
-      : null;
-    return {
-      sender: senderEl?.textContent?.trim() || null,
-      text: body.textContent?.trim() || '',
-    };
-  });
+  const messages = bodies.slice(-CONTEXT_MESSAGES).map((body: Element) => ({
+    sender: findSenderFor(body),
+    text: body.textContent?.trim() || '',
+  }));
 
   const formatted = formatThreadContext(messages, selfName);
   return formatted ? formatted.slice(0, MAX_CHARS) : null;
