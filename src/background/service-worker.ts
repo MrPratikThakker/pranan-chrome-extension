@@ -16,6 +16,7 @@ import { draftErrorMessage } from '@/lib/draft-error-message';
 import type { ExtensionMessage, Platform, AuthResponse, ContactContext } from '@/types';
 import { bootstrapSentry } from '@/lib/observability';
 import { APP_ORIGIN } from '@/lib/config';
+import { usesDirectWorkerPath } from './inline-draft-routing';
 
 // ---------------------------------------------------------------------------
 // State (persisted via chrome.storage, rebuilt on service worker restart)
@@ -348,13 +349,22 @@ async function handleMessage(
       // v0.8.22 (audit P1) — Slack now uses this SAME direct-worker path.
       // Previously Slack inline fell through to the side-panel handoff below,
       // which silently produced nothing when the panel was closed while the
-      // content script optimistically cleared the prompt. Gmail and LinkedIn
-      // were already migrated; Slack was the straggler.
-      if (
-        inlinePayload.originSurface === 'inline-bar' &&
-        (inlinePayload.platform === 'gmail' || inlinePayload.platform === 'slack') &&
-        tab?.id
-      ) {
+      // content script optimistically cleared the prompt.
+      //
+      // That note used to end "Gmail and LinkedIn were already migrated; Slack
+      // was the straggler." LinkedIn was never in the list. Measured on live
+      // LinkedIn messaging on v0.8.48: pressed Generate, and twenty-six seconds
+      // later the button still read "Generate", the compose was empty and no
+      // error had been shown -- the exact failure the comment described, still
+      // live for the surface the comment said was fixed.
+      //
+      // LinkedIn comments were unaffected because they travel as
+      // COMMENT_DRAFT_REQUEST, whose gate has no platform restriction, which is
+      // why commenting worked in the same session messaging did not.
+      //
+      // The list lives in inline-draft-routing.ts with a test that pins all
+      // three surfaces.
+      if (usesDirectWorkerPath(inlinePayload) && tab?.id) {
         const tabId = tab.id;
         const insertType = inlinePayload.composeType === 'comment'
           ? 'INSERT_COMMENT_DRAFT'
