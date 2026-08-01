@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateButtonState } from '../src/content/slack/generate-affordance';
+import { generateButtonState } from '../src/content/shared/generate-affordance';
 
 /**
  * Measured live in Slack on v0.8.44, in a real channel.

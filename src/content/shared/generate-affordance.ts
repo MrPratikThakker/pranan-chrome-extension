@@ -1,5 +1,11 @@
 /**
- * Whether the Slack bar's Generate button can be seen and pressed.
+ * Whether a bar's Generate/Draft button can be seen and pressed.
+ *
+ * Shared by three bars that each shipped the same defect independently: Slack's
+ * inline bar, LinkedIn's messaging bar, and LinkedIn's comment bar. Measured
+ * live on 1 Aug 2026 -- LinkedIn's comment bar renders a prompt field and a
+ * dismiss "x", with the Draft button at opacity 0 and pointer-events none, so
+ * the only control a user can press is the one that turns the feature off.
  *
  * It used to be hidden until the user typed into Pranan's own prompt field:
  *

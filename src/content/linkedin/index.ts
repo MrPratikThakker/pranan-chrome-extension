@@ -27,6 +27,7 @@ import { createSuggestionMonitor, type InlineSuggestion } from '../shared/inline
 import { bootstrapSentry } from '@/lib/observability';
 import { findOne, findAll } from '../selectors';
 import { attributeLinkedInHistory, readSelfName, LINKEDIN_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
+import { generateButtonState } from '../shared/generate-affordance';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -474,7 +475,6 @@ function injectMessagingPromptBar() {
     background: linear-gradient(135deg, #6d28d9, #a78bfa); color: white; border: none; border-radius: 6px;
     padding: 4px 12px; font-size: 12px; font-weight: 500; cursor: pointer;
     transition: all 0.15s ease; font-family: inherit; white-space: nowrap;
-    opacity: 0; pointer-events: none;
   `;
   generateBtn.textContent = 'Generate';
   generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = 'linear-gradient(135deg, #5b21b6, #8b5cf6)'; });
@@ -482,8 +482,9 @@ function injectMessagingPromptBar() {
 
   input.addEventListener('input', () => {
     const hasText = input.value.trim().length > 0;
-    generateBtn.style.opacity = hasText ? '1' : '0';
-    generateBtn.style.pointerEvents = hasText ? 'auto' : 'none';
+    const st = generateButtonState(input.value);
+    generateBtn.style.opacity = st.opacity;
+    generateBtn.style.pointerEvents = st.pointerEvents;
   });
 
   // Close button
@@ -516,8 +517,9 @@ function injectMessagingPromptBar() {
       },
     }).catch(() => {});
     input.value = '';
-    generateBtn.style.opacity = '0';
-    generateBtn.style.pointerEvents = 'none';
+    const stAfter = generateButtonState('');
+    generateBtn.style.opacity = stAfter.opacity;
+    generateBtn.style.pointerEvents = stAfter.pointerEvents;
   };
 
   input.addEventListener('keydown', (e) => {
@@ -640,7 +642,6 @@ function injectCommentPromptBars() {
       background: linear-gradient(135deg, #6d28d9, #a78bfa); color: white; border: none; border-radius: 5px;
       padding: 3px 10px; font-size: 11px; font-weight: 500; cursor: pointer;
       transition: all 0.15s ease; font-family: inherit; white-space: nowrap;
-      opacity: 0; pointer-events: none;
     `;
     generateBtn.textContent = 'Draft';
     generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = 'linear-gradient(135deg, #5b21b6, #8b5cf6)'; });
@@ -648,8 +649,9 @@ function injectCommentPromptBars() {
 
     input.addEventListener('input', () => {
       const hasText = input.value.trim().length > 0;
-      generateBtn.style.opacity = hasText ? '1' : '0';
-      generateBtn.style.pointerEvents = hasText ? 'auto' : 'none';
+      const st = generateButtonState(input.value);
+      generateBtn.style.opacity = st.opacity;
+      generateBtn.style.pointerEvents = st.pointerEvents;
     });
 
     // Close
@@ -704,8 +706,9 @@ function injectCommentPromptBars() {
         },
       }).catch(() => {});
       input.value = '';
-      generateBtn.style.opacity = '0';
-      generateBtn.style.pointerEvents = 'none';
+      const stAfter = generateButtonState('');
+      generateBtn.style.opacity = stAfter.opacity;
+      generateBtn.style.pointerEvents = stAfter.pointerEvents;
     };
 
     input.addEventListener('keydown', (e) => {

@@ -25,7 +25,7 @@ import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { findOne, findAll, SELECTORS as REGISTRY } from '../selectors';
 import { bootstrapSentry } from '@/lib/observability';
 import { attributeSlackThread, readSelfName, findSenderFor, SLACK_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
-import { generateButtonState } from './generate-affordance';
+import { generateButtonState } from '../shared/generate-affordance';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
