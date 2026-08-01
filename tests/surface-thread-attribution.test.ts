@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { attributeSlackThread, attributeLinkedInHistory } from '../src/content/shared/thread-attribution';
+import { attributeSlackThread, attributeLinkedInHistory, readSelfName, SLACK_SELF_NAME_SELECTORS, LINKEDIN_SELF_NAME_SELECTORS } from '../src/content/shared/thread-attribution';
 
 /**
  * The same defect that produced a wrong-side draft in Gmail, still live on the
@@ -204,5 +204,39 @@ describe('attributeSlackThread against current Slack markup', () => {
       </div>`;
     const out = attributeSlackThread(null) || '';
     expect((out.match(/Only once please\./g) || []).length).toBe(1);
+  });
+});
+
+/**
+ * The self-name chains, measured against the live surfaces on 1 Aug 2026.
+ *
+ * Slack:    [data-qa="user-button"] -> aria-label "User: Pratik Thakker"      OK
+ * LinkedIn: .global-nav__me-photo   -> 0 matches                              STALE
+ *           button.global-nav__primary-link-me-menu-trigger img -> alt="Pratik Thakker"
+ *
+ * The LinkedIn chain was stale the day it shipped, so readSelfName returned
+ * null and LinkedIn could label senders but never mark the user's own turns.
+ */
+describe('readSelfName against the markup each surface actually ships', () => {
+  it('reads the Slack user button', () => {
+    document.body.innerHTML = '<button data-qa="user-button" aria-label="User: Pratik Thakker"></button>';
+    expect(readSelfName(SLACK_SELF_NAME_SELECTORS)).toBe('Pratik Thakker');
+  });
+
+  it('reads the LinkedIn me-menu avatar that current LinkedIn renders', () => {
+    document.body.innerHTML =
+      '<button class="global-nav__primary-link-me-menu-trigger"><img alt="Pratik Thakker"></button>';
+    expect(readSelfName(LINKEDIN_SELF_NAME_SELECTORS)).toBe('Pratik Thakker');
+  });
+
+  it('still reads the older LinkedIn avatar markup', () => {
+    document.body.innerHTML = '<img class="global-nav__me-photo" alt="Photo of Pratik Thakker">';
+    expect(readSelfName(LINKEDIN_SELF_NAME_SELECTORS)).toBe('Pratik Thakker');
+  });
+
+  it('returns null rather than guessing when nothing matches', () => {
+    document.body.innerHTML = '<div>no avatar anywhere</div>';
+    expect(readSelfName(LINKEDIN_SELF_NAME_SELECTORS)).toBeNull();
+    expect(readSelfName(SLACK_SELF_NAME_SELECTORS)).toBeNull();
   });
 });

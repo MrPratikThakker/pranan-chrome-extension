@@ -66,7 +66,22 @@ export const SLACK_SELF_NAME_SELECTORS = [
   '[data-qa="user-profile-button"]',
 ];
 
+/**
+ * Measured against live LinkedIn on 1 Aug 2026, messaging view:
+ *
+ *   .global-nav__me-photo                              0 matches
+ *   button.global-nav__primary-link-me-menu-trigger img  1, alt="Pratik Thakker"
+ *
+ * The first chain I wrote here was stale on the day it shipped, so
+ * readSelfName returned null and LinkedIn transcripts could label senders but
+ * never mark the user's own turns as "you" -- the weaker degradation the
+ * function is designed to fall back to, reached immediately rather than
+ * eventually. Verified selector first, the old ones kept behind it.
+ */
 export const LINKEDIN_SELF_NAME_SELECTORS = [
+  'button.global-nav__primary-link-me-menu-trigger img',
+  '[data-test-global-nav-me] img',
+  '.global-nav__me img',
   '.global-nav__me-photo',
   'img.global-nav__me-photo',
   '.feed-identity-module__actor-meta a',
