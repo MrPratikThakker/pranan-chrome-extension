@@ -119,25 +119,29 @@ export function correctForcedTop(desiredTop: number, actualTop: number): number 
 }
 
 /**
- * Capping the dialog's height does not make its contents scroll.
+ * Why there is deliberately NO scroll guard here.
  *
- * Measured on Pratik's Gmail at a 517px viewport, 4 Aug: the rescue set
- * max-height 437px, but the dialog computes `overflow-y: visible`, so its
- * content (500px) simply spilled out of the bottom. Send ended up 52px below
- * the fold with NO scrollable ancestor -- unreachable by any means.
+ * v0.8.55 added one, on the theory that capping the dialog's height without
+ * letting it scroll would strand the Send button below the fold. That came from
+ * a measurement taken on a compose I had already stripped, re-styled and hit
+ * with synthetic resize events -- a dirty layout state, not one a user reaches.
  *
- * That is a straight downgrade of the bug being fixed. Drishti losing the Close
- * button is irritating; a user who cannot reach Send cannot send the mail at
- * all, and this file already carries the rule that our UI must never be why
- * Send is unreachable.
+ * Re-measured on clean composes it does not happen, and cannot:
  *
- * So when the cap actually bites, the content has to be allowed to scroll.
- * Checked rather than applied unconditionally: `overflow-y: auto` on Gmail's
- * dialog risks clipping menus that intentionally paint outside it, and in the
- * common case -- verified at a 677px viewport, where the compose needs 500px --
- * nothing overflows and there is no reason to touch it.
+ *   viewport 517 -> dialog [80, 517], Send bottom 506
+ *   viewport 677 -> dialog [177, 677], Send bottom 666
+ *
+ * Gmail pins the popup's BOTTOM to the bottom of the viewport. `max-height`
+ * only lowers the top edge; the bottom does not move, and Send is the last row
+ * inside it. So the cap can never push Send out of view.
+ *
+ * The v0.8.55 guard also keyed off `scrollHeight > clientHeight`, which turns
+ * out not to track Send's reachability at all -- measured at viewport 517 with
+ * scrollHeight 612 against clientHeight 437, Send was still comfortably visible
+ * at 506, because the overflow is inside Gmail's body area rather than the send
+ * row. It would have applied `overflow-y: auto` to Gmail's dialog on a signal
+ * that means nothing, risking clipped menus for no benefit.
+ *
+ * Removed in v0.8.56. If a real case of an unreachable Send ever turns up, gate
+ * it on the Send row's own position, not on scrollHeight.
  */
-export function needsScrollableContent(scrollHeight: number, clientHeight: number): boolean {
-  if (!Number.isFinite(scrollHeight) || !Number.isFinite(clientHeight)) return false;
-  return scrollHeight > clientHeight + 2;
-}

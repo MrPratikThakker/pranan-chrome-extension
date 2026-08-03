@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planComposeTitleRescue, needsForcedPositioning, correctForcedTop, needsScrollableContent, COMPOSE_SAFE_TOP } from '../src/lib/compose-title-rescue';
+import { planComposeTitleRescue, needsForcedPositioning, correctForcedTop, COMPOSE_SAFE_TOP } from '../src/lib/compose-title-rescue';
 
 /**
  * Drishti, 21 July: "the top part of the pop-up email box is getting hidden
@@ -148,32 +148,20 @@ describe('deliberate limits of the rescue', () => {
 });
 
 /**
- * Measured on real Gmail, 4 Aug, viewport 517: the rescue capped the dialog at
- * 437px, Gmail's dialog computes `overflow-y: visible`, so the 500px of content
- * spilled out the bottom. Send landed 52px below the fold with no scrollable
- * ancestor -- unreachable by any means. Capping the box without letting it
- * scroll turns a bug about the Close button into a bug about Send.
+ * Verified on real Gmail, 4 Aug, at viewports 517 and 677: the cap lowers the
+ * dialog's TOP edge only. Gmail pins the bottom to the viewport bottom and Send
+ * is the last row inside, so Send stayed visible (506 of 517; 666 of 677).
+ *
+ * v0.8.55 briefly shipped a scroll guard for a Send-below-the-fold case that
+ * only ever appeared on a compose I had manually stripped and re-styled.
+ * Removed in v0.8.56 -- see the note in lib/compose-title-rescue.
  */
-describe('needsScrollableContent', () => {
-  it('detects the measured 517px case', () => {
-    expect(needsScrollableContent(500, 437)).toBe(true);
-  });
-
-  // Verified at viewport 677: compose needs 500, cap is 597, nothing overflows.
-  // Leave Gmail's overflow alone there -- auto would clip menus that paint
-  // outside the dialog on purpose.
-  it('leaves a dialog that fits alone', () => {
-    expect(needsScrollableContent(500, 500)).toBe(false);
-    expect(needsScrollableContent(500, 597)).toBe(false);
-  });
-
-  it('ignores sub-pixel rounding rather than scrolling for 1px', () => {
-    expect(needsScrollableContent(501, 500)).toBe(false);
-    expect(needsScrollableContent(503, 500)).toBe(true);
-  });
-
-  it('does nothing on unmeasurable geometry', () => {
-    expect(needsScrollableContent(NaN, 437)).toBe(false);
-    expect(needsScrollableContent(500, NaN)).toBe(false);
+describe('the cap cannot strand the Send button', () => {
+  it('only ever lowers the top edge, never raises the bottom', () => {
+    const plan = planComposeTitleRescue(-147, 711, 711)!;
+    expect(plan.top).toBe(COMPOSE_SAFE_TOP);
+    // The plan carries no bottom, no height and no transform -- nothing that
+    // could move the pinned bottom edge Send sits on.
+    expect(Object.keys(plan).sort()).toEqual(['maxHeight', 'top']);
   });
 });
