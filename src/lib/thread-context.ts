@@ -54,8 +54,12 @@ export function formatThreadContext(
   const blocks = messages
     .filter((m) => m && typeof m.text === 'string' && m.text.trim().length > 0)
     .map((m) => {
+      // Compare normalised, but SHOW what the surface gave us. Slack and
+      // LinkedIn senders are display names, and lowercasing them turned
+      // "Grace Robinson" into "grace robinson" in the prompt. Addresses are
+      // case-insensitive so Gmail is unaffected either way.
       const who = m.sender
-        ? (self && bareAddress(m.sender) === self ? 'you' : bareAddress(m.sender))
+        ? (self && bareAddress(m.sender) === self ? 'you' : m.sender.trim())
         : 'unknown sender';
       return `From: ${who}\n${m.text.trim()}`;
     });

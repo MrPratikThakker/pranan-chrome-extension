@@ -24,6 +24,8 @@ import { injectMultilineText } from '@/lib/safe-dom';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { findOne, findAll, SELECTORS as REGISTRY } from '../selectors';
 import { bootstrapSentry } from '@/lib/observability';
+import { attributeSlackThread, readSelfName, findSenderFor, SLACK_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
+import { generateButtonState } from '../shared/generate-affordance';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -155,19 +157,13 @@ function isInputFocused(): boolean {
 }
 
 function getThreadContext(): string | null {
-  const threadPane = findOne('slack.threadContainer', REGISTRY.slack.threadContainer);
-  if (!threadPane) return null;
-
-  const messages = findAll('slack.threadMessageBody', REGISTRY.slack.threadMessageBody, threadPane);
-  if (messages.length === 0) return null;
-
-  // Get the last few messages for context
-  const contextMessages = messages
-    .slice(-5)
-    .map((m: Element) => m.textContent?.trim())
-    .filter(Boolean);
-
-  return contextMessages.join('\n---\n').slice(0, 2000);
+  // Attributed, not a bare join. This used to map textContent and glue the
+  // messages together with `---`, so nothing in the prompt could tell the
+  // user's own words from the counterparty's and the model answered whatever
+  // came last -- the wrong-side draft fixed on Gmail in v0.8.43. Sharper here
+  // than on Gmail, because getRecentChannelMessages below already attributes
+  // correctly and every call site prefers THIS one when a thread is open.
+  return attributeSlackThread(readSelfName(SLACK_SELF_NAME_SELECTORS));
 }
 
 /**
@@ -191,11 +187,11 @@ function getRecentChannelMessages(): string | null {
     // Walk up to find the message container, then look for sender
     // closest() needs a comma-joined string — registry chain has the same
     // entries; join them so the fallback semantics match.
-    const messageKit = el.closest(REGISTRY.slack.messageKitContainer.join(', '));
-    const senderEl = messageKit
-      ? findOne('slack.messageSenderName', REGISTRY.slack.messageSenderName, messageKit)
-      : null;
-    const sender = senderEl?.textContent?.trim() || 'Someone';
+    // Same climb the thread path uses. closest() with a comma-joined chain
+    // returns the NEAREST matching ancestor, which is `.c-message_kit__blocks`
+    // -- inside the element that holds the sender button -- so every message
+    // came back as "Someone" on current Slack. See findSenderFor.
+    const sender = findSenderFor(el) || 'Someone';
     const text = el.textContent?.trim();
     if (text) {
       messages.push(`${sender}: ${text}`);
@@ -312,17 +308,18 @@ function injectSlackPromptBar() {
     transition: all 0.15s ease;
     font-family: inherit;
     white-space: nowrap;
-    opacity: 0;
-    pointer-events: none;
   `;
   generateBtn.textContent = 'Generate';
   generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = 'linear-gradient(135deg, #5b21b6, #8b5cf6)'; });
   generateBtn.addEventListener('mouseleave', () => { generateBtn.style.background = 'linear-gradient(135deg, #6d28d9, #a78bfa)'; });
 
   input.addEventListener('input', () => {
-    const hasText = input.value.trim().length > 0;
-    generateBtn.style.opacity = hasText ? '1' : '0';
-    generateBtn.style.pointerEvents = hasText ? 'auto' : 'none';
+    // Generate stays visible and pressable whether or not a prompt is typed.
+    // It used to vanish on an empty field, so the bar's only usable control was
+    // the dismiss "×" -- see generate-affordance.ts.
+    const state = generateButtonState(input.value);
+    generateBtn.style.opacity = state.opacity;
+    generateBtn.style.pointerEvents = state.pointerEvents;
   });
 
   // Close button
@@ -420,8 +417,9 @@ function restoreSlackPromptBar(message?: string): void {
   const { input, generateBtn } = pendingSlackDraft;
   input.disabled = false;
   generateBtn.textContent = 'Generate';
-  generateBtn.style.opacity = input.value.trim() ? '1' : '0';
-  generateBtn.style.pointerEvents = input.value.trim() ? 'auto' : 'none';
+  const restored = generateButtonState(input.value);
+  generateBtn.style.opacity = restored.opacity;
+  generateBtn.style.pointerEvents = restored.pointerEvents;
   if (message) input.placeholder = message;
   pendingSlackDraft = null;
 }

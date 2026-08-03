@@ -300,9 +300,24 @@ export const SELECTORS = {
     channelMembers: [
       '[data-qa="channel_header_members"]',
     ],
-    /** Thread side-pane message bodies (used in getThreadMessages). */
+    /**
+     * Thread side-pane message bodies.
+     *
+     * This was a chain of one -- `.c-message__body` -- which matches ZERO
+     * elements in Slack's current thread pane. Counted live on 1 Aug 2026 in an
+     * open thread: .c-message__body 0, [data-qa="message-text"] 6,
+     * .p-rich_text_section 6. So getThreadContext() returned null every time and
+     * every draft fell through `threadContext || channelContext` to the CHANNEL.
+     * Measured side by side, the thread was about an expired password reset
+     * while the channel's recent messages were about not marking mail as spam --
+     * a reply written from the wrong conversation entirely.
+     *
+     * A chain of one cannot degrade, which is the whole point of the chain.
+     */
     threadMessageBody: [
       '.c-message__body',
+      '[data-qa="message-text"]',
+      '.p-rich_text_section',
     ],
     /** Message kit container around a single message — for sender lookup. */
     messageKitContainer: [

@@ -26,6 +26,8 @@ import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor, type InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
 import { findOne, findAll } from '../selectors';
+import { attributeLinkedInHistory, readSelfName, LINKEDIN_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
+import { generateButtonState } from '../shared/generate-affordance';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -238,18 +240,14 @@ function getProfileContext(): { headline: string | null; isInMail: boolean } {
 }
 
 function getMessageHistory(): string | null {
-  const messages = document.querySelectorAll(
-    SELECTORS.messageHistory.join(', ')
+  // Attributed, not a bare join. This used to map textContent and glue the
+  // messages together with `---`, leaving nothing in the prompt to separate the
+  // user's own turns from the other person's -- the same defect that made Gmail
+  // draft a reply from the wrong side of a negotiation (fixed in v0.8.43).
+  return attributeLinkedInHistory(
+    readSelfName(LINKEDIN_SELF_NAME_SELECTORS),
+    SELECTORS.messageHistory,
   );
-
-  if (messages.length === 0) return null;
-
-  const history = Array.from(messages)
-    .slice(-5)
-    .map(m => m.textContent?.trim())
-    .filter(Boolean);
-
-  return history.join('\n---\n').slice(0, 2000);
 }
 
 function getComposeContent(): string {
@@ -425,8 +423,9 @@ function injectMessagingPromptBar() {
     gap: 8px;
     padding: 6px 12px;
     margin: 4px 8px 6px 8px;
-    background: linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97));
-    border: 1px solid rgba(167, 139, 250, 0.45); box-shadow: 0 2px 8px rgba(109,40,217,0.15);
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
     border-radius: 8px;
     cursor: text;
     transition: all 0.15s ease;
@@ -434,12 +433,12 @@ function injectMessagingPromptBar() {
   `;
 
   bar.addEventListener('mouseenter', () => {
-    bar.style.borderColor = 'rgba(167, 139, 250, 0.7)';
-    bar.style.background = 'linear-gradient(135deg, rgba(26,12,42,0.98), rgba(20,12,40,0.98))';
+    bar.style.borderColor = '#c4b5fd';
+    bar.style.boxShadow = '0 2px 8px rgba(124, 58, 237, 0.08)';
   });
   bar.addEventListener('mouseleave', () => {
-    bar.style.borderColor = 'rgba(167, 139, 250, 0.45)';
-    bar.style.background = 'linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97))';
+    bar.style.borderColor = '#e5e7eb';
+    bar.style.boxShadow = '0 1px 2px rgba(15, 23, 42, 0.04)';
   });
 
   // Pranan icon
@@ -448,7 +447,7 @@ function injectMessagingPromptBar() {
     width: 22px; height: 22px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
   `;
-  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="60" cy="60" r="33" stroke="#a78bfa" stroke-width="7" fill="none"/><circle cx="60" cy="60" r="16" fill="#a78bfa"/></svg>`;
+  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="60" cy="60" r="33" stroke="#6d28d9" stroke-width="7" fill="none"/><circle cx="60" cy="60" r="16" fill="#6d28d9"/></svg>`;
 
   // Build placeholder text
   let placeholderText = 'Draft message with Pranan...';
@@ -463,12 +462,12 @@ function injectMessagingPromptBar() {
   input.placeholder = placeholderText;
   input.style.cssText = `
     flex: 1; border: none; background: transparent; outline: none;
-    font-size: 13px; color: #fafafa; font-family: inherit; cursor: text;
+    font-size: 13px; color: #0f172a; font-family: inherit; cursor: text;
   `;
 
   // Placeholder style injection
   const placeholderStyle = document.createElement('style');
-  placeholderStyle.textContent = `[${PRANAN_LI_MSG_BAR_ATTR}] input::placeholder { color: rgba(167, 139, 250, 0.5); }`;
+  placeholderStyle.textContent = `[${PRANAN_LI_MSG_BAR_ATTR}] input::placeholder { color: #94a3b8; }`;
   bar.appendChild(placeholderStyle);
 
   // Generate button
@@ -477,7 +476,6 @@ function injectMessagingPromptBar() {
     background: linear-gradient(135deg, #6d28d9, #a78bfa); color: white; border: none; border-radius: 6px;
     padding: 4px 12px; font-size: 12px; font-weight: 500; cursor: pointer;
     transition: all 0.15s ease; font-family: inherit; white-space: nowrap;
-    opacity: 0; pointer-events: none;
   `;
   generateBtn.textContent = 'Generate';
   generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = 'linear-gradient(135deg, #5b21b6, #8b5cf6)'; });
@@ -485,8 +483,9 @@ function injectMessagingPromptBar() {
 
   input.addEventListener('input', () => {
     const hasText = input.value.trim().length > 0;
-    generateBtn.style.opacity = hasText ? '1' : '0';
-    generateBtn.style.pointerEvents = hasText ? 'auto' : 'none';
+    const st = generateButtonState(input.value);
+    generateBtn.style.opacity = st.opacity;
+    generateBtn.style.pointerEvents = st.pointerEvents;
   });
 
   // Close button
@@ -519,8 +518,9 @@ function injectMessagingPromptBar() {
       },
     }).catch(() => {});
     input.value = '';
-    generateBtn.style.opacity = '0';
-    generateBtn.style.pointerEvents = 'none';
+    const stAfter = generateButtonState('');
+    generateBtn.style.opacity = stAfter.opacity;
+    generateBtn.style.pointerEvents = stAfter.pointerEvents;
   };
 
   input.addEventListener('keydown', (e) => {
@@ -643,7 +643,6 @@ function injectCommentPromptBars() {
       background: linear-gradient(135deg, #6d28d9, #a78bfa); color: white; border: none; border-radius: 5px;
       padding: 3px 10px; font-size: 11px; font-weight: 500; cursor: pointer;
       transition: all 0.15s ease; font-family: inherit; white-space: nowrap;
-      opacity: 0; pointer-events: none;
     `;
     generateBtn.textContent = 'Draft';
     generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = 'linear-gradient(135deg, #5b21b6, #8b5cf6)'; });
@@ -651,8 +650,9 @@ function injectCommentPromptBars() {
 
     input.addEventListener('input', () => {
       const hasText = input.value.trim().length > 0;
-      generateBtn.style.opacity = hasText ? '1' : '0';
-      generateBtn.style.pointerEvents = hasText ? 'auto' : 'none';
+      const st = generateButtonState(input.value);
+      generateBtn.style.opacity = st.opacity;
+      generateBtn.style.pointerEvents = st.pointerEvents;
     });
 
     // Close
@@ -707,8 +707,9 @@ function injectCommentPromptBars() {
         },
       }).catch(() => {});
       input.value = '';
-      generateBtn.style.opacity = '0';
-      generateBtn.style.pointerEvents = 'none';
+      const stAfter = generateButtonState('');
+      generateBtn.style.opacity = stAfter.opacity;
+      generateBtn.style.pointerEvents = stAfter.pointerEvents;
     };
 
     input.addEventListener('keydown', (e) => {
@@ -1104,6 +1105,29 @@ document.addEventListener('mouseup', () => {
   }
 });
 
+/**
+ * Show a transient reason on whichever Pranan bar is on screen.
+ *
+ * Both LinkedIn bars clear the prompt the instant Generate is pressed and never
+ * set a loading state, so a success and a total failure looked identical. This
+ * is the minimum that makes a failure visible: put the reason where the prompt
+ * was, and restore the placeholder afterwards.
+ */
+function showLinkedInNotice(text: string): void {
+  const bar =
+    document.querySelector(`[${PRANAN_LI_MSG_BAR_ATTR}]`) ||
+    document.querySelector(`[${PRANAN_LI_COMMENT_BAR_ATTR}]`);
+  const input = bar?.querySelector('input') as HTMLInputElement | null;
+  if (!input) return;
+  const original = input.placeholder;
+  input.placeholder = text.slice(0, 140);
+  input.style.borderColor = '#fbbf24';
+  setTimeout(() => {
+    input.placeholder = original;
+    input.style.borderColor = '';
+  }, 9000);
+}
+
 // ---------------------------------------------------------------------------
 // Message Listener
 // ---------------------------------------------------------------------------
@@ -1112,6 +1136,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'INSERT_DRAFT') {
     const success = injectDraft(message.payload.text || message.payload.draft);
     sendResponse({ success });
+  }
+
+  // The worker answers a failed or refused draft with DRAFT_SKIPPED. Gmail and
+  // Slack both surface it; LinkedIn had no handler at all, so every failure on
+  // this surface was perfectly silent -- prompt cleared, button unchanged, no
+  // message. Measured on 1 Aug: pressed Generate in messaging, waited 27
+  // seconds, nothing whatsoever, with the API returning a good draft in 3.4s
+  // for the same payload. Whatever went wrong, the user could not have known.
+  if (message.type === 'DRAFT_SKIPPED') {
+    showLinkedInNotice(message.payload?.message || 'Pranan could not draft this one. Try again.');
+    sendResponse({ ok: true });
   }
   if (message.type === 'INSERT_COMMENT_DRAFT') {
     const draftText = message.payload.text || message.payload.draft;

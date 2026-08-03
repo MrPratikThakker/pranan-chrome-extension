@@ -24,8 +24,19 @@ export function injectMultilineText(
   // Clear existing children safely.
   while (node.firstChild) node.removeChild(node.firstChild);
 
+  // A <p> already carries a margin, so an extra empty paragraph for each blank
+  // line adds a SECOND gap on top of it. Slack and LinkedIn pass 'p', and every
+  // draft on those surfaces arrived with enormous holes in it — measured on
+  // LinkedIn as "Hi Sahil,\n\n\n\n\nI'm doing well..." where the backend had
+  // returned a clean "Hi Sahil,\n\nI'm doing well...".
+  //
+  // A <div> has no margin, so there the empty block IS the blank line. That is
+  // why Gmail always looked right, and why this stays tag-aware rather than
+  // dropping empties everywhere.
   const lines = (text || '').split('\n');
-  for (const line of lines) {
+  const blocks = tag === 'p' ? lines.filter((line) => line.trim().length > 0) : lines;
+
+  for (const line of blocks) {
     const block = document.createElement(tag);
     if (!line) {
       block.appendChild(document.createElement('br'));
