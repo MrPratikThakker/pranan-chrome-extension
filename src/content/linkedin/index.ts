@@ -423,8 +423,9 @@ function injectMessagingPromptBar() {
     gap: 8px;
     padding: 6px 12px;
     margin: 4px 8px 6px 8px;
-    background: linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97));
-    border: 1px solid rgba(167, 139, 250, 0.45); box-shadow: 0 2px 8px rgba(109,40,217,0.15);
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
     border-radius: 8px;
     cursor: text;
     transition: all 0.15s ease;
@@ -432,12 +433,12 @@ function injectMessagingPromptBar() {
   `;
 
   bar.addEventListener('mouseenter', () => {
-    bar.style.borderColor = 'rgba(167, 139, 250, 0.7)';
-    bar.style.background = 'linear-gradient(135deg, rgba(26,12,42,0.98), rgba(20,12,40,0.98))';
+    bar.style.borderColor = '#c4b5fd';
+    bar.style.boxShadow = '0 2px 8px rgba(124, 58, 237, 0.08)';
   });
   bar.addEventListener('mouseleave', () => {
-    bar.style.borderColor = 'rgba(167, 139, 250, 0.45)';
-    bar.style.background = 'linear-gradient(135deg, rgba(20,10,35,0.97), rgba(14,10,31,0.97))';
+    bar.style.borderColor = '#e5e7eb';
+    bar.style.boxShadow = '0 1px 2px rgba(15, 23, 42, 0.04)';
   });
 
   // Pranan icon
@@ -446,7 +447,7 @@ function injectMessagingPromptBar() {
     width: 22px; height: 22px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
   `;
-  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="60" cy="60" r="33" stroke="#a78bfa" stroke-width="7" fill="none"/><circle cx="60" cy="60" r="16" fill="#a78bfa"/></svg>`;
+  icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="60" cy="60" r="33" stroke="#6d28d9" stroke-width="7" fill="none"/><circle cx="60" cy="60" r="16" fill="#6d28d9"/></svg>`;
 
   // Build placeholder text
   let placeholderText = 'Draft message with Pranan...';
@@ -461,12 +462,12 @@ function injectMessagingPromptBar() {
   input.placeholder = placeholderText;
   input.style.cssText = `
     flex: 1; border: none; background: transparent; outline: none;
-    font-size: 13px; color: #fafafa; font-family: inherit; cursor: text;
+    font-size: 13px; color: #0f172a; font-family: inherit; cursor: text;
   `;
 
   // Placeholder style injection
   const placeholderStyle = document.createElement('style');
-  placeholderStyle.textContent = `[${PRANAN_LI_MSG_BAR_ATTR}] input::placeholder { color: rgba(167, 139, 250, 0.5); }`;
+  placeholderStyle.textContent = `[${PRANAN_LI_MSG_BAR_ATTR}] input::placeholder { color: #94a3b8; }`;
   bar.appendChild(placeholderStyle);
 
   // Generate button
