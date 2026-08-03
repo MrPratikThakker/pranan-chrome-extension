@@ -25,7 +25,7 @@ import { bootstrapSentry } from '@/lib/observability';
 import { findAll, findOne, SELECTORS } from '../selectors';
 import { bottomOffsetAboveSendRow, bottomOffsetForChips, correctedBottomOffset, shouldHideBar, isSendReachable, placementObscuresCompose } from '@/lib/compose-layout';
 import { resolveLiveCompose, isOrphanedComposeBar } from '@/lib/live-compose';
-import { planComposeTitleRescue, needsForcedPositioning, correctForcedTop } from '@/lib/compose-title-rescue';
+import { planComposeTitleRescue, needsForcedPositioning, correctForcedTop, needsScrollableContent } from '@/lib/compose-title-rescue';
 import { formatThreadContext, extractSelfEmail } from '@/lib/thread-context';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
@@ -367,6 +367,7 @@ function rescueComposeTitle(compose: Element): void {
   // The gentle attempt first: constrain the height and ask for a safe top.
   dialog.style.top = `${plan.top}px`;
   dialog.style.maxHeight = plan.maxHeight;
+  keepComposeContentReachable(dialog);
 
   // Then check whether it worked, rather than assuming. `top` does nothing on a
   // statically-positioned element, and the v0.8.34 note above records Gmail's
@@ -390,6 +391,18 @@ function rescueComposeTitle(compose: Element): void {
   const forced = dialog.getBoundingClientRect();
   const corrected = correctForcedTop(plan.top, forced.top);
   if (corrected !== null) dialog.style.top = `${corrected}px`;
+}
+
+/**
+ * Capping the height does not make the contents scroll. Measured at a 517px
+ * viewport: max-height 437 against 500px of content, `overflow-y: visible`, and
+ * Send 52px below the fold with nothing able to scroll it back. Only applied
+ * when the cap actually bites -- see lib/compose-title-rescue.
+ */
+function keepComposeContentReachable(dialog: HTMLElement): void {
+  if (!dialog.style.maxHeight) return; // we did not cap it; not ours to touch
+  if (!needsScrollableContent(dialog.scrollHeight, dialog.clientHeight)) return;
+  dialog.style.overflowY = 'auto';
 }
 
 function positionComposeBar(bar: HTMLElement, getCompose: () => Element) {

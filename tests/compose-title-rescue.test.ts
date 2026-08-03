@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planComposeTitleRescue, needsForcedPositioning, correctForcedTop, COMPOSE_SAFE_TOP } from '../src/lib/compose-title-rescue';
+import { planComposeTitleRescue, needsForcedPositioning, correctForcedTop, needsScrollableContent, COMPOSE_SAFE_TOP } from '../src/lib/compose-title-rescue';
 
 /**
  * Drishti, 21 July: "the top part of the pop-up email box is getting hidden
@@ -144,5 +144,36 @@ describe('deliberate limits of the rescue', () => {
       expect(planComposeTitleRescue(-50, bottom, 711)).toBeNull();
     }
     expect(planComposeTitleRescue(-50, 707, 711)).not.toBeNull(); // at the fold
+  });
+});
+
+/**
+ * Measured on real Gmail, 4 Aug, viewport 517: the rescue capped the dialog at
+ * 437px, Gmail's dialog computes `overflow-y: visible`, so the 500px of content
+ * spilled out the bottom. Send landed 52px below the fold with no scrollable
+ * ancestor -- unreachable by any means. Capping the box without letting it
+ * scroll turns a bug about the Close button into a bug about Send.
+ */
+describe('needsScrollableContent', () => {
+  it('detects the measured 517px case', () => {
+    expect(needsScrollableContent(500, 437)).toBe(true);
+  });
+
+  // Verified at viewport 677: compose needs 500, cap is 597, nothing overflows.
+  // Leave Gmail's overflow alone there -- auto would clip menus that paint
+  // outside the dialog on purpose.
+  it('leaves a dialog that fits alone', () => {
+    expect(needsScrollableContent(500, 500)).toBe(false);
+    expect(needsScrollableContent(500, 597)).toBe(false);
+  });
+
+  it('ignores sub-pixel rounding rather than scrolling for 1px', () => {
+    expect(needsScrollableContent(501, 500)).toBe(false);
+    expect(needsScrollableContent(503, 500)).toBe(true);
+  });
+
+  it('does nothing on unmeasurable geometry', () => {
+    expect(needsScrollableContent(NaN, 437)).toBe(false);
+    expect(needsScrollableContent(500, NaN)).toBe(false);
   });
 });

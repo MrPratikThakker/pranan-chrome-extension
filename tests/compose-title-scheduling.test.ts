@@ -58,3 +58,21 @@ describe('compose title rescue is wired to signals that fire when it matters', (
     expect(calls.length).toBeGreaterThanOrEqual(3); // 1 definition + 2 call sites
   });
 });
+
+describe('the cap can never make Send unreachable', () => {
+  const positioner = gmail.slice(
+    gmail.indexOf('function positionComposeBar('),
+    gmail.indexOf('function injectPromptBar('),
+  );
+
+  it('checks reachability every time it caps the height', () => {
+    expect(gmail).toContain('keepComposeContentReachable(dialog)');
+  });
+
+  // Only when our own cap is what is biting. Gmail's dialog overflows on
+  // purpose elsewhere, and forcing auto there clips its menus.
+  it('only touches overflow on a dialog we capped', () => {
+    const fn = gmail.slice(gmail.indexOf('function keepComposeContentReachable'));
+    expect(fn.slice(0, 400)).toContain('if (!dialog.style.maxHeight) return');
+  });
+});

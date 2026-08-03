@@ -117,3 +117,27 @@ export function correctForcedTop(desiredTop: number, actualTop: number): number 
   if (error === 0) return null;
   return desiredTop - error;
 }
+
+/**
+ * Capping the dialog's height does not make its contents scroll.
+ *
+ * Measured on Pratik's Gmail at a 517px viewport, 4 Aug: the rescue set
+ * max-height 437px, but the dialog computes `overflow-y: visible`, so its
+ * content (500px) simply spilled out of the bottom. Send ended up 52px below
+ * the fold with NO scrollable ancestor -- unreachable by any means.
+ *
+ * That is a straight downgrade of the bug being fixed. Drishti losing the Close
+ * button is irritating; a user who cannot reach Send cannot send the mail at
+ * all, and this file already carries the rule that our UI must never be why
+ * Send is unreachable.
+ *
+ * So when the cap actually bites, the content has to be allowed to scroll.
+ * Checked rather than applied unconditionally: `overflow-y: auto` on Gmail's
+ * dialog risks clipping menus that intentionally paint outside it, and in the
+ * common case -- verified at a 677px viewport, where the compose needs 500px --
+ * nothing overflows and there is no reason to touch it.
+ */
+export function needsScrollableContent(scrollHeight: number, clientHeight: number): boolean {
+  if (!Number.isFinite(scrollHeight) || !Number.isFinite(clientHeight)) return false;
+  return scrollHeight > clientHeight + 2;
+}
