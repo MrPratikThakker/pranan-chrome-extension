@@ -1105,6 +1105,29 @@ document.addEventListener('mouseup', () => {
   }
 });
 
+/**
+ * Show a transient reason on whichever Pranan bar is on screen.
+ *
+ * Both LinkedIn bars clear the prompt the instant Generate is pressed and never
+ * set a loading state, so a success and a total failure looked identical. This
+ * is the minimum that makes a failure visible: put the reason where the prompt
+ * was, and restore the placeholder afterwards.
+ */
+function showLinkedInNotice(text: string): void {
+  const bar =
+    document.querySelector(`[${PRANAN_LI_MSG_BAR_ATTR}]`) ||
+    document.querySelector(`[${PRANAN_LI_COMMENT_BAR_ATTR}]`);
+  const input = bar?.querySelector('input') as HTMLInputElement | null;
+  if (!input) return;
+  const original = input.placeholder;
+  input.placeholder = text.slice(0, 140);
+  input.style.borderColor = '#fbbf24';
+  setTimeout(() => {
+    input.placeholder = original;
+    input.style.borderColor = '';
+  }, 9000);
+}
+
 // ---------------------------------------------------------------------------
 // Message Listener
 // ---------------------------------------------------------------------------
@@ -1113,6 +1136,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'INSERT_DRAFT') {
     const success = injectDraft(message.payload.text || message.payload.draft);
     sendResponse({ success });
+  }
+
+  // The worker answers a failed or refused draft with DRAFT_SKIPPED. Gmail and
+  // Slack both surface it; LinkedIn had no handler at all, so every failure on
+  // this surface was perfectly silent -- prompt cleared, button unchanged, no
+  // message. Measured on 1 Aug: pressed Generate in messaging, waited 27
+  // seconds, nothing whatsoever, with the API returning a good draft in 3.4s
+  // for the same payload. Whatever went wrong, the user could not have known.
+  if (message.type === 'DRAFT_SKIPPED') {
+    showLinkedInNotice(message.payload?.message || 'Pranan could not draft this one. Try again.');
+    sendResponse({ ok: true });
   }
   if (message.type === 'INSERT_COMMENT_DRAFT') {
     const draftText = message.payload.text || message.payload.draft;
