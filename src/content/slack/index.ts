@@ -25,6 +25,7 @@ import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { findOne, findAll, SELECTORS as REGISTRY } from '../selectors';
 import { bootstrapSentry } from '@/lib/observability';
 import { attributeSlackThread, readSelfName, findSenderFor, SLACK_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
+import { conversationKindFromUrl } from '@/lib/slack-conversation';
 import { generateButtonState } from '../shared/generate-affordance';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
@@ -95,6 +96,12 @@ function getChannelName(): string | null {
 }
 
 function getDMRecipient(): string | null {
+  // Never try to read a person's name outside a DM. The broad fallback at the
+  // bottom accepts any header text that does not start with "#", and Slack
+  // channel headers do not start with "#" -- so without this guard a channel
+  // slug still comes back as the recipient even with isDirectMessage fixed.
+  if (!isDirectMessage()) return null;
+
   // Try dedicated DM header selectors first
   const dmHeader = findOne('slack.dmHeader', REGISTRY.slack.dmHeader);
   if (dmHeader?.textContent?.trim()) return dmHeader.textContent.trim();
@@ -116,13 +123,22 @@ function getDMRecipient(): string | null {
 }
 
 function isDirectMessage(): boolean {
-  // Check URL pattern: /client/TEAM_ID/DMID starts with 'D'
-  const path = window.location.pathname;
-  const match = path.match(/\/client\/\w+\/(\w+)/);
-  if (match) {
-    // DM channel IDs start with 'D', group DMs with 'G'
-    if (match[1].startsWith('D') || match[1].startsWith('G')) return true;
-  }
+  // The URL already says which it is -- Slack prefixes conversation ids by type
+  // -- so read it and BELIEVE it, in both directions.
+  //
+  // The old version only looked for a DM id and fell through on a channel id
+  // into the DOM heuristics below, which are both wrong. Measured on
+  // #goal26-ancil-ai-launch, 4 Aug: the header reads "goal26-ancil-ai-launch"
+  // with no "#", and there is no member count element. So a channel failed the
+  // "starts with #" test AND the "channels have a member count" test, was
+  // declared a DM, and getDMRecipient handed its slug on as a person's name.
+  // That is why drafts there opened "Hi goal26-ancil-ai-launch,".
+  const kind = conversationKindFromUrl(window.location.pathname);
+  if (kind === 'dm') return true;
+  if (kind === 'channel') return false;
+
+  // Only reached when the URL genuinely does not say: thread panes, search
+  // views, a permalink still resolving.
 
   // Fallback: check for DM header element
   if (findOne('slack.dmHeader', REGISTRY.slack.dmHeader)) return true;

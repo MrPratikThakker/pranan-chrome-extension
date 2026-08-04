@@ -478,6 +478,7 @@ function injectMessagingPromptBar() {
     transition: all 0.15s ease; font-family: inherit; white-space: nowrap;
   `;
   generateBtn.textContent = 'Generate';
+  generateBtn.dataset.prananGenerate = 'Generate';
   generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = 'linear-gradient(135deg, #5b21b6, #8b5cf6)'; });
   generateBtn.addEventListener('mouseleave', () => { generateBtn.style.background = 'linear-gradient(135deg, #6d28d9, #a78bfa)'; });
 
@@ -503,6 +504,7 @@ function injectMessagingPromptBar() {
 
   const triggerDraft = () => {
     const prompt = input.value.trim() || undefined;
+    setLinkedInBarsBusy(true);
     safeSendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
@@ -645,6 +647,7 @@ function injectCommentPromptBars() {
       transition: all 0.15s ease; font-family: inherit; white-space: nowrap;
     `;
     generateBtn.textContent = 'Draft';
+    generateBtn.dataset.prananGenerate = 'Draft';
     generateBtn.addEventListener('mouseenter', () => { generateBtn.style.background = 'linear-gradient(135deg, #5b21b6, #8b5cf6)'; });
     generateBtn.addEventListener('mouseleave', () => { generateBtn.style.background = 'linear-gradient(135deg, #6d28d9, #a78bfa)'; });
 
@@ -771,6 +774,7 @@ function injectComposeButtons() {
     size: 'sm',
     position: 'before',
     onClick: () => {
+      setLinkedInBarsBusy(true);
       safeSendMessage({
         type: 'INLINE_DRAFT_REQUEST',
         payload: {
@@ -853,6 +857,7 @@ function renderPopup(data: RelationshipPopupData) {
   showRelationshipPopup(header, data,
     // Draft click
     () => {
+      setLinkedInBarsBusy(true);
       safeSendMessage({
         type: 'INLINE_DRAFT_REQUEST',
         payload: {
@@ -1105,6 +1110,55 @@ document.addEventListener('mouseup', () => {
   }
 });
 
+const LI_BUSY_LABEL = 'Drafting...';
+
+/** Longest we will claim to be working before admitting we are not. */
+const LI_BUSY_TIMEOUT_MS = 30_000;
+
+let liBusyTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Show that a draft is actually in flight.
+ *
+ * Both LinkedIn bars cleared the prompt on click and changed nothing else, so
+ * pressing Generate looked identical whether a draft was coming or the request
+ * had died. Gmail has had setLoading() and Slack a "Drafting..." label since
+ * long before this; LinkedIn simply never got one.
+ *
+ * The timeout is not belt-and-braces. Measured on 1 Aug: Generate pressed in
+ * messaging, 27 seconds of nothing, no INSERT_DRAFT and no DRAFT_SKIPPED ever
+ * arriving, while the same payload returned a good draft from the API in 3.4s.
+ * If a reply can go missing entirely then a busy state with no timeout hangs on
+ * "Drafting..." forever, which is a worse lie than the silence it replaced.
+ */
+function setLinkedInBarsBusy(busy: boolean): void {
+  if (liBusyTimer) { clearTimeout(liBusyTimer); liBusyTimer = undefined; }
+
+  const buttons = document.querySelectorAll<HTMLButtonElement>(
+    `[${PRANAN_LI_MSG_BAR_ATTR}] [data-pranan-generate], [${PRANAN_LI_COMMENT_BAR_ATTR}] [data-pranan-generate]`
+  );
+  for (const btn of buttons) {
+    if (busy) {
+      btn.textContent = LI_BUSY_LABEL;
+      btn.style.opacity = '0.6';
+      btn.style.pointerEvents = 'none';
+    } else {
+      // dataset holds this bar's own idle label -- "Generate" on comments,
+      // "Draft" in messaging.
+      btn.textContent = btn.dataset.prananGenerate || 'Generate';
+      btn.style.opacity = '1';
+      btn.style.pointerEvents = 'auto';
+    }
+  }
+
+  if (busy) {
+    liBusyTimer = setTimeout(() => {
+      setLinkedInBarsBusy(false);
+      showLinkedInNotice('Pranan did not hear back. Try again.');
+    }, LI_BUSY_TIMEOUT_MS);
+  }
+}
+
 /**
  * Show a transient reason on whichever Pranan bar is on screen.
  *
@@ -1134,6 +1188,7 @@ function showLinkedInNotice(text: string): void {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'INSERT_DRAFT') {
+    setLinkedInBarsBusy(false);
     const success = injectDraft(message.payload.text || message.payload.draft);
     sendResponse({ success });
   }
@@ -1145,10 +1200,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // seconds, nothing whatsoever, with the API returning a good draft in 3.4s
   // for the same payload. Whatever went wrong, the user could not have known.
   if (message.type === 'DRAFT_SKIPPED') {
+    setLinkedInBarsBusy(false);
     showLinkedInNotice(message.payload?.message || 'Pranan could not draft this one. Try again.');
     sendResponse({ ok: true });
   }
   if (message.type === 'INSERT_COMMENT_DRAFT') {
+    setLinkedInBarsBusy(false);
     const draftText = message.payload.text || message.payload.draft;
     const boundEditorId = message.payload.editorId as string | undefined;
     if (boundEditorId) {
