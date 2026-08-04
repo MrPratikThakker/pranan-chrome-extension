@@ -36,7 +36,18 @@ async function notifyAuthExpired(): Promise<void> {
   // Audit (LOW): clear BOTH tokens on auth-expiry. Clearing only authToken left
   // a stale refreshToken behind, which the refresh path would keep trying.
   try { await chrome.storage.local.remove(['authToken', 'refreshToken']); } catch { /* pass */ }
-  try { chrome.runtime.sendMessage({ type: 'AUTH_EXPIRED' }); } catch { /* pass */ }
+  // The try/catch below only covers a SYNCHRONOUS throw (dead extension
+  // context). It does not cover the promise, and this broadcast rejects
+  // whenever nothing is listening -- which is the normal case, because the
+  // popup and side panel are closed almost all the time. That unhandled
+  // rejection is the recurring "Uncaught (in promise) Error: Could not
+  // establish connection. Receiving end does not exist." on background.js,
+  // with a useless `background.js:0` stack. Nothing is broken when it fires;
+  // the broadcast simply has no audience.
+  try {
+    chrome.runtime.sendMessage({ type: 'AUTH_EXPIRED' })
+      .catch(() => { /* no popup or side panel open to hear it */ });
+  } catch { /* extension context gone */ }
   setTimeout(() => { authExpiryInFlight = false; }, 5000);
 }
 
@@ -300,7 +311,11 @@ async function handleResponse<T>(response: Response): Promise<T> {
   if (response.ok && authExpiryInFlight) {
     authExpiryInFlight = false;
     try {
-      chrome.runtime.sendMessage({ type: 'AUTH_RECOVERED' });
+      // Same as AUTH_EXPIRED above: the catch here is for a dead context, not
+      // for the promise. Without .catch() this rejects into the console every
+      // time auth recovers with no popup or side panel open.
+      chrome.runtime.sendMessage({ type: 'AUTH_RECOVERED' })
+        .catch(() => { /* no popup or side panel open to hear it */ });
     } catch { /* sender may not be a content script */ }
   }
 
