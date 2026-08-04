@@ -25,6 +25,7 @@ import { bootstrapSentry } from '@/lib/observability';
 import { findAll, findOne, SELECTORS } from '../selectors';
 import { bottomOffsetAboveSendRow, bottomOffsetForChips, correctedBottomOffset, shouldHideBar, isSendReachable, placementObscuresCompose } from '@/lib/compose-layout';
 import { resolveLiveCompose, isOrphanedComposeBar } from '@/lib/live-compose';
+import { planComposeTitleRescue, needsForcedPositioning, correctForcedTop } from '@/lib/compose-title-rescue';
 import { formatThreadContext, extractSelfEmail } from '@/lib/thread-context';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
@@ -32,11 +33,9 @@ import { formatThreadContext, extractSelfEmail } from '@/lib/thread-context';
 // (2026-06-08 audit round 2 produced a false negative for lack of this).
 try { document.documentElement.setAttribute('data-pranan-injected', chrome.runtime?.getManifest?.().version || 'true'); } catch { /* pass */ }
 
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
 
 bootstrapSentry('content-gmail');
 
@@ -352,6 +351,45 @@ function injectComposeButtons(composeWindow: Element) {
  * so Gmail and HubSpot Sales can replace the compose subtree underneath it),
  * and a captured Element silently stops matching anything. See live-compose.ts.
  */
+/**
+ * Keep Gmail's floating compose title bar reachable. Decision logic and the
+ * full history are in lib/compose-title-rescue; this is the DOM half.
+ */
+function rescueComposeTitle(compose: Element): void {
+  const dialog = compose.closest('[role="dialog"]') as HTMLElement | null;
+  if (!dialog) return;
+  const r = dialog.getBoundingClientRect();
+  const plan = planComposeTitleRescue(r.top, r.bottom, window.innerHeight);
+  if (!plan) return;
+
+  // The gentle attempt first: constrain the height and ask for a safe top.
+  dialog.style.top = `${plan.top}px`;
+  dialog.style.maxHeight = plan.maxHeight;
+
+  // Then check whether it worked, rather than assuming. `top` does nothing on a
+  // statically-positioned element, and the v0.8.34 note above records Gmail's
+  // dialog computing to static; max-height only rescues a dialog whose layout
+  // is anchored to the bottom of the viewport. Both of those were assumptions,
+  // and this fix has already shipped twice on assumptions that were wrong.
+  const after = dialog.getBoundingClientRect();
+  if (!needsForcedPositioning(after.top)) return;
+
+  // Still clipped. Force the dialog into a positioned box, preserving the
+  // horizontal geometry Gmail chose so only the vertical placement changes.
+  dialog.style.position = 'fixed';
+  dialog.style.left = `${after.left}px`;
+  dialog.style.width = `${after.width}px`;
+  dialog.style.top = `${plan.top}px`;
+
+  // And check THAT landed, because `fixed` is not always relative to the
+  // viewport: a transformed ancestor becomes the containing block and absorbs
+  // the offset. Measured in a browser on a static dialog inside a
+  // translateY(-19px) parent, asking for 64 produced 45.
+  const forced = dialog.getBoundingClientRect();
+  const corrected = correctForcedTop(plan.top, forced.top);
+  if (corrected !== null) dialog.style.top = `${corrected}px`;
+}
+
 function positionComposeBar(bar: HTMLElement, getCompose: () => Element) {
   const host = bar.parentElement as HTMLElement | null;
   if (!host) return;
@@ -467,6 +505,27 @@ function positionComposeBar(bar: HTMLElement, getCompose: () => Element) {
     //
     // Releasing to flow is the safe answer in both cases: in flow the bar can
     // push layout around but can never sit on top of anything.
+
+    // Before anything about OUR bar: keep Gmail's own compose title bar
+    // reachable. Gmail grows the floating "New Message" popup upward from the
+    // bottom of the viewport, and on a laptop-height screen its title row --
+    // minimise, pop-out, close -- ends up above the top of the screen.
+    //
+    // Reported by Drishti on 21 July. A rescue shipped in v0.8.33 behind a
+    // position:fixed/absolute guard that never matched (Gmail's dialog computes
+    // to static); v0.8.34 fixed the guard. Neither fixed the SCHEDULING: it was
+    // one rAF plus one 600ms timeout, both fired while Gmail was still sizing
+    // the dialog, then nothing watched again. It lived in injectPromptBarV6, so
+    // the legacy bar's compose never had it at all.
+    //
+    // Here it rides every signal apply() already has -- the staged timeouts, the
+    // resize listener, the MutationObserver, and above all the ResizeObserver on
+    // the dialog itself, which is exactly the moment the title row gets pushed
+    // off-screen. It sits ABOVE the early returns below on purpose: this is
+    // about Gmail's dialog, not our bar, so it must run even in the cases where
+    // we decide to leave our own bar alone.
+    rescueComposeTitle(getCompose());
+
     if (!sendButton || !sendRow) {
       flowAndAlign();
       return false;
@@ -541,7 +600,7 @@ function positionComposeBar(bar: HTMLElement, getCompose: () => Element) {
 
   apply();
   requestAnimationFrame(apply);
-  [300, 900, 2000].forEach((ms) => setTimeout(apply, ms));
+  [300, 900, 2000, 4000].forEach((ms) => setTimeout(apply, ms));
 
   window.addEventListener('resize', apply);
   const dialog = getCompose().closest('[role="dialog"]');
@@ -1095,28 +1154,8 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // the floating compose dialog's top edge sits above a safe offset, nudge it
   // down and cap its height so the title bar stays reachable. Inline replies
   // (not position:fixed/absolute) are never touched.
-  const keepComposeTitleVisible = () => {
-    if (!document.contains(bar)) return;
-    const dialog = liveCompose().closest('[role="dialog"]') as HTMLElement | null;
-    if (!dialog) return;
-    // v0.8.34: this used to early-return unless the dialog was fixed/absolute.
-    // Gmail's compose dialog computes to position:static, so the guard fired
-    // every time and this protection never ran for anyone. Detect a floating
-    // compose the way it actually presents -- it is the dialog Gmail anchors to
-    // the viewport bottom -- and leave true inline replies alone.
-    const isFloating = dialog.getBoundingClientRect().bottom >= window.innerHeight - 4;
-    if (!isFloating) return; // inline reply -> leave alone
-    // Only rescue a compose whose title bar is genuinely off-screen. A
-    // maximised compose legitimately sits high (top ~40px) and must not be
-    // nudged, or we would be re-breaking the layout we just stopped breaking.
-    const SAFE_TOP = 64; // clears Gmail's top toolbar
-    if (dialog.getBoundingClientRect().top < 0) {
-      dialog.style.top = `${SAFE_TOP}px`;
-      dialog.style.maxHeight = `calc(100vh - ${SAFE_TOP + 16}px)`;
-    }
-  };
-  requestAnimationFrame(keepComposeTitleVisible);
-  setTimeout(keepComposeTitleVisible, 600);
+  // Gmail's own compose title bar is kept reachable inside positionComposeBar,
+  // where it rides the ResizeObserver on the dialog. See rescueComposeTitle.
 
   // v0.8.10 UI QA: align the bar (and chips) with Gmail's compose CONTENT edge.
   // The bar is injected at the container's outer width while Gmail insets the
@@ -2488,6 +2527,4 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
-
-
 
