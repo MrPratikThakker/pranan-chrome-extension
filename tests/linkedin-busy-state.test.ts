@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const li = readFileSync(resolve(__dirname, '../src/content/linkedin/index.ts'), 'utf8');
+import { stripComments } from './helpers/strip-comments';
+
+const raw = readFileSync(resolve(__dirname, '../src/content/linkedin/index.ts'), 'utf8');
+// Comments here quote the very calls being counted -- strip before scanning.
+const li = stripComments(raw);
 
 /**
  * Both LinkedIn bars cleared the prompt on click and changed nothing else, so
@@ -48,4 +52,25 @@ describe('LinkedIn bars show that a draft is in flight', () => {
     expect(li).toContain("generateBtn.dataset.prananGenerate = 'Draft'");
     expect(li).toContain('btn.dataset.prananGenerate ||');
   });
+});
+
+/**
+ * Verified on real LinkedIn, 4 Aug. Pressing Generate produced:
+ *
+ *   before   "Generate  | pe=auto"
+ *   +50ms    "Drafting... | pe=auto"    <- label changed, button still live
+ *   +1500ms  "Generate  | pe=auto"      <- draft landed, cleared correctly
+ *
+ * The label worked; the dimming and click-blocking did not. triggerDraft reset
+ * opacity and pointerEvents from generateButtonState('') immediately after
+ * setLinkedInBarsBusy(true), undoing them on the same tick. The button looked
+ * live and stayed clickable for the whole request — so the busy state was
+ * cosmetic exactly where it mattered, and a second click could still fire.
+ */
+describe('nothing undoes the busy state on the same tick', () => {
+  it('does not reset the button style after entering busy', () => {
+    expect(li).not.toContain('generateBtn.style.pointerEvents = stAfter.pointerEvents');
+    expect(li).not.toContain("const stAfter = generateButtonState('')");
+  });
+
 });

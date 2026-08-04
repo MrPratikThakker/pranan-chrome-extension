@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve, relative } from 'node:path';
+import { stripComments } from './helpers/strip-comments';
 
 const SRC = resolve(__dirname, '../src');
 
@@ -29,13 +30,6 @@ function walk(dir: string): string[] {
  */
 describe('no sendMessage call can leak an unhandled rejection', () => {
   const offenders: string[] = [];
-
-  // Comments discuss these calls (insert-ack.ts opens by describing the very
-  // bug it fixed), so scanning raw text reports code that is already correct.
-  // Blank comments out rather than deleting them, to keep line numbers honest.
-  const stripComments = (s: string) =>
-    s.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '))
-     .replace(/(^|[^:])\/\/[^\n]*/g, (m, p) => p + ' '.repeat(m.length - p.length));
 
   for (const file of walk(SRC)) {
     const src = stripComments(readFileSync(file, 'utf8'));

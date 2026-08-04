@@ -80,8 +80,22 @@ const SELECTORS = {
     '.msg-thread__header-title',
     '.msg-s-message-list-container .msg-entity-lockup__entity-title',
   ],
-  // Profile name in messaging
+  // Profile name in messaging.
+  //
+  // Every selector in this chain AND in conversationHeader below missed on real
+  // LinkedIn messaging on 4 Aug 2026, so getConversationRecipient() returned
+  // null and drafts opened "Hi there," with the bar reading "Draft message with
+  // Pranan..." instead of naming the person.
+  //
+  // LinkedIn dropped the inner <span>: the name now sits directly in
+  // h2.msg-entity-lockup__entity-title. Measured on an open thread -- exactly
+  // one match ("Adam Kolb"), visible in the thread header, and the conversation
+  // list in the sidebar does NOT use this class, so it cannot pick up the wrong
+  // person. Scoped form first, bare form as the fallback, the old span variant
+  // kept last for any surface LinkedIn has not migrated.
   profileName: [
+    '.msg-thread .msg-entity-lockup__entity-title',
+    '.msg-entity-lockup__entity-title',
     '.msg-entity-lockup__entity-title span',
     '.msg-overlay-bubble-header__title a',
   ],
@@ -520,9 +534,12 @@ function injectMessagingPromptBar() {
       },
     }).catch(() => {});
     input.value = '';
-    const stAfter = generateButtonState('');
-    generateBtn.style.opacity = stAfter.opacity;
-    generateBtn.style.pointerEvents = stAfter.pointerEvents;
+    // Deliberately NOT resetting opacity/pointerEvents here. This ran straight
+    // after setLinkedInBarsBusy(true) and immediately undid it -- verified on
+    // real LinkedIn 4 Aug, where the label read "Drafting..." while
+    // pointerEvents was still 'auto', so the button looked live and stayed
+    // clickable through the whole request. setLinkedInBarsBusy(false) restores
+    // the button when the reply lands or the timeout fires.
   };
 
   input.addEventListener('keydown', (e) => {
@@ -710,9 +727,8 @@ function injectCommentPromptBars() {
         },
       }).catch(() => {});
       input.value = '';
-      const stAfter = generateButtonState('');
-      generateBtn.style.opacity = stAfter.opacity;
-      generateBtn.style.pointerEvents = stAfter.pointerEvents;
+      // See the note on the messaging bar: resetting here undoes the busy
+      // state set a few lines above. setLinkedInBarsBusy owns the button now.
     };
 
     input.addEventListener('keydown', (e) => {
