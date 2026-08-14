@@ -1564,10 +1564,9 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
         </span>
         <span style="display: inline-flex; align-items: center; padding: 4px 10px; border: 1px solid #e5e7eb; border-radius: 7px; font-size: 11px; color: #475569; background: white;">Tone: warm</span>
       </div>
-      <div style="display: flex; align-items: center; gap: 6px; color: #94a3b8; font-size: 11px;">
-        <span>Press</span>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 1px 5px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 3px; color: #64748b;">&#8984;&#9166;</span>
-        <span>to generate</span>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="color: #94a3b8; font-size: 11px;">or press Enter</span>
+        <button data-pranan-freeform-generate style="background: linear-gradient(135deg, #6d28d9, #a78bfa); color: #ffffff; border: none; border-radius: 8px; padding: 7px 16px; font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; line-height: 1.2;">Generate</button>
       </div>
     </div>
     <div style="padding: 9px 22px; background: #faf5ff; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #6d28d9;">
@@ -1597,13 +1596,39 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
   };
   document.addEventListener('keydown', escListener);
 
-  // Freeform prompt: ⌘⏎ generates
+  /**
+   * Send the freeform prompt.
+   *
+   * Reported by Drishti on 7 Aug: "we don't really have a generate option here".
+   * Her recording shows her typing a prompt into this panel, reading the hint,
+   * saying "I am unable to understand what this is", pressing Enter, getting
+   * nothing, then giving up and pasting the same prompt into the other bar --
+   * where it worked first time.
+   *
+   * She was right. This panel had NO submit control at all. The only way to
+   * send was Cmd/Ctrl+Enter, advertised as two symbols at 10px in grey, and
+   * plain Enter -- the obvious thing to try -- did nothing at all. Every other
+   * Pranan surface has a Generate button; this one asked you to already know a
+   * keyboard shortcut.
+   *
+   * Now: a Generate button, plain Enter, and Cmd/Ctrl+Enter all do the same
+   * thing. Shift+Enter still inserts a newline.
+   */
   const promptEl = popover.querySelector('[data-pranan-prompt]') as HTMLTextAreaElement;
-  promptEl.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      e.preventDefault();
+  const freeformBtn = popover.querySelector('[data-pranan-freeform-generate]') as HTMLButtonElement;
+
+  let submitting = false;
+  const submitFreeformPrompt = async () => {
+      if (submitting) return;
       const text = promptEl.value.trim();
-      if (!text) return;
+      // Nothing to send: put the cursor where the user needs to type rather
+      // than failing silently, which is the bug this whole change is about.
+      if (!text) { promptEl.focus(); return; }
+      submitting = true;
+      freeformBtn.textContent = 'Drafting...';
+      freeformBtn.style.opacity = '0.65';
+      freeformBtn.style.pointerEvents = 'none';
+
       const liveRecipients = composeWindow ? extractRecipients(composeWindow) : [];
       const recipientEmail = liveRecipients[0] || null;
       const recipientName = composeWindow && recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
@@ -1612,9 +1637,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
         ? ((composeWindow.querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null) || composeWindow)
         : null;
       const editorId = stampEditor(editableBody);
-      safeSendMessage({
-        type: 'INLINE_DRAFT_REQUEST',
-        payload: {
+      const pendingPayload = {
           platform: 'gmail',
           recipientEmail,
           recipientName,
@@ -1625,9 +1648,32 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
           originSurface: 'inline-bar',
           composeType: messageToReplyTo ? 'reply' : 'new',
           editorId,
-        },
-      }).catch(() => {});
+      };
+
+      // Wait for the worker to take it before dismissing. Closing immediately
+      // left the user with no acknowledgement at all -- the same silence that
+      // made this panel feel broken in the first place.
+      const ok = await safeSendMessage({
+        type: 'INLINE_DRAFT_REQUEST',
+        payload: pendingPayload,
+      }).then(() => true).catch(() => false);
+
+      if (!ok) {
+        submitting = false;
+        freeformBtn.textContent = 'Try again';
+        freeformBtn.style.opacity = '1';
+        freeformBtn.style.pointerEvents = 'auto';
+        return;
+      }
       popover.remove();
+  };
+
+  freeformBtn.addEventListener('click', (e) => { e.preventDefault(); void submitFreeformPrompt(); });
+  promptEl.addEventListener('keydown', (e) => {
+    // Shift+Enter keeps its normal meaning: a new line.
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void submitFreeformPrompt();
     }
   });
 
