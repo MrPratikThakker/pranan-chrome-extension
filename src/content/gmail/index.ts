@@ -27,6 +27,7 @@ import { bottomOffsetAboveSendRow, bottomOffsetForChips, correctedBottomOffset, 
 import { resolveLiveCompose, isOrphanedComposeBar } from '@/lib/live-compose';
 import { planComposeTitleRescue, needsForcedPositioning, correctForcedTop } from '@/lib/compose-title-rescue';
 import { formatThreadContext, extractSelfEmail } from '@/lib/thread-context';
+import { readGmailComposeText, MAX_COMPOSE_DRAFT_CHARS } from '@/lib/gmail-compose-text';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -961,12 +962,21 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       (liveRecipientEmail ? extractRecipientName(liveCompose(), liveRecipientEmail) : null)
       || threadSender.name
       || null;
-    setLoading(true);
     // Bind this generation to THIS compose's editable body so the returned
     // draft can only be inserted here even if the user switches compose/tab
-    // mid-flight (audit HIGH: wrong-place insertion). Stamp the editable body
-    // (preferred) or fall back to the compose window element.
-    const editableBody = (liveCompose().querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null) || liveCompose();
+    // mid-flight (audit HIGH: wrong-place insertion). Refuse when the actual
+    // editable body is missing; never read headers/buttons from its container.
+    const editableBody = liveCompose().querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null;
+    if (!editableBody) {
+      showInlineNotice('Open a message body before generating a draft. Your existing text has not changed.');
+      return;
+    }
+    const currentDraft = userPrompt ? readGmailComposeText(editableBody) : '';
+    if (currentDraft.length > MAX_COMPOSE_DRAFT_CHARS) {
+      showInlineNotice('This draft is too long to revise. Shorten it to 12,000 characters or fewer. Your existing text has not changed.');
+      return;
+    }
+    setLoading(true);
     const editorId = stampEditor(editableBody);
     safeSendMessage({
       type: 'INLINE_DRAFT_REQUEST',
@@ -978,6 +988,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
         channelName: null,
         subject: getSubject(liveCompose()),
         userPrompt: userPrompt || null,
+        currentDraft: currentDraft || undefined,
         originSurface: 'inline-bar',
         composeType: getThreadContext(liveCompose()) ? 'reply' : 'new',
         editorId,
@@ -2573,4 +2584,3 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
-
