@@ -205,6 +205,7 @@ function AppInner() {
       threadId: composeContext.threadId || undefined,
       messageToReplyTo: composeContext.messageToReplyTo || undefined,
       platform: composeContext.platform,
+      composeType: composeContext.composeType,
       channelName: composeContext.channelName || undefined,
       prompt: quickPrompt || undefined,
     });
@@ -246,6 +247,7 @@ function AppInner() {
       threadId: composeContext?.threadId || undefined,
       messageToReplyTo: composeContext?.messageToReplyTo || undefined,
       platform: composeContext?.platform || 'gmail',
+      composeType: composeContext?.composeType,
       prompt: quickPrompt || undefined,
       tone,
     });

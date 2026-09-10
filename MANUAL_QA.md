@@ -155,3 +155,5 @@ the page looks like. That is what this document is for.
 - In Draft with Pranan, open Speak instructions (beta). No microphone should start before Start dictation. Review the visible speech-service disclosure.
 - Test real speech, denial, no microphone, no speech, network error, Stop, closing the popover and switching tabs. No automatic restart. Review/edit transcript before selecting Generate. No automatic submission from transcript events.
 - Voice beta needs a real microphone and installed-extension check. Unit tests and the local `qa/` component preview do not establish microphone quality or Chrome Web Store parity.
+
+- LinkedIn: open Start a post with a messaging overlay present. The current ShareBox editor must get post tools, never a Draft comment bar. Actual feed comments must retain their own controls.

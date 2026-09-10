@@ -344,6 +344,7 @@ export const SELECTORS = {
     ],
     /** Post compose (the "What do you want to talk about" editor). */
     postCompose: [
+      '[componentkey="ShareBox_textEditor"][contenteditable="true"]',
       '.share-creation-state__text-editor [contenteditable="true"]',
       '.ql-editor[data-placeholder*="What do you want to talk about"]',
       '[role="textbox"][aria-label*="post"]',
