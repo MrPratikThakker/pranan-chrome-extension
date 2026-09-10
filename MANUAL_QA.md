@@ -157,3 +157,9 @@ the page looks like. That is what this document is for.
 - Voice beta needs a real microphone and installed-extension check. Unit tests and the local `qa/` component preview do not establish microphone quality or Chrome Web Store parity.
 
 - LinkedIn: open Start a post with a messaging overlay present. The current ShareBox editor must get post tools, never a Draft comment bar. Actual feed comments must retain their own controls.
+
+### Inline reply with other extensions (2026-09-10 screenshot regression)
+- In Gmail reply and reply-all, with Voilà and HubSpot enabled, verify the collapsed Pranan row, readable prompt and reachable editor/Send controls at default and enlarged browser zoom.
+- Open Reply options and suggestions. Check relationship correction and side-panel actions, wrapped suggestions, and Escape focus return. Select an intent and verify the correct reply editor and preserved signature.
+- Resize/pop out/maximize/restore compose. When space is constrained, the existing compact fallback must remain usable and no Pranan controls may cover the editor or Send.
+- Local `/qa/inline.html` passed desktop, 320/420 px compose and 390 px viewport checks. Installed candidate and browser zoom checks remain required before release.
