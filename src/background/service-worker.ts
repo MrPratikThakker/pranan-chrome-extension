@@ -218,7 +218,7 @@ async function handleMessage(
     case 'COMPOSE_CLOSED':
     case 'RECIPIENT_CHANGED':
     case 'TEXT_SELECTED':
-      broadcastToSidePanel(message);
+      broadcastToSidePanel({ ...message, payload: { ...(message.payload && typeof message.payload === "object" ? message.payload : {}), sourceTabId: sender.tab?.id } });
       return { ok: true };
 
     // Centralized token refresh: the SW is the SOLE refresher so the single-use

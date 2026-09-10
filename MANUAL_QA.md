@@ -143,3 +143,15 @@ ability to send an email at all.
 `positionComposeBar` enforces it. If you change placement, that helper is the
 thing to keep honest — and it is still only arithmetic. It cannot tell you what
 the page looks like. That is what this document is for.
+
+## 0.8.61 candidate: editing, signature, context and voice
+
+- Edit a side-panel draft, Preview it, Insert it and Copy it. All three must use the revised text.
+- Deny clipboard access. The panel must show a failure, never Copied.
+- Generate for compose A, switch to B or a different Gmail tab before completion. No A draft, rewrite or contact context may appear in B. Insert must carry A's editor binding or fail with Copy available.
+- Generate in a new Gmail compose with a logo/link signature, then regenerate. Preserve the same signature and quoted history without duplication.
+- Use a long recipient name in a floating compose. The bar, input and buttons must fit the compose width. At maximized/short sizes, verify the compact Draft with Pranan fallback remains usable and Send is not obscured.
+- Retry a skipped draft or an unavailable extension worker. Preserve the typed instructions. The popover must not disappear and falsely acknowledge a missing worker.
+- In Draft with Pranan, open Speak instructions (beta). No microphone should start before Start dictation. Review the visible speech-service disclosure.
+- Test real speech, denial, no microphone, no speech, network error, Stop, closing the popover and switching tabs. No automatic restart. Review/edit transcript before selecting Generate. No automatic submission from transcript events.
+- Voice beta needs a real microphone and installed-extension check. Unit tests and the local `qa/` component preview do not establish microphone quality or Chrome Web Store parity.

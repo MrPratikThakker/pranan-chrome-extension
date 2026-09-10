@@ -131,3 +131,12 @@ export function normalizeDraftForPlainText(text: string): string {
   out = out.replace(/\*\*/g, '');            // any leftover bold markers
   return out;
 }
+
+/** Preserve Gmail's signature and quoted history when replacing authored text. */
+export function findGmailPreservedBlock(body: HTMLElement): HTMLElement | null {
+  const preserved = body.querySelector('.gmail_signature, [data-smartmail="gmail_signature"], .gmail_quote, [class*="gmail_quote"]');
+  if (!(preserved instanceof HTMLElement)) return null;
+  let root = preserved;
+  while (root.parentElement && root.parentElement !== body) root = root.parentElement;
+  return root.parentElement === body ? root : null;
+}

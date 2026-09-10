@@ -113,6 +113,7 @@ function AppInner() {
   } = useStore();
 
   const [quickPrompt, setQuickPrompt] = useState('');
+  useEffect(() => { setQuickPrompt(''); }, [composeContext?.sourceTabId, composeContext?.editorId, composeContext?.recipientEmail, composeContext?.threadId]);
 
   // --- Lifecycle ---
 
@@ -207,7 +208,6 @@ function AppInner() {
       channelName: composeContext.channelName || undefined,
       prompt: quickPrompt || undefined,
     });
-    setQuickPrompt('');
   }, [composeContext, quickPrompt, requestDraft, setError]);
 
   const handleRewrite = useCallback(() => {
@@ -236,8 +236,8 @@ function AppInner() {
     // chrome.runtime.lastError so the panel can show Inserted / Could not
     // insert (with copy fallback).
     const messageType = composeContext?.composeType === 'comment' ? 'INSERT_COMMENT_DRAFT' : 'INSERT_DRAFT';
-    sendInsertToActiveTab(messageType, text).then((ok) => onResult?.(ok));
-  }, [composeContext?.composeType]);
+    sendInsertToActiveTab(messageType, text, composeContext || undefined).then((ok) => onResult?.(ok));
+  }, [composeContext]);
 
   const handleRegenerateDraft = useCallback((tone?: string) => {
     requestDraft({
@@ -246,9 +246,10 @@ function AppInner() {
       threadId: composeContext?.threadId || undefined,
       messageToReplyTo: composeContext?.messageToReplyTo || undefined,
       platform: composeContext?.platform || 'gmail',
+      prompt: quickPrompt || undefined,
       tone,
     });
-  }, [composeContext, requestDraft]);
+  }, [composeContext, quickPrompt, requestDraft]);
 
   const handleAcceptRewrite = useCallback((text: string) => {
     handleInsertDraft(text);
@@ -702,6 +703,7 @@ function AppInner() {
                     handleGenerateDraft();
                   }
                 }}
+                aria-label="Instructions for Pranan"
                 placeholder="What should this say? (optional)"
                 className="w-full text-xs px-3 py-2.5 rounded-md border border-brand-border bg-brand-surface text-brand-text placeholder:text-brand-text-3/50 focus:outline-none focus:border-brand-accent/40 focus:bg-brand-surface-2 transition-all"
               />

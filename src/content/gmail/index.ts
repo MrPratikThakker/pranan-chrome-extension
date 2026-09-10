@@ -13,7 +13,8 @@
 // Content script -- runs in Chrome's isolated world (no ES module support)
 // IIFE bundling handles scope isolation
 
-import { injectMultilineText, findGmailQuoteBlock, injectMultilineTextBefore, normalizeDraftForPlainText } from '@/lib/safe-dom';
+import { injectMultilineText, findGmailPreservedBlock, injectMultilineTextBefore, normalizeDraftForPlainText } from '@/lib/safe-dom';
+import { attachVoicePrompt } from '../shared/voice-prompt';
 import { safeSendMessage } from '@/lib/runtime';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
@@ -274,7 +275,7 @@ function injectDraft(composeWindow: Element, draftText: string): boolean {
   // context). Insert the draft ABOVE the quote; fall back to full-body write
   // only for a fresh compose with no quoted thread.
   const clean = normalizeDraftForPlainText(draftText);
-  const quoteBlock = findGmailQuoteBlock(body);
+  const quoteBlock = findGmailPreservedBlock(body);
   if (quoteBlock) {
     injectMultilineTextBefore(body, clean, quoteBlock, 'div');
   } else {
@@ -688,7 +689,8 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   bar.style.cssText = `
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
+    box-sizing: border-box;
     /* Sized to its contents rather than the full compose width, so it sits as
        a tidy block above the chips row instead of a very wide, mostly empty
        panel. Still shrinks on narrow windows. */
@@ -718,10 +720,12 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // Real input element (replaces the passive span)
   const input = document.createElement('input');
   input.type = 'text';
-  input.placeholder = 'Draft a reply with Pranan...';
+  input.setAttribute('aria-label', 'Instructions for Pranan');
+  input.placeholder = 'What should this say?';
   input.style.cssText = `
     flex: 1 1 auto;
-    min-width: 100px;
+    min-width: 60px;
+    box-sizing: border-box;
     /* Capped so the bar reads as a compact control group. An uncapped flex
        grow stretched the field to ~1000px on a wide compose and stranded the
        recipient chip, tone and Generate against the far right edge, with a
@@ -769,6 +773,9 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   const isReplyCompose = !!getThreadContext(liveCompose());
   relChip.innerHTML = `<span style="width: 5px; height: 5px; border-radius: 50%; background: currentColor;"></span><span data-rel-text>${recipientEmail ? '→ ' + escapeText(recipientEmail.split('@')[0] || 'recipient') : (isReplyCompose ? 'Reply' : 'New email')}</span>`;
 
+  relChip.style.boxSizing = 'border-box';
+  relChip.style.maxWidth = '120px';
+  relChip.style.overflow = 'hidden';
   // R2: one-click tier correction. The pill is tappable; picking a tier sets a
   // manual override server-side that the auto-classifier never overwrites.
   relChip.style.cursor = 'pointer';
@@ -869,7 +876,8 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // More icon (placeholder hook for ⋯ menu — wired in next PR)
   const moreBtn = document.createElement('button');
   moreBtn.type = 'button';
-  moreBtn.title = 'More options';
+  moreBtn.title = 'Open Pranan side panel';
+  moreBtn.setAttribute('aria-label', 'Open Pranan side panel');
   moreBtn.style.cssText = `
     width: 28px; height: 28px;
     background: none;
@@ -1032,7 +1040,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       clearTimeout(resetTimer);
       resetTimer = null;
       setLoading(false);
-      input.value = '';
+      // Keep the instructions available for correction and retry.
       // Surface the FULL skip reason in a transient notice directly below the
       // bar, so the user sees WHY nothing happened AND how to override (e.g.
       // "addressed to Jigar, you are only copied. Add a prompt or pick an
@@ -1515,6 +1523,8 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
     position: fixed;
     z-index: 2147483646;
     width: 540px;
+    max-width: calc(100vw - 16px);
+    box-sizing: border-box;
     max-height: 80vh;
     background: #ffffff;
     border-radius: 14px;
@@ -1554,7 +1564,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
       <span style="flex:1; height: 1px; background: #f1f5f9;"></span>
     </div>
     <div style="padding: 4px 24px 14px 24px;">
-      <textarea data-pranan-prompt placeholder='Draft a new email. e.g. "Intro Marshall to Wajee about Singapore"' style="width: 100%; min-height: 64px; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 10px; font-size: 13px; color: #1f2937; background: white; font-family: inherit; resize: vertical; outline: none;"></textarea>
+      <textarea data-pranan-prompt aria-label="Instructions for Pranan" placeholder='Draft a new email. e.g. "Intro Marshall to Wajee about Singapore"' style="box-sizing: border-box; width: 100%; min-height: 64px; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 10px; font-size: 13px; color: #1f2937; background: white; font-family: inherit; resize: vertical; outline: none;"></textarea>
     </div>
     <div style="padding: 10px 24px; border-top: 1px solid #f1f5f9; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
       <div style="display: flex; align-items: center; gap: 6px;">
@@ -1616,6 +1626,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
    */
   const promptEl = popover.querySelector('[data-pranan-prompt]') as HTMLTextAreaElement;
   const freeformBtn = popover.querySelector('[data-pranan-freeform-generate]') as HTMLButtonElement;
+  const stopVoice = attachVoicePrompt(promptEl, popover);
 
   let submitting = false;
   const submitFreeformPrompt = async () => {
@@ -1624,6 +1635,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
       // Nothing to send: put the cursor where the user needs to type rather
       // than failing silently, which is the bug this whole change is about.
       if (!text) { promptEl.focus(); return; }
+      stopVoice();
       submitting = true;
       freeformBtn.textContent = 'Drafting...';
       freeformBtn.style.opacity = '0.65';
@@ -1656,10 +1668,12 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
       const ok = await safeSendMessage({
         type: 'INLINE_DRAFT_REQUEST',
         payload: pendingPayload,
-      }).then(() => true).catch(() => false);
+      }).then((ack) => ack != null && !ack.error).catch(() => false);
 
       if (!ok) {
         submitting = false;
+        const subtitle = popover.querySelector('[data-pranan-subtitle]');
+        if (subtitle) subtitle.textContent = 'Could not reach Pranan. Your instructions are preserved. Reload Gmail if retry fails.';
         freeformBtn.textContent = 'Try again';
         freeformBtn.style.opacity = '1';
         freeformBtn.style.pointerEvents = 'auto';
@@ -2141,6 +2155,7 @@ function onComposeDetected(composeWindow: Element) {
     type: 'COMPOSE_DETECTED',
     payload: {
       platform: 'gmail',
+      editorId: stampEditor(composeWindow.querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"]')),
       recipientEmail: primaryRecipient,
       recipientName: null,
       threadId: null,
