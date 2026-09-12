@@ -58,3 +58,17 @@ describe('sendInsertToActiveTab', () => {
     await expect(sendInsertToActiveTab('INSERT_DRAFT', 'hi')).resolves.toBe(false);
   });
 });
+
+it('does not insert an old-tab draft into the newly active tab', async () => {
+  installChrome({ tabId: 9, response: { success: true } });
+  const { sendInsertToActiveTab } = await import('../src/lib/insert-ack');
+  await expect(sendInsertToActiveTab('INSERT_DRAFT', 'for tab 7', { sourceTabId: 7, editorId: 'editor-7' })).resolves.toBe(false);
+  expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
+});
+
+it('carries the exact editor binding through insertion', async () => {
+  installChrome({ tabId: 7, response: { success: true } });
+  const { sendInsertToActiveTab } = await import('../src/lib/insert-ack');
+  await expect(sendInsertToActiveTab('INSERT_DRAFT', 'hello', { sourceTabId: 7, editorId: 'editor-7' })).resolves.toBe(true);
+  expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(7, { type: 'INSERT_DRAFT', payload: { text: 'hello', editorId: 'editor-7' } }, expect.any(Function));
+});

@@ -13,7 +13,8 @@
 // Content script -- runs in Chrome's isolated world (no ES module support)
 // IIFE bundling handles scope isolation
 
-import { injectMultilineText, findGmailQuoteBlock, injectMultilineTextBefore, normalizeDraftForPlainText } from '@/lib/safe-dom';
+import { injectMultilineText, findGmailPreservedBlock, injectMultilineTextBefore, normalizeDraftForPlainText } from '@/lib/safe-dom';
+import { compactPromptBar } from '../shared/compact-prompt-bar';
 import { safeSendMessage } from '@/lib/runtime';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
@@ -27,6 +28,7 @@ import { bottomOffsetAboveSendRow, bottomOffsetForChips, correctedBottomOffset, 
 import { resolveLiveCompose, isOrphanedComposeBar } from '@/lib/live-compose';
 import { planComposeTitleRescue, needsForcedPositioning, correctForcedTop } from '@/lib/compose-title-rescue';
 import { formatThreadContext, extractSelfEmail } from '@/lib/thread-context';
+import { readGmailComposeText, MAX_COMPOSE_DRAFT_CHARS } from '@/lib/gmail-compose-text';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -274,7 +276,7 @@ function injectDraft(composeWindow: Element, draftText: string): boolean {
   // context). Insert the draft ABOVE the quote; fall back to full-body write
   // only for a fresh compose with no quoted thread.
   const clean = normalizeDraftForPlainText(draftText);
-  const quoteBlock = findGmailQuoteBlock(body);
+  const quoteBlock = findGmailPreservedBlock(body);
   if (quoteBlock) {
     injectMultilineTextBefore(body, clean, quoteBlock, 'div');
   } else {
@@ -405,6 +407,7 @@ function positionComposeBar(bar: HTMLElement, getCompose: () => Element) {
       el.style.right = '';
       el.style.bottom = '';
       el.style.margin = '';
+      el.style.maxWidth = '100%';
       el.style.zIndex = '';
     }
   };
@@ -450,6 +453,7 @@ function positionComposeBar(bar: HTMLElement, getCompose: () => Element) {
     if (delta > 4 && delta < 200) {
       const current = parseFloat(bar.style.marginLeft) || 0;
       bar.style.marginLeft = `${current + delta}px`;
+      bar.style.maxWidth = `calc(100% - ${current + delta}px)`;
       const chips = chipsOf();
       if (chips) chips.style.marginLeft = bar.style.marginLeft;
     }
@@ -685,58 +689,16 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   const liveCompose = (): Element =>
     resolveLiveCompose(bar, composeWindow, SELECTORS.gmail.composeBody.join(', '), SELECTORS.gmail.composeWindow.join(', '))
     || composeWindow;
-  bar.style.cssText = `
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    /* Sized to its contents rather than the full compose width, so it sits as
-       a tidy block above the chips row instead of a very wide, mostly empty
-       panel. Still shrinks on narrow windows. */
-    width: fit-content;
-    max-width: 100%;
-    padding: 10px 14px 10px 12px;
-    margin: 10px 0 6px;
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  `;
 
-  // Pranan icon — round atom mark in a small bordered tile
+  // Pranan mark; compactPromptBar owns the control sizing.
   const iconWrap = document.createElement('div');
-  iconWrap.style.cssText = `
-    width: 32px; height: 32px;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    background: white;
-  `;
   iconWrap.innerHTML = `<svg width="20" height="20" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="vbg-${Math.random().toString(36).slice(2,8)}" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#4c1d95"/></linearGradient></defs><circle cx="60" cy="60" r="33" stroke="#8b5cf6" stroke-width="7" fill="none"/><circle cx="60" cy="60" r="16" fill="#8b5cf6"/></svg>`;
 
   // Real input element (replaces the passive span)
   const input = document.createElement('input');
   input.type = 'text';
-  input.placeholder = 'Draft a reply with Pranan...';
-  input.style.cssText = `
-    flex: 1 1 auto;
-    min-width: 100px;
-    /* Capped so the bar reads as a compact control group. An uncapped flex
-       grow stretched the field to ~1000px on a wide compose and stranded the
-       recipient chip, tone and Generate against the far right edge, with a
-       field of empty white between them. */
-    max-width: 460px;
-    height: 36px;
-    padding: 0 12px;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    font-size: 13px;
-    font-family: inherit;
-    color: #1f2937;
-    background: white;
-    outline: none;
-  `;
+  input.setAttribute('aria-label', 'Instructions for Pranan');
+  input.placeholder = 'What should this say?';
   input.addEventListener('focus', () => {
     input.style.borderColor = '#a78bfa';
     // v0.7.2 — refresh recipient chip on focus
@@ -752,18 +714,8 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   input.addEventListener('blur', () => { input.style.borderColor = '#e5e7eb'; });
 
   // Relationship chip (placeholder — real tier comes from contact-styles)
-  const relChip = document.createElement('span');
-  relChip.style.cssText = `
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 5px 10px;
-    border: 1px solid #ddd6fe;
-    border-radius: 7px;
-    font-size: 11px;
-    color: #6d28d9;
-    background: #faf5ff;
-    white-space: nowrap;
-    flex-shrink: 0;
-  `;
+  const relChip = document.createElement('button');
+  relChip.type = 'button';
   // v0.8.10 UI QA: never label a reply compose "New email". If the compose has
   // thread context it is a reply; use "Reply" until the real recipient resolves.
   const isReplyCompose = !!getThreadContext(liveCompose());
@@ -835,64 +787,25 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
 
   // Tone chip
   const toneChip = document.createElement('span');
-  toneChip.style.cssText = `
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 5px 10px;
-    border: 1px solid #e5e7eb;
-    border-radius: 7px;
-    font-size: 11px;
-    color: #475569;
-    background: white;
-    white-space: nowrap;
-    flex-shrink: 0;
-    cursor: pointer;
-  `;
   toneChip.textContent = 'Tone: auto';
 
   // Generate button (primary)
   const genBtn = document.createElement('button');
   genBtn.type = 'button';
-  genBtn.style.cssText = `
-    padding: 7px 14px;
-    border: 1px solid #6d28d9;
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 500;
-    color: white;
-    background: #6d28d9;
-    cursor: pointer;
-    font-family: inherit;
-    flex-shrink: 0;
-  `;
   genBtn.textContent = 'Generate';
 
-  // More icon (placeholder hook for ⋯ menu — wired in next PR)
+  // Side panel action, available within reply options.
   const moreBtn = document.createElement('button');
   moreBtn.type = 'button';
-  moreBtn.title = 'More options';
-  moreBtn.style.cssText = `
-    width: 28px; height: 28px;
-    background: none;
-    border: none;
-    color: #94a3b8;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 16px;
-    line-height: 1;
-    flex-shrink: 0;
-  `;
-  moreBtn.innerHTML = '&middot;&middot;&middot;';
+  moreBtn.title = 'Open Pranan side panel';
+  moreBtn.setAttribute('aria-label', 'Open Pranan side panel');
   moreBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
   });
 
-  bar.appendChild(iconWrap);
-  bar.appendChild(input);
-  bar.appendChild(relChip);
-  bar.appendChild(toneChip);
-  bar.appendChild(genBtn);
-  bar.appendChild(moreBtn);
+  const compact = compactPromptBar({ bar, icon: iconWrap, input, generate: genBtn,
+    relationship: relChip, tone: toneChip, sidePanel: moreBtn });
 
   // Generate handler — fire INLINE_DRAFT_REQUEST. If input has text, treat it
   // as a user prompt; otherwise generate from thread context only.
@@ -961,12 +874,21 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       (liveRecipientEmail ? extractRecipientName(liveCompose(), liveRecipientEmail) : null)
       || threadSender.name
       || null;
-    setLoading(true);
     // Bind this generation to THIS compose's editable body so the returned
     // draft can only be inserted here even if the user switches compose/tab
-    // mid-flight (audit HIGH: wrong-place insertion). Stamp the editable body
-    // (preferred) or fall back to the compose window element.
-    const editableBody = (liveCompose().querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null) || liveCompose();
+    // mid-flight (audit HIGH: wrong-place insertion). Refuse when the actual
+    // editable body is missing; never read headers/buttons from its container.
+    const editableBody = liveCompose().querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null;
+    if (!editableBody) {
+      showInlineNotice('Open a message body before generating a draft. Your existing text has not changed.');
+      return;
+    }
+    const currentDraft = userPrompt ? readGmailComposeText(editableBody) : '';
+    if (currentDraft.length > MAX_COMPOSE_DRAFT_CHARS) {
+      showInlineNotice('This draft is too long to revise. Shorten it to 12,000 characters or fewer. Your existing text has not changed.');
+      return;
+    }
+    setLoading(true);
     const editorId = stampEditor(editableBody);
     safeSendMessage({
       type: 'INLINE_DRAFT_REQUEST',
@@ -978,6 +900,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
         channelName: null,
         subject: getSubject(liveCompose()),
         userPrompt: userPrompt || null,
+        currentDraft: currentDraft || undefined,
         originSurface: 'inline-bar',
         composeType: getThreadContext(liveCompose()) ? 'reply' : 'new',
         editorId,
@@ -1032,7 +955,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       clearTimeout(resetTimer);
       resetTimer = null;
       setLoading(false);
-      input.value = '';
+      // Keep the instructions available for correction and retry.
       // Surface the FULL skip reason in a transient notice directly below the
       // bar, so the user sees WHY nothing happened AND how to override (e.g.
       // "addressed to Jigar, you are only copied. Add a prompt or pick an
@@ -1173,6 +1096,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     if (delta > 4 && delta < 200) {
       const current = parseFloat(bar.style.marginLeft) || 0;
       bar.style.marginLeft = `${current + delta}px`;
+      bar.style.maxWidth = `calc(100% - ${current + delta}px)`;
       const chipsEl = bar.nextElementSibling as HTMLElement | null;
       if (chipsEl?.hasAttribute('data-pranan-intents')) chipsEl.style.marginLeft = bar.style.marginLeft;
     }
@@ -1197,15 +1121,10 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   };
   [500, 1500, 3000].forEach((ms) => setTimeout(refreshPill, ms));
 
-  // One-tap reply intents (reply threads only). We surface up to 3 short,
-  // in-your-voice intent chips below the bar; tapping one steers the draft.
+  // Reply suggestions stay inside the collapsed options section so they do
+  // not add another permanent row above an already crowded inline editor.
   const threadForIntents = getThreadContext(liveCompose());
   if (threadForIntents) {
-    const chipsRow = document.createElement('div');
-    chipsRow.setAttribute('data-pranan-intents', '1');
-    chipsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px 0;padding:0 2px;';
-    // v0.8.10 UI QA: inherit the bar's compose-content alignment (set below).
-    if (bar.style.marginLeft) chipsRow.style.marginLeft = bar.style.marginLeft;
     const liveRecipients = extractRecipients(liveCompose());
     const intentRecipient = liveRecipients[0] || recipientEmail || null;
     const intentRecipientName = intentRecipient ? extractRecipientName(liveCompose(), intentRecipient) : null;
@@ -1221,27 +1140,10 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     }).then((res: { intents?: string[] } | undefined) => {
       const intents = (res?.intents || []).slice(0, 3);
       if (!intents.length || !document.contains(bar)) return;
-      for (const intent of intents) {
-        const chip = document.createElement('button');
-        chip.type = 'button';
-        chip.textContent = intent;
-        chip.style.cssText = 'font:500 12px/1.1 inherit;color:#6d28d9;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:999px;padding:5px 11px;cursor:pointer;white-space:nowrap;';
-        chip.addEventListener('mouseenter', () => { chip.style.background = '#ede9fe'; });
-        chip.addEventListener('mouseleave', () => { chip.style.background = '#f5f3ff'; });
-        chip.addEventListener('click', (e) => {
-          e.stopPropagation();
-          input.value = intent;
-          triggerGenerate();
-          chipsRow.remove();
-        });
-        chipsRow.appendChild(chip);
-      }
-      // v0.8.11: inherit the bar's compose-content alignment at INSERTION time.
-      // The creation-time check ran before alignWithCompose had measured the
-      // inset (chips insert after the intents API responds), so the chips row
-      // missed the margin and sat 81px left of the bar.
-      if (bar.style.marginLeft) chipsRow.style.marginLeft = bar.style.marginLeft;
-      bar.insertAdjacentElement('afterend', chipsRow);
+      compact.setIntents(intents, (intent) => {
+        input.value = intent;
+        triggerGenerate();
+      });
     }).catch(() => { /* intents are best-effort */ });
   }
 }
@@ -1515,6 +1417,8 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
     position: fixed;
     z-index: 2147483646;
     width: 540px;
+    max-width: calc(100vw - 16px);
+    box-sizing: border-box;
     max-height: 80vh;
     background: #ffffff;
     border-radius: 14px;
@@ -1554,7 +1458,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
       <span style="flex:1; height: 1px; background: #f1f5f9;"></span>
     </div>
     <div style="padding: 4px 24px 14px 24px;">
-      <textarea data-pranan-prompt placeholder='Draft a new email. e.g. "Intro Marshall to Wajee about Singapore"' style="width: 100%; min-height: 64px; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 10px; font-size: 13px; color: #1f2937; background: white; font-family: inherit; resize: vertical; outline: none;"></textarea>
+      <textarea data-pranan-prompt aria-label="Instructions for Pranan" placeholder='Draft a new email. e.g. "Intro Marshall to Wajee about Singapore"' style="box-sizing: border-box; width: 100%; min-height: 64px; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 10px; font-size: 13px; color: #1f2937; background: white; font-family: inherit; resize: vertical; outline: none;"></textarea>
     </div>
     <div style="padding: 10px 24px; border-top: 1px solid #f1f5f9; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
       <div style="display: flex; align-items: center; gap: 6px;">
@@ -1634,8 +1538,27 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
       const recipientName = composeWindow && recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
       const messageToReplyTo = composeWindow ? getThreadContext(composeWindow) : null;
       const editableBody = composeWindow
-        ? ((composeWindow.querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null) || composeWindow)
+        ? (composeWindow.querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null)
         : null;
+      if (!editableBody) {
+        submitting = false;
+        const subtitle = popover.querySelector('[data-pranan-subtitle]');
+        if (subtitle) subtitle.textContent = 'Open a message body before generating. Your instructions and existing text have not changed.';
+        freeformBtn.textContent = 'Try again';
+        freeformBtn.style.opacity = '1';
+        freeformBtn.style.pointerEvents = 'auto';
+        return;
+      }
+      const currentDraft = readGmailComposeText(editableBody);
+      if (currentDraft.length > MAX_COMPOSE_DRAFT_CHARS) {
+        submitting = false;
+        const subtitle = popover.querySelector('[data-pranan-subtitle]');
+        if (subtitle) subtitle.textContent = 'This draft is too long to revise. Shorten it to 12,000 characters or fewer. Your text has not changed.';
+        freeformBtn.textContent = 'Try again';
+        freeformBtn.style.opacity = '1';
+        freeformBtn.style.pointerEvents = 'auto';
+        return;
+      }
       const editorId = stampEditor(editableBody);
       const pendingPayload = {
           platform: 'gmail',
@@ -1645,6 +1568,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
           channelName: null,
           subject: composeWindow ? getSubject(composeWindow) : null,
           userPrompt: text,
+          currentDraft: currentDraft || undefined,
           originSurface: 'inline-bar',
           composeType: messageToReplyTo ? 'reply' : 'new',
           editorId,
@@ -1656,10 +1580,12 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
       const ok = await safeSendMessage({
         type: 'INLINE_DRAFT_REQUEST',
         payload: pendingPayload,
-      }).then(() => true).catch(() => false);
+      }).then((ack) => ack != null && !ack.error).catch(() => false);
 
       if (!ok) {
         submitting = false;
+        const subtitle = popover.querySelector('[data-pranan-subtitle]');
+        if (subtitle) subtitle.textContent = 'Could not reach Pranan. Your instructions are preserved. Reload Gmail if retry fails.';
         freeformBtn.textContent = 'Try again';
         freeformBtn.style.opacity = '1';
         freeformBtn.style.pointerEvents = 'auto';
@@ -2141,6 +2067,7 @@ function onComposeDetected(composeWindow: Element) {
     type: 'COMPOSE_DETECTED',
     payload: {
       platform: 'gmail',
+      editorId: stampEditor(composeWindow.querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"]')),
       recipientEmail: primaryRecipient,
       recipientName: null,
       threadId: null,
@@ -2573,4 +2500,3 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
-

@@ -143,3 +143,19 @@ ability to send an email at all.
 `positionComposeBar` enforces it. If you change placement, that helper is the
 thing to keep honest — and it is still only arithmetic. It cannot tell you what
 the page looks like. That is what this document is for.
+
+## 0.8.61 candidate: editing, signature and context
+
+- Edit a side-panel draft, Preview it, Insert it and Copy it. All three must use the revised text.
+- Deny clipboard access. The panel must show a failure, never Copied.
+- Generate for compose A, switch to B or a different Gmail tab before completion. No A draft, rewrite or contact context may appear in B. Insert must carry A's editor binding or fail with Copy available.
+- Generate in a new Gmail compose with a logo/link signature, then regenerate. Preserve the same signature and quoted history without duplication.
+- Use a long recipient name in a floating compose. The bar, input and buttons must fit the compose width. At maximized/short sizes, verify the compact Draft with Pranan fallback remains usable and Send is not obscured.
+- Retry a skipped draft or an unavailable extension worker. Preserve the typed instructions. The popover must not disappear and falsely acknowledge a missing worker.
+- LinkedIn: open Start a post with a messaging overlay present. The current ShareBox editor must get post tools, never a Draft comment bar. Actual feed comments must retain their own controls.
+
+### Inline reply with other extensions (2026-09-10 screenshot regression)
+- In Gmail reply and reply-all, with Voilà and HubSpot enabled, verify the collapsed Pranan row, readable prompt and reachable editor/Send controls at default and enlarged browser zoom.
+- Open Reply options and suggestions. Check relationship correction and side-panel actions, wrapped suggestions, and Escape focus return. Select an intent and verify the correct reply editor and preserved signature.
+- Resize/pop out/maximize/restore compose. When space is constrained, the existing compact fallback must remain usable and no Pranan controls may cover the editor or Send.
+- Local `/qa/inline.html` passed desktop, 320/420 px compose and 390 px viewport checks. Installed candidate and browser zoom checks remain required before release.

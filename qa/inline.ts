@@ -1,0 +1,16 @@
+import { compactPromptBar } from '../src/content/shared/compact-prompt-bar';
+const bar = document.getElementById('pranan')!;
+const icon = document.createElement('div'); icon.textContent = '◉'; icon.style.color = '#8b5cf6';
+const input = document.createElement('input'); input.placeholder = 'What should this say?'; input.setAttribute('aria-label', 'Instructions for Pranan');
+const generate = document.createElement('button'); generate.textContent = 'Generate'; generate.type = 'button';
+const relationship = document.createElement('button'); relationship.type = 'button'; relationship.textContent = 'Rehana seoworking (network)';
+const tone = document.createElement('span'); tone.textContent = 'Tone: auto';
+const sidePanel = document.createElement('button'); sidePanel.type = 'button'; sidePanel.setAttribute('aria-label', 'Open Pranan side panel');
+const layout = compactPromptBar({ bar, icon, input, generate, relationship, tone, sidePanel });
+const result = document.getElementById('result')!;
+const request = () => { result.textContent = `Local generation request: ${input.value || '(use thread context)'}`; };
+generate.addEventListener('click', request);
+input.addEventListener('keydown', (event) => { if (event.key === 'Enter') request(); });
+layout.setIntents(['Send sponsor post pricing', 'Share additional site options', 'Request brief and budget'], (intent) => { input.value = intent; request(); });
+sidePanel.addEventListener('click', () => { result.textContent = 'Local side panel action recorded.'; });
+document.getElementById('width')!.addEventListener('change', (event) => { document.getElementById('fixture')!.style.width = (event.target as HTMLSelectElement).value; });

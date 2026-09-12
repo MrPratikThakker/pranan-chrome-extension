@@ -218,7 +218,7 @@ async function handleMessage(
     case 'COMPOSE_CLOSED':
     case 'RECIPIENT_CHANGED':
     case 'TEXT_SELECTED':
-      broadcastToSidePanel(message);
+      broadcastToSidePanel({ ...message, payload: { ...(message.payload && typeof message.payload === "object" ? message.payload : {}), sourceTabId: sender.tab?.id } });
       return { ok: true };
 
     // Centralized token refresh: the SW is the SOLE refresher so the single-use
@@ -327,6 +327,7 @@ async function handleMessage(
         recipientName?: string;
         channelName?: string;
         messageToReplyTo?: string;
+        currentDraft?: string;
         userPrompt?: string;
         prompt?: string;
         isDM?: boolean;
@@ -385,6 +386,7 @@ async function handleMessage(
               recipientEmail: inlinePayload.recipientEmail || undefined,
               recipientName: inlinePayload.recipientName || undefined,
               messageToReplyTo: inlinePayload.messageToReplyTo || undefined,
+              currentDraft: inlinePayload.currentDraft || undefined,
               platform: inlinePayload.platform,
               channelName: inlinePayload.channelName || undefined,
               prompt: inlinePayload.userPrompt || inlinePayload.prompt || undefined,
@@ -985,5 +987,4 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 // + listener block was removed because it ran the same logic with worse
 // timing.
 initAuth();
-
 

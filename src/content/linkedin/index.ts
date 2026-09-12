@@ -19,6 +19,7 @@
 import { injectMultilineText } from '@/lib/safe-dom';
 import { safeSendMessage } from '@/lib/runtime';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
+import { LINKEDIN_POST_EDITOR, isLinkedInCommentCandidate, findLinkedInPostButton } from './editor-kind';
 import { parseLinkedInPostText, pickAuthorProfileUrl } from './post-parse';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
@@ -51,6 +52,7 @@ const SELECTORS = {
   ],
   // Post compose
   postCompose: [
+    LINKEDIN_POST_EDITOR,
     '.share-creation-state__text-editor [contenteditable="true"]',
     '.ql-editor[data-placeholder*="What do you want to talk about"]',
     '[role="textbox"][aria-label*="post"]',
@@ -575,7 +577,7 @@ function injectMessagingPromptBar() {
 // ---------------------------------------------------------------------------
 
 function injectCommentPromptBars() {
-  const commentInputs = queryAll(SELECTORS.commentCompose);
+  const commentInputs = queryAll(SELECTORS.commentCompose).filter(isLinkedInCommentCandidate);
 
   for (const commentInput of commentInputs) {
     // Resolve the stable form container FIRST. Do NOT blacklist the
@@ -777,7 +779,9 @@ function removePromptBars() {
 
 function injectComposeButtons() {
   // Try messaging send button first, then post submit
-  const sendBtn = queryFirst(SELECTORS.sendButton) || queryFirst(SELECTORS.postSubmitButton);
+  const sendBtn = activeComposeType === 'post'
+    ? (queryFirst(SELECTORS.postSubmitButton) || findLinkedInPostButton(queryFirst(SELECTORS.postCompose)))
+    : queryFirst(SELECTORS.sendButton);
   if (!sendBtn) return;
   if (hasInjectedButton(sendBtn, 'pranan-linkedin-main')) return;
 
@@ -931,8 +935,9 @@ function attachSuggestionMonitor() {
 // ---------------------------------------------------------------------------
 
 function detectActiveCompose() {
-  // Check for messaging compose
-  const messageInput = queryFirst(SELECTORS.messageCompose);
+  const postInput = queryFirst(SELECTORS.postCompose);
+  // A foreground post composer takes priority over a background messaging box.
+  const messageInput = postInput ? null : queryFirst(SELECTORS.messageCompose);
   if (messageInput) {
     const recipient = getConversationRecipient();
 
@@ -972,7 +977,6 @@ function detectActiveCompose() {
   }
 
   // Check for post compose
-  const postInput = queryFirst(SELECTORS.postCompose);
   if (postInput && activeComposeType !== 'post') {
     activeComposeType = 'post';
     lastRecipientName = null;
@@ -986,6 +990,8 @@ function detectActiveCompose() {
         threadId: null,
         messageToReplyTo: null,
         channelName: 'LinkedIn Post',
+        composeType: 'post',
+        editorId: stampEditor(postInput),
         isDM: false,
         selectedText: null,
       },
@@ -1047,13 +1053,14 @@ function injectCommentDraft(text: string, target?: HTMLElement | null): boolean 
   if (focused) {
     const matchingSelector = SELECTORS.commentCompose.join(', ');
     if (focused.matches(matchingSelector) || focused.closest(matchingSelector)) {
-      commentInput = (focused.closest(matchingSelector) || focused) as HTMLElement;
+      const candidate = focused.closest(matchingSelector) || focused;
+      if (isLinkedInCommentCandidate(candidate)) commentInput = candidate as HTMLElement;
     }
   }
 
   // Fallback: use last comment input on page
   if (!commentInput) {
-    const allInputs = queryAll(SELECTORS.commentCompose);
+    const allInputs = queryAll(SELECTORS.commentCompose).filter(isLinkedInCommentCandidate);
     commentInput = (allInputs[allInputs.length - 1] || null) as HTMLElement | null;
   }
 
