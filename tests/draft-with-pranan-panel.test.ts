@@ -23,6 +23,11 @@ const src = stripComments(raw);
  * Pranan surface has a Generate button.
  */
 describe('the Draft with Pranan panel can be submitted', () => {
+  it('does not hard-code a stale model provider in the privacy footer', () => {
+    expect(src).toContain('Private workspace &middot; Pranan AI');
+    expect(src).not.toContain('Private workspace &middot; Anthropic');
+  });
+
   it('has a Generate button, not just a keyboard shortcut', () => {
     expect(src).toContain('data-pranan-freeform-generate');
     const footer = src.slice(src.indexOf('data-pranan-freeform-generate'));
