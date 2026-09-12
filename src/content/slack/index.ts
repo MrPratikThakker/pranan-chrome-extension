@@ -26,6 +26,7 @@ import { findOne, findAll, SELECTORS as REGISTRY } from '../selectors';
 import { bootstrapSentry } from '@/lib/observability';
 import { attributeSlackThread, readSelfName, findSenderFor, SLACK_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
 import { conversationKindFromUrl } from '@/lib/slack-conversation';
+import { slackContextLabel } from '@/lib/slack-context-label';
 import { generateButtonState } from '../shared/generate-affordance';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
@@ -92,7 +93,7 @@ const PRANAN_SLACK_BAR_ATTR = 'data-pranan-slack-bar';
 
 function getChannelName(): string | null {
   const header = findOne('slack.channelHeader', REGISTRY.slack.channelHeader);
-  return header?.textContent?.trim() || null;
+  return slackContextLabel(header?.textContent);
 }
 
 function getDMRecipient(): string | null {
@@ -104,19 +105,19 @@ function getDMRecipient(): string | null {
 
   // Try dedicated DM header selectors first
   const dmHeader = findOne('slack.dmHeader', REGISTRY.slack.dmHeader);
-  if (dmHeader?.textContent?.trim()) return dmHeader.textContent.trim();
+  if (dmHeader?.textContent?.trim()) return slackContextLabel(dmHeader.textContent);
 
   // Fallback: in DMs, the channel header often shows the person's name
   if (isDirectMessage()) {
     const channelHeader = findOne('slack.channelHeader', REGISTRY.slack.channelHeader);
-    if (channelHeader?.textContent?.trim()) return channelHeader.textContent.trim();
+    if (channelHeader?.textContent?.trim()) return slackContextLabel(channelHeader.textContent);
   }
 
   // Broader fallback: try registry chain for header title fallbacks.
   const fallback = findOne('slack.channelHeaderFallbacks', REGISTRY.slack.channelHeaderFallbacks);
   const fallbackText = fallback?.textContent?.trim();
   if (fallbackText && fallbackText.length > 0 && !fallbackText.startsWith('#')) {
-    return fallbackText;
+    return slackContextLabel(fallbackText);
   }
 
   return null;
@@ -360,6 +361,11 @@ function injectSlackPromptBar() {
 
   const triggerDraft = () => {
     const prompt = input.value.trim() || undefined;
+    // Slack can reuse the composer while recipients change. Read the current
+    // context on Generate, never the labels captured when the bar mounted.
+    const liveIsDM = isDirectMessage();
+    const liveRecipientName = liveIsDM ? getDMRecipient() : null;
+    const liveChannelName = liveIsDM ? null : getChannelName();
     const messageContext = getThreadContext() || getRecentChannelMessages();
     const editorId = stampEditor(findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput));
     // Show a loading state; keep the prompt text so we can restore it on error.
@@ -372,9 +378,9 @@ function injectSlackPromptBar() {
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
         platform: 'slack',
-        recipientName,
-        channelName,
-        isDM,
+        recipientName: liveRecipientName,
+        channelName: liveChannelName,
+        isDM: liveIsDM,
         messageToReplyTo: messageContext,
         // Send under both keys: the service worker reads userPrompt (gmail
         // convention); keep prompt for any legacy side-panel fallback.
@@ -920,6 +926,5 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
-
 
 

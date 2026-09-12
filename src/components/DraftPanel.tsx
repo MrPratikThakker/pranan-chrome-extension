@@ -46,6 +46,7 @@ export function DraftPanel({
   const [editedText, setEditedText] = useState(draft.draft);
   const [selectedTone, setSelectedTone] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
   // Audit (MEDIUM/LOW): acknowledge whether the content script actually
   // inserted. 'idle' | 'inserting' | 'ok' | 'fail'.
   const [insertState, setInsertState] = useState<'idle' | 'inserting' | 'ok' | 'fail'>('idle');
@@ -75,7 +76,7 @@ export function DraftPanel({
 
   const handleInsert = () => {
     setInsertState('inserting');
-    onInsert(isEditing ? editedText : draft.draft, (ok) => {
+    onInsert(editedText, (ok) => {
       setInsertState(ok ? 'ok' : 'fail');
       if (ok) setTimeout(() => setInsertState('idle'), 2500);
     });
@@ -86,13 +87,19 @@ export function DraftPanel({
     onRegenerate(tone);
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(isEditing ? editedText : draft.draft);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    setCopied(false);
+    setCopyError(false);
+    try {
+      await navigator.clipboard.writeText(editedText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopyError(true);
+    }
   };
 
-  const displayText = streamingText || draft.draft;
+  const displayText = streamingText || editedText;
   const hasContent = displayText && displayText.length > 0;
   const recipientDisplay = recipientName || recipientEmail;
 
@@ -226,6 +233,7 @@ export function DraftPanel({
           /* Edit mode */
           <textarea
             ref={textareaRef}
+            aria-label="Draft text"
             value={editedText}
             onChange={(e) => {
               setEditedText(e.target.value);
@@ -252,7 +260,7 @@ export function DraftPanel({
           <div className="flex items-center gap-2">
             <button
               onClick={handleInsert}
-              disabled={insertState === 'inserting'}
+              disabled={insertState === 'inserting' || !editedText.trim()}
               className="btn-accent flex-1 text-[13px] py-2.5 px-4 flex items-center justify-center gap-2 font-semibold disabled:opacity-60"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -265,6 +273,7 @@ export function DraftPanel({
               onClick={() => setIsEditing(!isEditing)}
               className="w-10 h-10 flex items-center justify-center text-brand-text-3 border border-brand-border rounded-md hover:border-brand-border-strong hover:text-brand-text hover:bg-brand-surface transition-all"
               title={isEditing ? 'Preview' : 'Edit'}
+              aria-label={isEditing ? 'Preview' : 'Edit'}
             >
               {isEditing ? (
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -283,6 +292,7 @@ export function DraftPanel({
               onClick={() => onRegenerate()}
               className="w-10 h-10 flex items-center justify-center text-brand-text-3 border border-brand-border rounded-md hover:border-brand-border-strong hover:text-brand-text hover:bg-brand-surface transition-all"
               title="Regenerate"
+              aria-label="Regenerate"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M1 4v6h6" />
@@ -330,6 +340,8 @@ export function DraftPanel({
           </button>
         </div>
       )}
+
+      {copyError && <p role="alert" className="text-xs text-brand-red">Copy failed. Select and copy the draft text manually.</p>}
 
       {/* Suggested alternative tones from API */}
       {draft.alternativeTones.length > 0 && !isLoading && (

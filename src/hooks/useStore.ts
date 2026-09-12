@@ -38,6 +38,12 @@ import type { MeetingBriefing, FollowUpNudge, DecayAlert } from '@/types';
 let draftAbortController: AbortController | null = null;
 let rewriteAbortController: AbortController | null = null;
 let grammarAbortController: AbortController | null = null;
+let contactRequestVersion = 0;
+
+function composeKey(ctx: ComposeContext | null): string {
+  return JSON.stringify(ctx && [ctx.sourceTabId, ctx.editorId, ctx.platform, ctx.recipientEmail,
+    ctx.recipientName, ctx.threadId, ctx.channelName, ctx.composeType, ctx.messageToReplyTo]);
+}
 
 interface Actions {
   // Auth
@@ -192,6 +198,17 @@ export const useStore = create<AppState & Actions>((set, get) => ({
   setPlatform: (platform) => set({ currentPlatform: platform }),
 
   setComposeContext: (ctx) => {
+    if (composeKey(ctx) !== composeKey(get().composeContext)) {
+      draftAbortController?.abort();
+      rewriteAbortController?.abort();
+      grammarAbortController?.abort();
+      contactRequestVersion++;
+      set({ currentDraft: null, rewriteResult: null, grammarResult: null,
+        contactContext: null, contactContextLookup: null, isLoading: false,
+        isDraftLoading: false, isDraftStreaming: false, streamingDraftText: '',
+        isRewriteLoading: false, isGrammarLoading: false, error: null,
+        viewMode: get().isAuthenticated ? 'context' : get().viewMode });
+    }
     set({ composeContext: ctx });
     if (ctx) {
       // Auto-load contact context when compose is detected
@@ -212,11 +229,14 @@ export const useStore = create<AppState & Actions>((set, get) => ({
 
   loadContactContext: async (email, name, linkedinUrl) => {
     if (!email && !name && !linkedinUrl) return;
-    set({ isLoading: true, error: null, contactContextLookup: { email, name, linkedinUrl } });
+    const version = ++contactRequestVersion;
+    set({ isLoading: true, error: null, contactContext: null, contactContextLookup: { email, name, linkedinUrl } });
     try {
       const context = await getContactContext({ email, name, linkedinUrl });
-      set({ contactContext: context, isLoading: false, viewMode: 'context' });
+      if (version !== contactRequestVersion) return;
+      set({ contactContext: context, isLoading: false });
     } catch (err) {
+      if (version !== contactRequestVersion) return;
       set({
         isLoading: false,
         error: err instanceof Error ? err.message : 'Failed to load context',
@@ -249,6 +269,7 @@ export const useStore = create<AppState & Actions>((set, get) => ({
       try {
         console.log('[Store] requestDraft: attempting SSE stream...');
         for await (const chunk of streamDraft(request, signal)) {
+          if (signal.aborted) return;
           if (chunk.type === 'chunk') {
             fullText += chunk.text;
             set({ streamingDraftText: fullText });
@@ -257,6 +278,7 @@ export const useStore = create<AppState & Actions>((set, get) => ({
             meta = chunk.meta || {};
           }
         }
+        if (signal.aborted) return;
         console.log('[Store] requestDraft: stream complete, text length:', fullText.length);
         const draft: DraftResponse = {
           // v0.8.2 — spread meta FIRST so skip metadata flows through, then
@@ -278,12 +300,13 @@ export const useStore = create<AppState & Actions>((set, get) => ({
         if (signal.aborted) throw streamErr;
         console.warn('[Store] requestDraft: stream failed, falling back to non-stream', streamErr instanceof Error ? streamErr.message : streamErr);
         const draft = await generateDraft(request, signal);
+        if (signal.aborted) return;
         console.log('[Store] requestDraft: non-stream complete, draft length:', draft.draft?.length);
         set({ currentDraft: draft, isDraftLoading: false, isDraftStreaming: false, streamingDraftText: '' });
       }
       get().incrementInteraction();
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return; // Cancelled by user/new request
+      if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return; // Cancelled by user/new request
       const errorMsg = err instanceof Error ? err.message : 'Failed to generate draft';
       console.error('[Store] requestDraft: FINAL ERROR', errorMsg, err);
       set({
@@ -306,13 +329,14 @@ export const useStore = create<AppState & Actions>((set, get) => ({
     rewriteAbortController = new AbortController();
     const { signal } = rewriteAbortController;
 
-    set({ isRewriteLoading: true, error: null, viewMode: 'rewrite' });
+    set({ rewriteResult: null, isRewriteLoading: true, error: null, viewMode: 'rewrite' });
     try {
       const result = await rewriteText(request, signal);
+      if (signal.aborted) return;
       set({ rewriteResult: result, isRewriteLoading: false });
       get().incrementInteraction();
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return;
       set({
         isRewriteLoading: false,
         error: err instanceof Error ? err.message : 'Failed to rewrite',
@@ -329,12 +353,13 @@ export const useStore = create<AppState & Actions>((set, get) => ({
     grammarAbortController = new AbortController();
     const { signal } = grammarAbortController;
 
-    set({ isGrammarLoading: true, error: null, viewMode: 'grammar' });
+    set({ grammarResult: null, isGrammarLoading: true, error: null, viewMode: 'grammar' });
     try {
       const result = await checkGrammar(request, signal);
+      if (signal.aborted) return;
       set({ grammarResult: result, isGrammarLoading: false });
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return;
       set({
         isGrammarLoading: false,
         error: err instanceof Error ? err.message : 'Grammar check failed',
@@ -375,7 +400,9 @@ export const useStore = create<AppState & Actions>((set, get) => ({
         break;
       }
       case 'PLATFORM_DETECTED': {
-        const { platform } = message.payload as { platform: Platform };
+        const { platform, tabId } = message.payload as { platform: Platform; tabId?: number };
+        const ctx = get().composeContext;
+        if (ctx && (ctx.platform !== platform || (tabId !== undefined && ctx.sourceTabId !== tabId))) get().setComposeContext(null);
         get().setPlatform(platform);
         break;
       }

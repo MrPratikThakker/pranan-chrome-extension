@@ -7,6 +7,8 @@
 export type Platform = 'gmail' | 'slack' | 'linkedin' | 'universal' | 'unknown';
 
 export interface ComposeContext {
+  sourceTabId?: number;
+  editorId?: string | null;
   platform: Platform;
   recipientEmail: string | null;
   recipientName: string | null;

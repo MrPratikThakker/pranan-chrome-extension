@@ -423,6 +423,7 @@ export async function getProactiveSuggestions(): Promise<ProactiveSuggestion[]> 
 // ---------------------------------------------------------------------------
 
 export interface DraftRequest {
+  currentDraft?: string;
   recipientEmail?: string;
   recipientName?: string;
   threadId?: string;
@@ -775,6 +776,5 @@ export async function getSnippets(): Promise<Snippet[]> {
     return [];
   }
 }
-
 
 
