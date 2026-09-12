@@ -1476,7 +1476,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
     <div style="padding: 9px 22px; background: #faf5ff; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #6d28d9;">
       <span style="display: inline-flex; align-items: center; gap: 6px;">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z" stroke="#6d28d9" stroke-width="2"/></svg>
-        Private workspace &middot; Anthropic
+        Private workspace &middot; Pranan AI
       </span>
       <a href="https://app.pranan.ai/settings" target="_blank" style="color: #6d28d9; text-decoration: none;">Settings</a>
     </div>
