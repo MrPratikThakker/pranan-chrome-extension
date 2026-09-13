@@ -14,9 +14,16 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Uploaded release version to submit for Chrome Web Store review'
+        required: true
+        type: string
 
 jobs:
   publish:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # softprops/action-gh-release needs contents:write to create the
@@ -130,3 +137,43 @@ jobs:
             echo "- ✅ GitHub Release: pranan-companion-${{ github.ref_name }}.zip"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  submit-store-review:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify requested release
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must use the form 0.8.63"
+            exit 1
+          fi
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if [[ "$PACKAGE_VERSION" != "$RELEASE_VERSION" ]]; then
+            echo "::error::Requested version $RELEASE_VERSION does not match main package version $PACKAGE_VERSION"
+            exit 1
+          fi
+          gh release download "v${RELEASE_VERSION}" --pattern "pranan-companion-v${RELEASE_VERSION}.zip"
+          ARCHIVE_VERSION=$(unzip -p "pranan-companion-v${RELEASE_VERSION}.zip" manifest.json | node -e "let s=''; process.stdin.on('data', d => s += d).on('end', () => console.log(JSON.parse(s).version))")
+          if [[ "$ARCHIVE_VERSION" != "$RELEASE_VERSION" ]]; then
+            echo "::error::Release archive version $ARCHIVE_VERSION does not match $RELEASE_VERSION"
+            exit 1
+          fi
+
+      - name: Submit uploaded release to Chrome Web Store review
+        uses: mnao305/chrome-extension-upload@v6.0.0
+        with:
+          file-path: pranan-companion-v${{ inputs.version }}.zip
+          extension-id: ${{ secrets.CHROME_EXTENSION_ID }}
+          client-id: ${{ secrets.CHROME_CLIENT_ID }}
+          client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          publish: true
+          publish-target: default
