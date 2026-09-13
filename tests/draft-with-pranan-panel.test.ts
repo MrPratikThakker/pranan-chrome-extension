@@ -30,8 +30,24 @@ describe('the Draft with Pranan panel can be submitted', () => {
 
   it('has a clear context-aware draft button, not just a keyboard shortcut', () => {
     expect(src).toContain('data-pranan-generate');
-    const action = src.slice(src.indexOf('data-pranan-generate'));
+    const action = src.slice(src.indexOf('<button data-pranan-generate'));
     expect(action.slice(0, 700)).toContain("'Draft reply'");
+  });
+
+  it('surfaces a compact compose prompt automatically above Gmail footer', () => {
+    expect(src).toContain("const PRANAN_COMPOSE_RAIL_ATTR = 'data-pranan-compose-rail'");
+    const rail = src.slice(src.indexOf('function injectAutomaticComposeRail'));
+    expect(rail).toContain("insertionParent.insertBefore(host, footer)");
+    expect(rail).toContain("return 'Describe this email'");
+    expect(rail).toContain("return 'Reply in your voice'");
+    expect(rail).toContain("return 'Improve this draft'");
+  });
+
+  it('lets the automatic prompt submit directly or start voice', () => {
+    const rail = src.slice(src.indexOf('function injectAutomaticComposeRail'), src.indexOf('interface ComposePopoverOptions'));
+    expect(rail).toContain("openExpanded({ autoSubmit: !!canDraft })");
+    expect(rail).toContain("openExpanded({ startVoice: true })");
+    expect(rail).toContain("event.key === 'Enter'");
   });
 
   it('wires that button to the submit path', () => {
