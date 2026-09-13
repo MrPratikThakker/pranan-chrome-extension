@@ -1,7 +1,8 @@
 export const MAX_COMPOSE_DRAFT_CHARS = 12_000;
 
 /** Read only the supplied editor, stopping before Gmail's quoted reply history. */
-export function readGmailComposeText(body: HTMLElement): string {
+export function readGmailComposeText(body: HTMLElement | null): string {
+  if (!body) return "";
   // The insertion helper returns the quote's top-level ancestor. Reading must
   // stop at the actual quote: that ancestor can also contain the user's draft.
   const quote = body.querySelector('.gmail_quote, blockquote.gmail_quote, [class*="gmail_quote"]');
@@ -16,6 +17,7 @@ export function readGmailComposeText(body: HTMLElement): string {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
     if (!(node instanceof HTMLElement)) return '';
     if (['SCRIPT', 'STYLE'].includes(node.tagName) || node.hidden || node.getAttribute('aria-hidden') === 'true') return '';
+    if (node.matches('.gmail_signature, [data-smartmail="gmail_signature"]')) return '';
     if (node.tagName === 'BR') return '\n';
     let text = '';
     for (const child of Array.from(node.childNodes)) {

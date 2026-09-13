@@ -4,7 +4,7 @@ export type InsertMessageType = 'INSERT_DRAFT' | 'INSERT_COMMENT_DRAFT';
 export function sendInsertToActiveTab(
   type: InsertMessageType,
   text: string,
-  target?: { sourceTabId?: number; editorId?: string | null },
+  target?: { sourceTabId?: number; editorId?: string | null; originUrl?: string; allRecipients?: string[] },
 ): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false;
@@ -27,7 +27,7 @@ export function sendInsertToActiveTab(
         try {
           chrome.tabs.sendMessage(tabId, {
             type,
-            payload: { text, ...(target?.editorId ? { editorId: target.editorId } : {}) },
+            payload: { text, originUrl: target?.originUrl, allRecipients: target?.allRecipients, ...(target?.editorId ? { editorId: target.editorId } : {}) },
           }, (resp?: { success?: boolean }) => {
             const failed = !!chrome.runtime.lastError;
             finish(!failed && !!resp?.success);

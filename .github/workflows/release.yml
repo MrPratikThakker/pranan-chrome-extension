@@ -119,7 +119,7 @@ jobs:
             echo "### Release ${{ github.ref_name }}"
             echo
             if [[ "${{ steps.cws-upload.outcome }}" == "success" ]]; then
-              echo "- ✅ Chrome Web Store: uploaded (in review)"
+              echo "- ✅ Chrome Web Store: uploaded; review submission pending (publish=false)"
             elif [[ "${{ steps.cws-upload.outcome }}" == "skipped" ]]; then
               echo "- ⏭️ Chrome Web Store: skipped (credentials missing)"
             else

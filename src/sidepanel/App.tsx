@@ -662,6 +662,7 @@ function AppInner() {
             so they work from nudge-drafts, briefing-drafts, or timing edge cases */}
         {viewMode === 'draft' && (
           <DraftPanel
+            onStop={() => useStore.getState().cancelDraft()}
             draft={currentDraft || { draft: '', confidence: 0, voiceMatch: 0, alternativeTones: [] }}
             isLoading={isDraftLoading}
             streamingText={isDraftStreaming ? streamingDraftText : undefined}

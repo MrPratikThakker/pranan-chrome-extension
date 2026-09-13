@@ -127,6 +127,7 @@ export async function refreshAccessToken(): Promise<string | null> {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
+        signal: AbortSignal.timeout(8_000),
       });
       if (!res.ok) {
         // 401 => refresh token itself is dead; clear so the UI prompts reconnect.
@@ -192,8 +193,9 @@ async function ensureValidToken(): Promise<string | null> {
 
 async function authedFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const legacyToken = await ensureValidToken();
+  init.signal?.throwIfAborted();
   const headers = new Headers(init.headers || {});
-  if (!headers.has('Content-Type') && init.body) {
+  if (!headers.has('Content-Type') && init.body && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
   if (legacyToken && !headers.has('Authorization')) {
@@ -217,8 +219,9 @@ async function authedFetchWithRetry(
   opts: { retries?: number } = {}
 ): Promise<Response> {
   const legacyToken = await ensureValidToken();
+  init.signal?.throwIfAborted();
   const headers = new Headers(init.headers || {});
-  if (!headers.has('Content-Type') && init.body) {
+  if (!headers.has('Content-Type') && init.body && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
   if (legacyToken && !headers.has('Authorization')) {
@@ -384,9 +387,10 @@ export async function validateAuth(): Promise<AuthResponse> {
 // ---------------------------------------------------------------------------
 
 export async function getContactContext(
-  params: { email?: string; name?: string; linkedinUrl?: string }
+  params: { email?: string; name?: string; linkedinUrl?: string; mailboxEmail?: string }
 ): Promise<ContactContext> {
   const query = new URLSearchParams();
+  if (params.mailboxEmail) query.set('mailboxEmail', params.mailboxEmail);
   if (params.email) query.set('email', params.email);
   if (params.name) query.set('name', params.name);
   if (params.linkedinUrl) query.set('linkedinUrl', params.linkedinUrl);
@@ -424,6 +428,7 @@ export async function getProactiveSuggestions(): Promise<ProactiveSuggestion[]> 
 // ---------------------------------------------------------------------------
 
 export interface DraftRequest {
+  mailboxEmail?: string;
   currentDraft?: string;
   recipientEmail?: string;
   recipientName?: string;
@@ -444,7 +449,7 @@ export interface DraftRequest {
 
 export async function generateDraft(request: DraftRequest, signal?: AbortSignal): Promise<DraftResponse> {
   console.log('[API] generateDraft: POST', `${API_BASE}/draft`);
-  const response = await authedFetchWithRetry(`${API_BASE}/draft`, { method: 'POST', body: JSON.stringify(request), signal });
+  const response = await authedFetchWithRetry(`${API_BASE}/draft`, { method: 'POST', body: JSON.stringify(request), signal }, { retries: 0 });
   console.log('[API] generateDraft: response status', response.status);
   const data = await handleResponse<DraftResponse & { reason?: string; message?: string }>(response);
   // Normalize skip fields. The server returns a skip as { skipped, reason,
@@ -478,11 +483,30 @@ export async function generateDraft(request: DraftRequest, signal?: AbortSignal)
 // ---------------------------------------------------------------------------
 
 export interface IntentsRequest {
+  mailboxEmail?: string;
   platform?: string;
   recipientEmail?: string | null;
   recipientName?: string | null;
   subject?: string | null;
   messageToReplyTo?: string | null;
+}
+
+export async function transcribeAudio(audio: Blob): Promise<string> {
+  const form = new FormData();
+  const extension = audio.type.includes('ogg') ? 'ogg'
+    : audio.type.includes('mp4') ? 'mp4'
+      : audio.type.includes('wav') ? 'wav'
+        : 'webm';
+  form.set('audio', audio, `voice.${extension}`);
+  const response = await authedFetch(`${API_BASE}/transcribe`, {
+    method: 'POST',
+    body: form,
+    signal: AbortSignal.timeout(30_000),
+  });
+  const data = await handleResponse<{ text?: string }>(response);
+  const text = data.text?.trim() || '';
+  if (!text) throw new ApiError('No speech was detected.', 422, 'NO_SPEECH');
+  return text;
 }
 
 /**
@@ -552,11 +576,7 @@ export async function* streamDraft(
   const contentType = response.headers.get('content-type') || '';
   console.log('[API] streamDraft: response status', response.status, 'content-type', contentType);
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    console.error('[API] streamDraft: error body', body);
-    throw new ApiError(`Draft stream failed: ${response.status}${body ? ` - ${body.slice(0, 200)}` : ''}`, response.status);
-  }
+  if (!response.ok) await handleResponse(response);
 
   // ---- Server returned plain JSON (no SSE support) ----
   // Detect via Content-Type: if it's application/json, parse as a single DraftResponse
