@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>QA - owner@example.test - Gmail</title>
+<style>body{font:14px Arial;margin:0;background:#eeeaf5;color:#202124}main{max-width:1040px;margin:35px auto;background:#fff;border-radius:16px;padding:28px;box-sizing:border-box}.message{padding:20px}.reply-host{position:relative}.ip.iq{margin:0;background:white;border:1px solid #dadce0;border-radius:14px;padding:16px;box-shadow:0 2px 6px #0002}.aoD{display:flex;gap:8px;align-items:center}.Am{min-height:120px;padding:16px 0;outline:none}.footer{display:flex;gap:10px;padding-top:15px}.integration{color:#006865;display:flex;flex-wrap:wrap;gap:18px;margin:20px 0}.fixture-controls{padding:12px;display:flex;gap:12px;flex-wrap:wrap}button,select{font:inherit}button{cursor:pointer}#events{white-space:pre-wrap;font:12px monospace;overflow-wrap:anywhere;margin:20px}body.dark,body.dark main,body.dark .ip.iq{background:#202124;color:#f3f4f6}body.dark .integration{color:#7ce8d9}body.zoom main{max-width:680px}body.zoom{font-size:20px}@media(max-width:600px){main{margin:8px;padding:10px}.message{padding:10px}}</style></head><body>
+<div class="fixture-controls"><strong>Local QA fixture</strong><label>Response <select id="scenario"><option>Success</option><option>Slow success</option><option>Network error</option><option>Session expired</option><option>Missing price</option></select></label><button id="dark">Dark theme</button><button id="zoom">Large layout</button><button id="recipient">Change recipient</button><button id="second">Open second draft</button></div>
+<main class="aeH nH if" role="main"><h2 class="hP">Project proposal</h2><div class="adn"><div class="gs message"><span class="gD" email="alex@example.test" name="Alex">Alex</span><div class="ii gt"><div class="a3s aiL">Can you confirm the scope, timing, and cost by Friday?</div></div></div></div>
+<div class="reply-host"><div class="ip iq"><div class="aoD hl"><span>To</span><span data-hovercard-id="alex@example.test" name="Alex">Alex</span></div><div class="integration">Write with Breeze <span>Templates</span><span>Meetings</span><span>Tasks</span><span>Snippets</span></div><div class="Am aiL"><div contenteditable="true" role="textbox" aria-label="Message Body" g_editable="true"><div class="gmail_signature" data-smartmail="gmail_signature">Best,<br>Owner</div></div></div><div class="aDh footer"><div role="button" aria-label="Send" data-tooltip="Send" style="background:#f50;color:white;padding:8px 25px;border-radius:20px">Send disabled in fixture</div></div></div></div></main><pre id="events" aria-label="QA event log"></pre>
+<script type="module">
+const listeners=new Set(); const cancelled=new Set(); const saved={};
+class FakeSpeechRecognition {
+ continuous=false;interimResults=false;lang='';onstart=null;onresult=null;onerror=null;onend=null;
+ start(){this.onstart?.();setTimeout(()=>this.onresult?.({results:[{0:{transcript:'Thank them and ask for confirmation by Friday'},isFinal:true}]}),100)}
+ stop(){this.onend?.()}
+}
+window.webkitSpeechRecognition=FakeSpeechRecognition;
+function log(event){document.querySelector('#events').textContent=JSON.stringify(event,null,2)}
+window.chrome={runtime:{id:'pranan-local-fixture',getManifest:()=>({version:'0.8.63-QA'}),getURL:path=>path,onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn),hasListeners:()=>true},sendMessage:async msg=>{
+ if(msg.type==='GET_REPLY_INTENTS')return{intents:['Ask for the scope','Confirm Friday','Decline politely']};
+ if(msg.type==='GET_RELATIONSHIP_TIER')return {name:'Alex',tier:'client'};
+ if(msg.type==='CANCEL_INLINE_DRAFT'){cancelled.add(msg.payload.requestId);return{ok:true}}
+ if(msg.type==='INLINE_DRAFT_REQUEST'){
+  const mode=document.querySelector('#scenario').value;log({request:msg.payload});
+  setTimeout(()=>{if(cancelled.has(msg.payload.requestId)){log({cancelled:true});return;}
+   const fail=mode==='Network error'||mode==='Session expired'||mode==='Missing price';
+   const response={type:fail?'DRAFT_SKIPPED':'INSERT_DRAFT',payload:{requestId:msg.payload.requestId,editorId:msg.payload.editorId,text:'Hi Alex,\nCould you confirm the scope, timing and cost by Friday?',message:mode==='Missing price'?'What price and currency should I quote?':mode==='Session expired'?'Your Pranan session expired. Sign in and retry.':'Pranan could not connect. Your draft has not changed.'}};
+   for(const fn of listeners)fn(response,{},result=>log({result}));
+  },mode==='Slow success'?7000:500);return{ok:true};
+ }
+ return{};
+}},storage:{local:{get:async key=>({[key]:saved[key]}),set:async values=>Object.assign(saved,values)},onChanged:{addListener:()=>{}}}};
+document.querySelector('#dark').onclick=()=>{document.body.classList.toggle('dark');document.querySelectorAll('.pranan-compact').forEach(el=>el.setAttribute('data-theme',document.body.classList.contains('dark')?'dark':'light'))};
+document.querySelector('#zoom').onclick=()=>document.body.classList.toggle('zoom');
+document.querySelector('#recipient').onclick=()=>{const chip=document.querySelector('.aoD [data-hovercard-id]');chip.setAttribute('data-hovercard-id','beth@example.test');chip.textContent='Beth';};
+document.querySelector('#second').onclick=()=>{const dialog=document.createElement('section');dialog.setAttribute('role','dialog');dialog.className='M9';dialog.innerHTML='<input name="subjectbox" aria-label="Subject" value="Separate email"><div class="aoD"><span data-hovercard-id="beth@example.test">Beth</span></div><div class="Am aiL"><div contenteditable="true" role="textbox" aria-label="Second Message Body" g_editable="true">Independent draft</div></div><div role="button" aria-label="Send" data-tooltip="Send">Send disabled</div>';const host=document.createElement('main');host.append(dialog);document.body.append(host)};
+await import('/src/content/gmail/index.ts');
+</script></body></html>

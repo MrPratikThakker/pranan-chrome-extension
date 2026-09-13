@@ -7,6 +7,9 @@
 export type Platform = 'gmail' | 'slack' | 'linkedin' | 'universal' | 'unknown';
 
 export interface ComposeContext {
+  mailboxEmail?: string;
+  originUrl?: string;
+  allRecipients?: string[];
   sourceTabId?: number;
   editorId?: string | null;
   platform: Platform;
@@ -134,6 +137,7 @@ export type MessageType =
   | 'AUTH_RECOVERED'
   // Phase 1: Inline compose buttons
   | 'INLINE_DRAFT_REQUEST'
+  | 'CANCEL_INLINE_DRAFT'
   | 'INLINE_REWRITE_REQUEST'
   | 'INLINE_GRAMMAR_REQUEST'
   // Phase 2: Relationship popup

@@ -67,7 +67,9 @@ describe('the Draft with Pranan panel can be submitted', () => {
     const awaitAt = body.indexOf('await safeSendMessage');
     const closeAt = body.indexOf('popover.remove()');
     expect(awaitAt).toBeGreaterThan(-1);
-    expect(closeAt).toBeGreaterThan(awaitAt);
+    // Acknowledgement is not completion: the panel now stays open for retries.
+    expect(closeAt).toBe(-1);
+    expect(src).toContain("message.payload?.requestId !== popoverRequest");
   });
 
   it('says so instead of vanishing when the request fails', () => {

@@ -26,6 +26,7 @@ import { usesDirectWorkerPath } from './inline-draft-routing';
 bootstrapSentry('service-worker');
 
 let cachedAuth: AuthResponse | null = null;
+const inlineRequests = new Map<string, AbortController>();
 
 // MV3 service workers terminate after ~30s idle, which kills setTimeout-based
 // refresh. chrome.alarms persists across SW restarts so the 25-min refresh
@@ -129,9 +130,9 @@ function evictContactCache() {
   }
 }
 
-async function getCachedContactContext(params: { email?: string; name?: string }): Promise<ContactContext | null> {
-  const key = params.email || params.name || '';
-  if (!key) return null;
+async function getCachedContactContext(params: { email?: string; name?: string; mailboxEmail?: string }): Promise<ContactContext | null> {
+  if (!params.email && !params.name) return null;
+  const key = JSON.stringify([cachedAuth?.userId, params.mailboxEmail, params.email || params.name]);
 
   const cached = contactCache.get(key);
   if (cached && Date.now() - cached.ts < CONTACT_CACHE_TTL) {
@@ -319,9 +320,17 @@ async function handleMessage(
     }
 
     // --- Phase 1: Inline compose buttons ---
+    case 'CANCEL_INLINE_DRAFT': {
+      const id = (message.payload as { requestId?: string })?.requestId;
+      if (id && sender.tab?.id) inlineRequests.get(`${sender.tab.id}:${id}`)?.abort();
+      return { ok: true };
+    }
     case 'INLINE_DRAFT_REQUEST': {
       const tab = sender.tab;
       const inlinePayload = message.payload as {
+        requestId?: string;
+        mailboxEmail?: string;
+        tone?: string;
         platform?: string;
         recipientEmail?: string;
         recipientName?: string;
@@ -370,6 +379,11 @@ async function handleMessage(
         const insertType = inlinePayload.composeType === 'comment'
           ? 'INSERT_COMMENT_DRAFT'
           : 'INSERT_DRAFT';
+        const requestKey = `${tabId}:${inlinePayload.requestId || crypto.randomUUID()}`;
+        const controller = new AbortController();
+        inlineRequests.set(requestKey, controller);
+        const deadline = setTimeout(() => controller.abort(new DOMException('Draft timed out', 'TimeoutError')), 25_000);
+        const correlation = { originUrl: tab.url, editorId: inlinePayload.editorId, requestId: inlinePayload.requestId };
         (async () => {
           try {
             // Bounded, and bounded BELOW the inline bar's own 30s reset.
@@ -387,14 +401,18 @@ async function handleMessage(
               recipientName: inlinePayload.recipientName || undefined,
               messageToReplyTo: inlinePayload.messageToReplyTo || undefined,
               currentDraft: inlinePayload.currentDraft || undefined,
+              mailboxEmail: inlinePayload.mailboxEmail,
+              tone: inlinePayload.tone,
               platform: inlinePayload.platform,
               channelName: inlinePayload.channelName || undefined,
               prompt: inlinePayload.userPrompt || inlinePayload.prompt || undefined,
-            }, AbortSignal.timeout(25_000));
+            }, controller.signal);
+            if (controller.signal.aborted) return;
             if (resp?.skipped) {
               chrome.tabs.sendMessage(tabId, {
                 type: 'DRAFT_SKIPPED',
                 payload: {
+                  ...correlation,
                   reason: resp.skipReason || 'skipped',
                   message: resp.skipMessage || 'Draft skipped.',
                 },
@@ -404,7 +422,7 @@ async function handleMessage(
             if (resp?.draft) {
               chrome.tabs.sendMessage(tabId, {
                 type: insertType,
-                payload: { text: resp.draft, editorId: inlinePayload.editorId },
+                payload: { text: resp.draft, ...correlation },
               }).catch(() => { /* tab gone */ });
               return;
             }
@@ -415,6 +433,7 @@ async function handleMessage(
             chrome.tabs.sendMessage(tabId, {
               type: 'DRAFT_SKIPPED',
               payload: {
+                ...correlation,
                 reason: 'empty',
                 message: "Pranan couldn't draft a reply for this one. Try again, or type a prompt and press Generate.",
               },
@@ -423,8 +442,11 @@ async function handleMessage(
             console.warn('[SW] inline gmail/slack generateDraft failed:', err);
             chrome.tabs.sendMessage(tabId, {
               type: 'DRAFT_SKIPPED',
-              payload: { reason: 'error', message: draftErrorMessage(err) },
+              payload: { ...correlation, reason: 'error', message: draftErrorMessage(err) },
             }).catch(() => { /* tab gone */ });
+          } finally {
+            clearTimeout(deadline);
+            inlineRequests.delete(requestKey);
           }
         })();
         return { ok: true };
@@ -673,10 +695,10 @@ async function handleMessage(
     }
 
     case 'GET_RELATIONSHIP_TIER': {
-      const { email } = (message.payload as { email?: string }) || {};
+      const { email, mailboxEmail } = (message.payload as { email?: string; mailboxEmail?: string }) || {};
       if (!email) return { tier: null };
       try {
-        const ctx = await getCachedContactContext({ email });
+        const ctx = await getCachedContactContext({ email, mailboxEmail });
         if (!ctx) return { tier: 'unknown', name: null };
         return {
           tier: ctx.tier || 'unknown',

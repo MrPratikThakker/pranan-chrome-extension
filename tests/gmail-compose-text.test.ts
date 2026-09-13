@@ -51,7 +51,7 @@ describe('Gmail revision context', () => {
   it('propagates current draft through the worker to the API', () => {
     const gmail = readFileSync('src/content/gmail/index.ts', 'utf8');
     const worker = readFileSync('src/background/service-worker.ts', 'utf8');
-    expect(gmail).toContain('userPrompt ? readGmailComposeText(editableBody)');
+    expect(gmail).toContain('const currentDraft = readGmailComposeText(editableBody)');
     expect(gmail).toContain('currentDraft.length > MAX_COMPOSE_DRAFT_CHARS');
     expect(gmail).toContain('currentDraft: currentDraft || undefined');
     expect(worker).toContain('currentDraft: inlinePayload.currentDraft || undefined');

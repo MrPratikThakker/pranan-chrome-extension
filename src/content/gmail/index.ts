@@ -28,7 +28,16 @@ import { bottomOffsetAboveSendRow, bottomOffsetForChips, correctedBottomOffset, 
 import { resolveLiveCompose, isOrphanedComposeBar } from '@/lib/live-compose';
 import { planComposeTitleRescue, needsForcedPositioning, correctForcedTop } from '@/lib/compose-title-rescue';
 import { formatThreadContext, extractSelfEmail } from '@/lib/thread-context';
+import { scopedThreadContext, replyTarget, composeThread } from '@/lib/gmail-compose-context';
+import { ComposeTransactions } from '@/lib/compose-transaction';
+const composeTransactions = new ComposeTransactions();
+function composeIdentity(compose: Element): string {
+  return JSON.stringify([location.href, extractSelfEmail(document.title), extractRecipients(compose).map(e => e.toLowerCase()).sort(), getSubject(compose)]);
+}
 import { readGmailComposeText, MAX_COMPOSE_DRAFT_CHARS } from '@/lib/gmail-compose-text';
+import { createSpeechInput } from '@/lib/speech-input';
+import { createRecordedSpeechInput } from '@/lib/recorded-speech-input';
+import { transcribeAudio } from '@/lib/api-client';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -143,18 +152,6 @@ function extractRecipients(composeWindow: Element): string[] {
     if (match) emails.push(...match);
   });
 
-  // Method 6: For reply windows, extract from the reply header
-  if (emails.length === 0) {
-    const replyHeader = composeWindow.closest('.h7, .gs, .nH');
-    if (replyHeader) {
-      const fromSpans = findAll('gmail.replyHeader', SELECTORS.gmail.replyHeader, replyHeader);
-      fromSpans.forEach(el => {
-        const email = el.getAttribute('email');
-        if (email && email.includes('@')) emails.push(email);
-      });
-    }
-  }
-
   return [...new Set(emails)];
 }
 
@@ -206,56 +203,14 @@ function getComposeBody(composeWindow: Element): string {
 }
 
 function getThreadContext(composeWindow: Element): string | null {
-  // Try several thread-container selectors. Gmail rotates class names, so we
-  // walk up looking for any of: the legacy .h7/.gs containers, the modern
-  // [role="main"] thread region, or any [data-thread-perm-id] ancestor. If
-  // none match, fall back to the visible thread on the page (most recent).
-  const thread =
-    composeWindow.closest('.h7, .gs') ||
-    composeWindow.closest('[data-thread-perm-id]') ||
-    composeWindow.closest('[role="main"]') ||
-    findOne('gmail.threadRoot', SELECTORS.gmail.threadRoot);
-
-  if (!thread) return null;
-
-  // Collect ALL visible message bodies. .a3s.aiL is the legacy selector;
-  // .ii.gt is the modern message-body wrapper; [data-message-id] .a3s catches
-  // newer Gmail variants. Take up to the last 3 messages so the LLM has
-  // recent context plus the message being replied to.
-  const messageBodies = thread.querySelectorAll(
-    '.a3s.aiL, .ii.gt .a3s, [data-message-id] .a3s, .ii .a3s, [role="listitem"] .a3s'
-  );
-  if (messageBodies.length === 0) return null;
-
-  const recent = Array.from(messageBodies).slice(-3);
-
-  // Attribute every message. Concatenating the bodies with `---` and no sender
-  // left nothing in the prompt that could tell the user's own words from the
-  // counterparty's -- so when the user had sent the newest message, the model
-  // answered it, in the other side's voice. Measured on a live pricing
-  // negotiation: Pratik (the buyer) asked "Can we do $15/user/month?", and
-  // Pranan drafted "Yes, we can offer $15/user/month". See lib/thread-context.
-  const selfEmail = extractSelfEmail(document.title);
-  const messages = recent.map((m: Element) => {
-    const container = m.closest('[data-message-id], .ii.gt, [role="listitem"], .gs') || m.parentElement;
-    const senderEl = container?.querySelector('.gD[email], [email]') as HTMLElement | null;
-    return {
-      sender: senderEl?.getAttribute('email') || senderEl?.getAttribute('name') || null,
-      text: (m as HTMLElement).innerText?.trim() || m.textContent?.trim() || '',
-    };
-  });
-
-  const combined = formatThreadContext(messages, selfEmail);
-  if (!combined) return null;
-  // Cap at 4000 chars (~1k tokens) so we don't blow the context window.
-  return combined.slice(-4000);
+  return scopedThreadContext(composeWindow);
 }
 
 function getSubject(composeWindow: Element): string | null {
   const subjectInput = composeWindow.querySelector(
     'input[name="subjectbox"]'
   ) as HTMLInputElement | null;
-  return subjectInput?.value || null;
+  return subjectInput?.value || composeThread(composeWindow)?.querySelector('h2.hP')?.textContent?.trim() || null;
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +224,7 @@ function injectDraft(composeWindow: Element, draftText: string): boolean {
 
   if (!body) return false;
 
+  const before = body.innerHTML;
   body.focus();
   // Preserve the Gmail quoted thread on replies so newly-added recipients still
   // get the conversation history. The old path cleared the whole body, wiping
@@ -283,6 +239,7 @@ function injectDraft(composeWindow: Element, draftText: string): boolean {
     injectMultilineText(body, clean, 'div');
   }
 
+  composeTransactions.remember(body, before);
   body.dispatchEvent(new Event('input', { bubbles: true }));
   body.dispatchEvent(new Event('change', { bubbles: true }));
 
@@ -733,17 +690,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     ['vendor', 'Vendor'],
     ['network', 'Network'],
   ];
-  const resolveTargetContact = (): string | null => {
-    const live = extractRecipients(liveCompose());
-    if (live[0]) return live[0];
-    if (recipientEmail) return recipientEmail;
-    const threadsForPill = findThreadViews();
-    if (threadsForPill.length > 0) {
-      const sender = extractThreadSender(threadsForPill[threadsForPill.length - 1]);
-      if (sender.email) return sender.email;
-    }
-    return null;
-  };
+  const resolveTargetContact = (): string | null => replyTarget(liveCompose(), extractRecipients(liveCompose())).email;
   relChip.addEventListener('click', (ev) => {
     ev.stopPropagation();
     const existing = document.querySelector('[data-pranan-tier-menu]');
@@ -778,7 +725,10 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       });
       menu.appendChild(item);
     }
+    menu.setAttribute('role', 'group'); menu.setAttribute('aria-label', 'Relationship tier');
+    menu.addEventListener('keydown', event => { if (event.key === 'Escape') { event.stopPropagation(); menu.remove(); relChip.focus(); } });
     document.body.appendChild(menu);
+    menu.querySelector('button')?.focus();
     const dismiss = (e: MouseEvent) => {
       if (!menu.contains(e.target as Node)) { menu.remove(); document.removeEventListener('mousedown', dismiss); }
     };
@@ -812,20 +762,28 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // Loading state resets when:
   //   (a) INSERT_DRAFT message arrives back (draft was generated + injected), OR
   //   (b) 30 second safety timeout fires (something went wrong upstream)
+  let activeRequest: string | null = null;
+  let activeEditor: string | null = null;
   let resetTimer: ReturnType<typeof setTimeout> | null = null;
   let skipNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   const setLoading = (loading: boolean) => {
     if (loading) {
+      const oldNotice = bar.parentElement?.querySelector<HTMLElement>('[data-pranan-skip-notice]');
+      if (oldNotice) oldNotice.style.display = 'none';
       genBtn.disabled = true;
       genBtn.textContent = 'Generating...';
       genBtn.style.opacity = '0.6';
-      input.style.background = '#f5f3ff';
+      bar.setAttribute('aria-busy', 'true');
+      cancelBtn.hidden = false;
+      input.style.background = 'var(--pranan-muted, #f5f3ff)';
       input.disabled = true;
     } else {
       genBtn.disabled = false;
-      genBtn.textContent = 'Generate';
+      genBtn.textContent = readGmailComposeText(liveCompose().querySelector('[contenteditable="true"]') as HTMLElement).trim() ? 'Improve draft' : 'Draft reply';
       genBtn.style.opacity = '1';
-      input.style.background = 'white';
+      bar.setAttribute('aria-busy', 'false');
+      cancelBtn.hidden = true;
+      input.style.background = 'var(--pranan-bg, white)';
       input.disabled = false;
     }
   };
@@ -840,6 +798,8 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       notice.style.cssText = 'margin:6px 0 0;padding:8px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;font:500 12px/1.45 inherit;max-width:560px;';
       bar.insertAdjacentElement('afterend', notice);
     }
+    notice.setAttribute('role', 'status');
+    notice.setAttribute('aria-live', 'polite');
     notice.textContent = text;
     notice.style.display = 'block';
     input.style.borderColor = '#fbbf24';
@@ -850,8 +810,94 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     }, 9000);
   };
 
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button'; cancelBtn.textContent = 'Stop'; cancelBtn.hidden = true;
+  cancelBtn.setAttribute('aria-label', 'Stop generating this draft');
+  compact.actions.append(cancelBtn);
+  const voiceBtn = document.createElement('button');
+  voiceBtn.type = 'button'; voiceBtn.textContent = 'Voice';
+  voiceBtn.setAttribute('aria-label', 'Dictate Pranan instructions');
+  voiceBtn.setAttribute('aria-pressed', 'false');
+  let activeVoice: 'speech' | 'recording' | 'transcribing' | null = null;
+  let voiceStarting = false;
+  let voicePrefix = '';
+  const setVoiceActive = (mode: 'speech' | 'recording' | 'transcribing') => {
+    activeVoice = mode;
+    voiceBtn.textContent = mode === 'transcribing' ? 'Transcribing...' : 'Stop voice';
+    voiceBtn.disabled = mode === 'transcribing';
+    voiceBtn.setAttribute('aria-pressed', mode === 'transcribing' ? 'false' : 'true');
+    genBtn.disabled = true;
+  };
+  const setVoiceIdle = () => {
+    activeVoice = null;
+    voiceStarting = false;
+    voiceBtn.textContent = 'Voice';
+    voiceBtn.disabled = false;
+    voiceBtn.setAttribute('aria-pressed', 'false');
+    if (!activeRequest) genBtn.disabled = false;
+    input.focus();
+  };
+  const applyVoiceTranscript = (transcript: string) => {
+    input.value = [voicePrefix, transcript.trim()].filter(Boolean).join(' ');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const speech = createSpeechInput({
+    onStart: () => setVoiceActive('speech'),
+    onTranscript: applyVoiceTranscript,
+    onError: message => showInlineNotice(message),
+    onEnd: setVoiceIdle,
+  });
+  const recordedSpeech = createRecordedSpeechInput({
+    onStart: () => setVoiceActive('recording'),
+    onAudio: async audio => {
+      setVoiceActive('transcribing');
+      showInlineNotice('Transcribing your voice. Your draft is unchanged until you choose Generate.');
+      applyVoiceTranscript(await transcribeAudio(audio));
+    },
+    onError: message => showInlineNotice(message),
+    onEnd: setVoiceIdle,
+  });
+  voiceBtn.addEventListener('click', async () => {
+    if (activeVoice === 'speech') { speech.stop(); return; }
+    if (activeVoice === 'recording') { recordedSpeech.stop(); return; }
+    if (activeVoice === 'transcribing' || voiceStarting) return;
+    voicePrefix = input.value.trim();
+    voiceStarting = true;
+    voiceBtn.textContent = 'Starting voice...';
+    voiceBtn.disabled = true;
+    if (!speech.start()) await recordedSpeech.start();
+    voiceStarting = false;
+  });
+  compact.actions.append(voiceBtn);
+  const cancelGeneration = () => {
+    if (activeRequest) {
+      composeTransactions.cancel(activeRequest);
+      safeSendMessage({ type: 'CANCEL_INLINE_DRAFT', payload: { requestId: activeRequest } }).catch(() => {});
+    }
+    activeRequest = null;
+    if (resetTimer) clearTimeout(resetTimer);
+    resetTimer = null;
+    setLoading(false);
+  };
+  cancelBtn.addEventListener('click', () => { cancelGeneration(); showInlineNotice('Stopped. Your draft and instructions are unchanged.'); input.focus(); });
+  const undoBtn = document.createElement('button');
+  undoBtn.type = 'button'; undoBtn.textContent = 'Undo Pranan change';
+  compact.secondaryActions.append(undoBtn);
+  undoBtn.addEventListener('click', () => {
+    const editor = liveCompose().querySelector<HTMLElement>('[contenteditable="true"]');
+    if (editor && composeTransactions.restore(editor)) { editor.focus(); showInlineNotice('Your previous draft has been restored.'); }
+    else showInlineNotice('No unchanged Pranan revision to undo. Your current edits have been kept.');
+  });
   const triggerGenerate = () => {
-    const userPrompt = input.value.trim();
+    if (activeRequest) return;
+    if (activeVoice === 'recording' || activeVoice === 'transcribing') {
+      if (activeVoice === 'recording') recordedSpeech.stop();
+      showInlineNotice('Finish voice transcription before generating. Your draft is unchanged.');
+      return;
+    }
+    if (activeVoice === 'speech') speech.stop();
+    if (!navigator.onLine) { showInlineNotice('You are offline. Reconnect, then try again. Your draft and instructions are unchanged.'); return; }
+    let userPrompt = input.value.trim();
     // v0.7.2 — re-extract recipient at click time. The bar is injected as
     // soon as the compose container mounts, but Gmail's recipient chip
     // often renders ~50-200ms later. If we captured recipientEmail at
@@ -865,15 +911,9 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     // instead of the external person who actually asked (e.g. Jarrell at G2) and
     // anchor the reply on the wrong message. Prefer the thread's most recent
     // sender; fall back to the To field only when there is no thread (new email).
-    const threadsForSender = findThreadViews();
-    const threadSender = threadsForSender.length > 0
-      ? extractThreadSender(threadsForSender[threadsForSender.length - 1])
-      : { email: null as string | null, name: null as string | null };
-    let liveRecipientEmail = threadSender.email || liveRecipients[0] || recipientEmail || null;
-    let recipientName =
-      (liveRecipientEmail ? extractRecipientName(liveCompose(), liveRecipientEmail) : null)
-      || threadSender.name
-      || null;
+    const target = replyTarget(liveCompose(), liveRecipients);
+    const liveRecipientEmail = target.email;
+    const recipientName = target.name || (liveRecipientEmail ? extractRecipientName(liveCompose(), liveRecipientEmail) : null);
     // Bind this generation to THIS compose's editable body so the returned
     // draft can only be inserted here even if the user switches compose/tab
     // mid-flight (audit HIGH: wrong-place insertion). Refuse when the actual
@@ -883,13 +923,18 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       showInlineNotice('Open a message body before generating a draft. Your existing text has not changed.');
       return;
     }
-    const currentDraft = userPrompt ? readGmailComposeText(editableBody) : '';
+    const currentDraft = readGmailComposeText(editableBody);
+    if (!userPrompt && currentDraft.trim()) userPrompt = 'Improve this draft while preserving every fact, request and commitment.';
+    if (!userPrompt && !getThreadContext(liveCompose())) { showInlineNotice('Describe what this email should say before drafting.'); input.focus(); return; }
     if (currentDraft.length > MAX_COMPOSE_DRAFT_CHARS) {
       showInlineNotice('This draft is too long to revise. Shorten it to 12,000 characters or fewer. Your existing text has not changed.');
       return;
     }
     setLoading(true);
     const editorId = stampEditor(editableBody);
+    activeEditor = editorId;
+    activeRequest = composeTransactions.start(editorId!, editableBody, composeIdentity(liveCompose()));
+    const requestId = activeRequest;
     safeSendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
@@ -901,6 +946,9 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
         subject: getSubject(liveCompose()),
         userPrompt: userPrompt || null,
         currentDraft: currentDraft || undefined,
+        requestId,
+        mailboxEmail: extractSelfEmail(document.title) || undefined,
+        tone: compact.getTone(),
         originSurface: 'inline-bar',
         composeType: getThreadContext(liveCompose()) ? 'reply' : 'new',
         editorId,
@@ -911,7 +959,8 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       // was written for. A dead worker therefore looked identical to a slow one:
       // the bar sat on "Generating..." for the full 30s and then told the user to
       // check they were signed in. Treat a missing ack as the failure it is.
-      if (ack === null) {
+      if (ack === null && activeRequest === requestId) {
+        cancelGeneration();
         if (resetTimer) { clearTimeout(resetTimer); resetTimer = null; }
         setLoading(false);
         showInlineNotice('Pranan lost its connection to the browser extension. Reload this tab and try again.');
@@ -931,10 +980,12 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     // Safety timeout: if INSERT_DRAFT never arrives back within 30s, reset.
     if (resetTimer) clearTimeout(resetTimer);
     resetTimer = setTimeout(() => {
-      setLoading(false);
+      cancelGeneration();
+      speech.stop();
+      recordedSpeech.stop();
       // Nothing came back in 30s (worker never replied / network stalled).
       // Fail loudly instead of quietly resetting to "Generate".
-      showInlineNotice("This took longer than expected. Check you're signed in at app.pranan.ai, then try Generate again.");
+      showInlineNotice('This request timed out and was stopped. Your draft and instructions are unchanged. Try again.');
     }, 30000);
   };
 
@@ -945,39 +996,15 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // generation completes. We reset our loading state.
   // v0.8.1 — also listen for DRAFT_SKIPPED so the bar doesn't hang when the
   // backend refuses to draft (cold prospect, automated sender, etc.).
-  const insertDraftListener = (msg: { type?: string; payload?: { message?: string } }) => {
-    if (msg?.type === 'INSERT_DRAFT' && resetTimer) {
-      clearTimeout(resetTimer);
+  const insertDraftListener = (msg: { type?: string; payload?: { message?: string; requestId?: string; editorId?: string } }) => {
+    if (!activeRequest || msg.payload?.requestId !== activeRequest || msg.payload?.editorId !== activeEditor) return;
+    if (msg.type === 'INSERT_DRAFT' || msg.type === 'DRAFT_SKIPPED') {
+      if (resetTimer) clearTimeout(resetTimer);
       resetTimer = null;
+      composeTransactions.cancel(activeRequest);
+      activeRequest = null;
       setLoading(false);
-      input.value = '';
-    } else if (msg?.type === 'DRAFT_SKIPPED' && resetTimer) {
-      clearTimeout(resetTimer);
-      resetTimer = null;
-      setLoading(false);
-      // Keep the instructions available for correction and retry.
-      // Surface the FULL skip reason in a transient notice directly below the
-      // bar, so the user sees WHY nothing happened AND how to override (e.g.
-      // "addressed to Jigar, you are only copied. Add a prompt or pick an
-      // intent to draft anyway."). The old approach stuffed this into the input
-      // placeholder truncated at 87 chars, which hid the actionable half and
-      // made an intentional skip look like a silent no-op.
-      const skipMsg = msg.payload?.message || 'Pranan stayed out of this one. Add a prompt or pick an intent to draft anyway.';
-      let notice = bar.parentElement?.querySelector('[data-pranan-skip-notice]') as HTMLElement | null;
-      if (!notice) {
-        notice = document.createElement('div');
-        notice.setAttribute('data-pranan-skip-notice', '1');
-        notice.style.cssText = 'margin:6px 0 0;padding:8px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;font:500 12px/1.45 inherit;max-width:560px;';
-        bar.insertAdjacentElement('afterend', notice);
-      }
-      notice.textContent = skipMsg;
-      notice.style.display = 'block';
-      input.style.borderColor = '#fbbf24';
-      if (skipNoticeTimer) clearTimeout(skipNoticeTimer);
-      skipNoticeTimer = setTimeout(() => {
-        if (notice) notice.style.display = 'none';
-        input.style.borderColor = '#e5e7eb';
-      }, 9000);
+      if (msg.type === 'DRAFT_SKIPPED') showInlineNotice(msg.payload.message || 'Drafting stopped. Your instructions are available to retry.');
     }
   };
   chrome.runtime.onMessage.addListener(insertDraftListener);
@@ -985,7 +1012,10 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // changed before the draft returned, the draft was NOT inserted. Reset the
   // loading state and offer the user a one-click Copy so the work is not lost.
   const editorChangedListener = (ev: Event) => {
-    const detail = (ev as CustomEvent<{ text?: string }>).detail;
+    const detail = (ev as CustomEvent<{ text?: string; editorId?: string; requestId?: string }>).detail;
+    if (!detail?.editorId || detail.editorId !== activeEditor) return;
+    if (!activeRequest || detail.requestId !== activeRequest) return;
+    activeRequest = null;
     if (resetTimer) { clearTimeout(resetTimer); resetTimer = null; }
     setLoading(false);
     let notice = bar.parentElement?.querySelector('[data-pranan-skip-notice]') as HTMLElement | null;
@@ -997,7 +1027,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     }
     notice.textContent = '';
     const msg = document.createElement('span');
-    msg.textContent = 'You moved to a different compose, so Pranan did not insert here. Copy the draft instead?';
+    msg.textContent = 'Your draft or recipients changed, so Pranan kept your edits. Copy the generated draft instead?';
     const copyBtn = document.createElement('button');
     copyBtn.textContent = 'Copy draft';
     copyBtn.style.cssText = 'flex:none;padding:5px 10px;background:#92400e;color:#fff;border:none;border-radius:6px;font:600 12px/1 inherit;cursor:pointer;';
@@ -1008,6 +1038,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
         copyBtn.textContent = 'Copied';
       }).catch(() => { copyBtn.textContent = 'Copy failed'; });
     });
+    notice.setAttribute('role', 'status');
     notice.appendChild(msg);
     notice.appendChild(copyBtn);
     notice.style.display = 'flex';
@@ -1016,12 +1047,35 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   };
   window.addEventListener('pranan:editor-changed', editorChangedListener);
   // Clean up listener when the bar is removed from DOM (compose closed)
+  let observedIdentity = composeIdentity(liveCompose());
   const cleanupObserver = new MutationObserver(() => {
+    let backdrop: Element | null = liveCompose();
+    while (backdrop) {
+      const color = getComputedStyle(backdrop).backgroundColor;
+      const rgb = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+      if (rgb) {
+        const luminance = Number(rgb[1]) * .2126 + Number(rgb[2]) * .7152 + Number(rgb[3]) * .0722;
+        const theme = luminance < 128 ? 'dark' : 'light';
+        if (bar.getAttribute('data-theme') !== theme) bar.setAttribute('data-theme', theme);
+        break;
+      }
+      backdrop = backdrop.parentElement;
+    }
+    const currentIdentity = composeIdentity(liveCompose());
+    if (document.contains(bar) && currentIdentity !== observedIdentity) {
+      observedIdentity = currentIdentity;
+      const target = replyTarget(liveCompose(), extractRecipients(liveCompose()));
+      const labelEl = relChip.querySelector('[data-rel-text]');
+      if (labelEl) labelEl.textContent = target.email ? `To ${target.email}` : 'Add a recipient';
+      refreshIntents();
+    }
     if (!document.contains(bar)) {
       chrome.runtime.onMessage.removeListener(insertDraftListener);
       window.removeEventListener('pranan:editor-changed', editorChangedListener);
       cleanupObserver.disconnect();
-      if (resetTimer) clearTimeout(resetTimer);
+      cancelGeneration();
+      speech.stop();
+      recordedSpeech.stop();
       if (skipNoticeTimer) clearTimeout(skipNoticeTimer);
     }
   });
@@ -1038,18 +1092,28 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       triggerGenerate();
     } else if (e.key === 'Escape') {
       input.blur();
-      input.value = '';
     }
   });
+
+  const updateAction = () => {
+    if (activeRequest) return;
+    const editor = liveCompose().querySelector<HTMLElement>('[contenteditable="true"]');
+    const hasDraft = !!editor && !!readGmailComposeText(editor).trim();
+    genBtn.textContent = hasDraft ? 'Improve draft' : (getThreadContext(liveCompose()) ? 'Draft reply' : 'Draft email');
+    input.placeholder = hasDraft ? 'How should this change?' : 'What should this say?';
+  };
+  liveCompose().addEventListener('input', updateAction);
+  updateAction();
+  compact.setRefinements(['Shorter', 'Warmer', 'More direct'], refinement => { input.value = refinement; triggerGenerate(); });
 
   // Async: try to upgrade the relationship chip with the real tier from the
   // background script (best-effort; falls back to the simple email-local label).
   if (recipientEmail) {
     safeSendMessage({
       type: 'GET_RELATIONSHIP_TIER',
-      payload: { email: recipientEmail },
+      payload: { email: recipientEmail, mailboxEmail: extractSelfEmail(document.title) || undefined },
     }).then((res: { tier?: string; name?: string } | undefined) => {
-      if (!res || !res.tier) return;
+      if (!res || !res.tier || resolveTargetContact()?.toLowerCase() !== recipientEmail.toLowerCase()) return;
       const labelEl = relChip.querySelector('[data-rel-text]') as HTMLElement | null;
       if (!labelEl) return;
       const tierLabels: Record<string, string> = {
@@ -1123,6 +1187,9 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
 
   // Reply suggestions stay inside the collapsed options section so they do
   // not add another permanent row above an already crowded inline editor.
+  function refreshIntents() {
+  compact.setIntents([], () => {});
+  const intentIdentity = composeIdentity(liveCompose());
   const threadForIntents = getThreadContext(liveCompose());
   if (threadForIntents) {
     const liveRecipients = extractRecipients(liveCompose());
@@ -1132,6 +1199,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       type: 'GET_REPLY_INTENTS',
       payload: {
         platform: 'gmail',
+        mailboxEmail: extractSelfEmail(document.title) || undefined,
         recipientEmail: intentRecipient,
         recipientName: intentRecipientName,
         subject: getSubject(liveCompose()),
@@ -1139,13 +1207,15 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       },
     }).then((res: { intents?: string[] } | undefined) => {
       const intents = (res?.intents || []).slice(0, 3);
-      if (!intents.length || !document.contains(bar)) return;
+      if (!intents.length || !document.contains(bar) || intentIdentity !== composeIdentity(liveCompose())) return;
       compact.setIntents(intents, (intent) => {
         input.value = intent;
         triggerGenerate();
       });
     }).catch(() => { /* intents are best-effort */ });
   }
+  }
+  refreshIntents();
 }
 
 // ---------------------------------------------------------------------------
@@ -1521,6 +1591,34 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
   const promptEl = popover.querySelector('[data-pranan-prompt]') as HTMLTextAreaElement;
   const freeformBtn = popover.querySelector('[data-pranan-freeform-generate]') as HTMLButtonElement;
 
+  let popoverRequest: string | null = null;
+  const finishPopover = (message?: string) => {
+    submitting = false;
+    if (popoverRequest) composeTransactions.cancel(popoverRequest);
+    popoverRequest = null;
+    freeformBtn.textContent = 'Try again'; freeformBtn.style.opacity = '1'; freeformBtn.style.pointerEvents = 'auto';
+    const status = popover.querySelector('[data-pranan-subtitle]');
+    if (status && message) { status.setAttribute('role', 'status'); status.textContent = message; }
+  };
+  const popoverResult = (message: { type: string; payload?: { requestId?: string; message?: string } }) => {
+    if (!popoverRequest || message.payload?.requestId !== popoverRequest) return;
+    if (message.type === 'DRAFT_SKIPPED') finishPopover(message.payload.message || 'Drafting failed. Your instructions are preserved.');
+    else if (message.type === 'INSERT_DRAFT') { popoverRequest = null; popover.remove(); }
+  };
+  const popoverChanged = (event: Event) => {
+    if ((event as CustomEvent).detail?.requestId === popoverRequest) finishPopover('Your draft or recipients changed. Your text was kept. Review your instructions and try again.');
+  };
+  chrome.runtime.onMessage.addListener(popoverResult);
+  window.addEventListener('pranan:editor-changed', popoverChanged);
+  const popoverCleanup = new MutationObserver(() => {
+    if (popover.isConnected) return;
+    if (popoverRequest) { composeTransactions.cancel(popoverRequest); safeSendMessage({ type: 'CANCEL_INLINE_DRAFT', payload: { requestId: popoverRequest } }).catch(() => {}); }
+    chrome.runtime.onMessage.removeListener(popoverResult);
+    window.removeEventListener('pranan:editor-changed', popoverChanged);
+    document.removeEventListener('keydown', escListener); document.removeEventListener('mousedown', outsideClick);
+    popoverCleanup.disconnect();
+  });
+  popoverCleanup.observe(document.body, { childList: true, subtree: true });
   let submitting = false;
   const submitFreeformPrompt = async () => {
       if (submitting) return;
@@ -1560,7 +1658,10 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
         return;
       }
       const editorId = stampEditor(editableBody);
+      popoverRequest = composeTransactions.start(editorId!, editableBody, composeIdentity(composeWindow!));
       const pendingPayload = {
+          requestId: popoverRequest,
+          mailboxEmail: extractSelfEmail(document.title) || undefined,
           platform: 'gmail',
           recipientEmail,
           recipientName,
@@ -1583,6 +1684,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
       }).then((ack) => ack != null && !ack.error).catch(() => false);
 
       if (!ok) {
+        finishPopover();
         submitting = false;
         const subtitle = popover.querySelector('[data-pranan-subtitle]');
         if (subtitle) subtitle.textContent = 'Could not reach Pranan. Your instructions are preserved. Reload Gmail if retry fails.';
@@ -1591,7 +1693,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
         freeformBtn.style.pointerEvents = 'auto';
         return;
       }
-      popover.remove();
+      setTimeout(() => { if (popoverRequest) { safeSendMessage({ type: 'CANCEL_INLINE_DRAFT', payload: { requestId: popoverRequest } }).catch(() => {}); finishPopover('Drafting timed out. Your instructions and draft are unchanged. Try again.'); } }, 30000);
   };
 
   freeformBtn.addEventListener('click', (e) => { e.preventDefault(); void submitFreeformPrompt(); });
@@ -1908,26 +2010,23 @@ function injectThreadPromptBar(threadContainer: Element) {
     generateBtn.style.pointerEvents = hasText ? 'auto' : 'none';
   });
 
-  const triggerDraft = () => {
-    const prompt = input.value.trim() || undefined;
-    safeSendMessage({
-      type: 'INLINE_DRAFT_REQUEST',
-      payload: {
-        platform: 'gmail',
-        recipientEmail: senderEmail,
-        recipientName: senderName,
-        messageToReplyTo: messageText,
-        channelName: null,
-        subject,
-        prompt,
-        originSurface: 'inline-bar',
-        composeType: 'reply',
-      },
-    }).catch(() => {});
-    // Visual feedback
-    input.value = '';
-    generateBtn.style.opacity = '0';
-    generateBtn.style.pointerEvents = 'none';
+  let openingReply = false;
+  const triggerDraft = async () => {
+    if (openingReply) return;
+    openingReply = true;
+    const prompt = input.value.trim();
+    const originUrl = location.href;
+    if (!openGmailReply(threadContainer)) { openingReply = false; input.placeholder = 'Open Reply to draft with Pranan'; return; }
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      if (location.href !== originUrl || !threadContainer.isConnected) break;
+      const composeBar = threadContainer.querySelector<HTMLElement>('[data-pranan-v6]');
+      const composeInput = composeBar?.querySelector('input');
+      const generate = composeBar?.querySelector<HTMLButtonElement>('[data-pranan-primary]');
+      if (composeInput && generate) { composeInput.value = prompt; generate.click(); openingReply = false; return; }
+    }
+    openingReply = false;
+    input.placeholder = 'Use Pranan in the open reply';
   };
 
   input.addEventListener('keydown', (e) => {
@@ -2063,12 +2162,15 @@ function onComposeDetected(composeWindow: Element) {
     lastDetectedRecipientPerCompose.set(composeWindow, primaryRecipient);
   }
 
-  safeSendMessage({
+  const emitComposeContext = () => safeSendMessage({
     type: 'COMPOSE_DETECTED',
     payload: {
       platform: 'gmail',
       editorId: stampEditor(composeWindow.querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"]')),
-      recipientEmail: primaryRecipient,
+      mailboxEmail: extractSelfEmail(document.title) || undefined,
+      originUrl: location.href,
+      allRecipients: extractRecipients(composeWindow),
+      recipientEmail: replyTarget(composeWindow, extractRecipients(composeWindow)).email,
       recipientName: null,
       threadId: null,
       messageToReplyTo: getThreadContext(composeWindow),
@@ -2078,6 +2180,8 @@ function onComposeDetected(composeWindow: Element) {
       subject: getSubject(composeWindow),
     },
   }).catch(() => {});
+  emitComposeContext();
+  composeWindow.addEventListener('focusin', emitComposeContext);
 
   // Phase 1: Inject inline buttons near Send
   // Small delay to ensure Gmail has fully rendered the compose toolbar
@@ -2096,18 +2200,19 @@ function onComposeDetected(composeWindow: Element) {
     const newRecipients = extractRecipients(composeWindow);
     const newPrimary = newRecipients[0] || null;
 
-    if (newPrimary && newPrimary !== lastDetectedRecipientPerCompose.get(composeWindow)) {
+    if (newPrimary !== lastDetectedRecipientPerCompose.get(composeWindow)) {
       lastDetectedRecipientPerCompose.set(composeWindow, newPrimary);
       safeSendMessage({
         type: 'RECIPIENT_CHANGED',
         payload: {
           recipientEmail: newPrimary,
+          editorId: stampEditor(composeWindow.querySelector('[contenteditable="true"]')),
           allRecipients: newRecipients,
         },
       }).catch(() => {});
 
       // Re-show relationship popup for new recipient
-      showComposeRelationshipPopup(composeWindow, newPrimary);
+      if (newPrimary) showComposeRelationshipPopup(composeWindow, newPrimary);
     }
 
     // Re-inject buttons if Gmail re-rendered the toolbar
@@ -2150,7 +2255,7 @@ function onComposeClosed(composeWindow: Element) {
 
   safeSendMessage({
     type: 'COMPOSE_CLOSED',
-    payload: { platform: 'gmail' },
+    payload: { platform: 'gmail', editorId: composeWindow.querySelector('[data-pranan-editor-id]')?.getAttribute('data-pranan-editor-id') },
   }).catch(() => {});
 }
 
@@ -2180,7 +2285,7 @@ document.addEventListener('mouseup', () => {
  * appears broken — sidepanel had a draft ready, Gmail had no compose
  * to inject into, the call silently failed.
  */
-function openGmailReply(): boolean {
+function openGmailReply(scope: ParentNode = document): boolean {
   // Primary: structured selector path (fast when Gmail's classes match).
   const threads = findThreadViews();
   if (threads.length > 0) {
@@ -2203,7 +2308,7 @@ function openGmailReply(): boolean {
   // Find any VISIBLE Reply control by role + exact text and fire a bubbling
   // MouseEvent (some Gmail builds ignore a plain .click() here). This exact
   // approach was verified working against current Gmail.
-  const all = Array.from(document.querySelectorAll<HTMLElement>(
+  const all = Array.from(scope.querySelectorAll<HTMLElement>(
     'span[role="link"], div[role="button"], span[role="button"]'
   ));
   const reply = all.find(el => /^reply$/i.test((el.textContent || '').trim()) && el.offsetParent !== null);
@@ -2213,27 +2318,6 @@ function openGmailReply(): boolean {
     return true;
   }
   return false;
-}
-
-// v0.8.12: when a generated draft arrives but no compose can be opened (or the
-// compose never mounts in time), stash it for 60s and inject the moment ANY
-// reply compose appears. Prevents silent draft loss in the reading view.
-let pendingDraftText: string | null = null;
-let pendingDraftTimer: ReturnType<typeof setTimeout> | null = null;
-function stashPendingDraft(text: string) {
-  pendingDraftText = text;
-  if (pendingDraftTimer) clearTimeout(pendingDraftTimer);
-  pendingDraftTimer = setTimeout(() => { pendingDraftText = null; }, 60000);
-  const obs = new MutationObserver(() => {
-    if (!pendingDraftText) { obs.disconnect(); return; }
-    const wins = findComposeWindows();
-    if (wins.length > 0) {
-      const ok = injectDraft(wins[0], pendingDraftText);
-      if (ok) { pendingDraftText = null; obs.disconnect(); }
-    }
-  });
-  obs.observe(document.body, { childList: true, subtree: true });
-  setTimeout(() => obs.disconnect(), 61000);
 }
 
 // ---------------------------------------------------------------------------
@@ -2258,6 +2342,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message.type === 'INSERT_DRAFT') {
     const draftText = message.payload.text || message.payload.draft;
+    if (message.payload.originUrl && message.payload.originUrl !== location.href) {
+      sendResponse({ success: false, reason: 'conversation_changed' }); return true;
+    }
+    if (message.payload.requestId && !composeTransactions.has(message.payload.requestId)) {
+      sendResponse({ success: false, reason: 'request_expired' });
+      return true;
+    }
     // Editor binding (audit HIGH): if this draft was correlated to a specific
     // compose at request time, it must land THERE or nowhere. Never fall back
     // to composeWindows[0], which may be a different compose the user switched
@@ -2275,8 +2366,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         try {
           chrome.runtime.onMessage.hasListeners?.();
         } catch { /* pass */ }
-        window.dispatchEvent(new CustomEvent('pranan:editor-changed', { detail: { text: draftText } }));
+        window.dispatchEvent(new CustomEvent('pranan:editor-changed', { detail: { text: draftText, editorId: boundEditorId, requestId: message.payload.requestId } }));
         sendResponse({ success: false, reason: 'editor_changed' });
+        return true;
+      }
+      if (message.payload.allRecipients && JSON.stringify([...message.payload.allRecipients].map((e: string) => e.toLowerCase()).sort()) !== JSON.stringify(extractRecipients(boundCompose).map(e => e.toLowerCase()).sort())) {
+        sendResponse({ success: false, reason: 'recipients_changed' }); return true;
+      }
+      const requestId = message.payload.requestId as string | undefined;
+      if (requestId && !composeTransactions.consume(requestId, boundEditorId, boundEl, composeIdentity(boundCompose))) {
+        window.dispatchEvent(new CustomEvent('pranan:editor-changed', { detail: { text: draftText, editorId: boundEditorId, requestId } }));
+        sendResponse({ success: false, reason: 'draft_or_audience_changed' });
         return true;
       }
       const success = injectDraft(boundCompose, draftText);
@@ -2284,7 +2384,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
     }
     const composeWindows = findComposeWindows();
-    if (composeWindows.length > 0) {
+    if (composeWindows.length > 1) {
+      sendResponse({ success: false, reason: 'multiple_composes', error: 'Choose the intended compose or copy the draft.' }); return true;
+    }
+    if (composeWindows.length === 1) {
       const success = injectDraft(composeWindows[0], draftText);
       sendResponse({ success });
       return true;
@@ -2298,16 +2401,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const replyClicked = openGmailReply();
     if (!replyClicked) {
       // Keep the draft alive: inject as soon as the user opens a compose.
-      stashPendingDraft(draftText);
-      sendResponse({ success: false, error: 'No compose window and Reply button not found; draft stashed for 60s' });
+      sendResponse({ success: false, error: 'Open the intended reply, then insert again. Your generated draft is still available in Pranan.' });
       return true;
     }
     // Async wait + retry. We must return true synchronously to keep
     // the sendResponse channel open across the timeout.
     let attempts = 0;
+    const originUrl = location.href;
     const tryInject = () => {
+      if (location.href !== originUrl) { sendResponse({ success: false, reason: 'conversation_changed' }); return; }
       const wins = findComposeWindows();
-      if (wins.length > 0) {
+      if (wins.length === 1) {
         const success = injectDraft(wins[0], draftText);
         sendResponse({ success });
         return;
@@ -2316,8 +2420,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         attempts++;
         setTimeout(tryInject, 100);
       } else {
-        stashPendingDraft(draftText);
-        sendResponse({ success: false, error: 'Reply opened but compose did not appear in 2s; draft stashed for 60s' });
+        sendResponse({ success: false, error: 'Reply target is unavailable or ambiguous. Choose the intended reply and insert again.' });
       }
     };
     setTimeout(tryInject, 200);

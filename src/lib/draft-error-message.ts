@@ -19,6 +19,7 @@ export function draftErrorMessage(err: unknown): string {
   if (status === 401) {
     return 'Your Pranan session expired. Open app.pranan.ai to sign back in, then try again.';
   }
+  if (status === 409) return 'This Gmail mailbox differs from your Pranan account. Switch to the matching mailbox or sign into Pranan with this account.';
   if (status === 503) {
     return 'The AI service is briefly unavailable. Try again in a moment.';
   }
@@ -31,5 +32,6 @@ export function draftErrorMessage(err: unknown): string {
   if (name === 'TimeoutError' || name === 'AbortError') {
     return 'That draft took too long and was stopped. Try Generate again.';
   }
+  if (err instanceof TypeError) return 'Pranan could not connect. Check your connection and retry. Your draft has not changed.';
   return 'Draft failed to generate. Try again.';
 }

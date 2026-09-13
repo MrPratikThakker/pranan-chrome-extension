@@ -42,7 +42,7 @@ let contactRequestVersion = 0;
 
 function composeKey(ctx: ComposeContext | null): string {
   return JSON.stringify(ctx && [ctx.sourceTabId, ctx.editorId, ctx.platform, ctx.recipientEmail,
-    ctx.recipientName, ctx.threadId, ctx.channelName, ctx.composeType, ctx.messageToReplyTo]);
+    ctx.recipientName, ctx.mailboxEmail, ctx.originUrl, ctx.allRecipients, ctx.threadId, ctx.channelName, ctx.composeType, ctx.messageToReplyTo]);
 }
 
 interface Actions {
@@ -236,7 +236,7 @@ export const useStore = create<AppState & Actions>((set, get) => ({
     const version = ++contactRequestVersion;
     set({ isLoading: true, error: null, contactContext: null, contactContextLookup: { email, name, linkedinUrl } });
     try {
-      const context = await getContactContext({ email, name, linkedinUrl });
+      const context = await getContactContext({ email, name, linkedinUrl, mailboxEmail: get().composeContext?.mailboxEmail });
       if (version !== contactRequestVersion) return;
       set({ contactContext: context, isLoading: false });
     } catch (err) {
@@ -251,10 +251,16 @@ export const useStore = create<AppState & Actions>((set, get) => ({
   // --- Draft ---
 
   requestDraft: async (request) => {
+    if (request.platform === 'gmail') request = { ...request, mailboxEmail: get().composeContext?.mailboxEmail };
     // Abort any in-flight draft request
     draftAbortController?.abort();
-    draftAbortController = new AbortController();
-    const { signal } = draftAbortController;
+    const requestController = new AbortController();
+    draftAbortController = requestController;
+    const { signal } = requestController;
+    const deadline = setTimeout(() => {
+      requestController.abort();
+      if (draftAbortController === requestController) set({ isDraftLoading: false, isDraftStreaming: false, streamingDraftText: '', error: 'Drafting timed out. Your previous draft is preserved. Try again.' });
+    }, 30_000);
 
     console.log('[Store] requestDraft: starting', { recipient: request.recipientEmail, platform: request.platform, hasTone: !!request.tone });
 
@@ -265,7 +271,7 @@ export const useStore = create<AppState & Actions>((set, get) => ({
     // handles both paths; if neither works, the API returns 401 and
     // handleResponse in api-client clears state cleanly. No pre-flight needed.
 
-    set({ isDraftLoading: true, isDraftStreaming: true, streamingDraftText: '', error: null, viewMode: 'draft', currentDraft: null });
+    set({ isDraftLoading: true, isDraftStreaming: true, streamingDraftText: '', error: null, viewMode: 'draft' });
     try {
       // Try streaming first; fall back to non-streaming
       let fullText = '';
@@ -300,13 +306,9 @@ export const useStore = create<AppState & Actions>((set, get) => ({
         };
         set({ currentDraft: draft, isDraftLoading: false, isDraftStreaming: false, streamingDraftText: '' });
       } catch (streamErr) {
-        // If streaming fails (not abort), fall back to non-streaming
-        if (signal.aborted) throw streamErr;
-        console.warn('[Store] requestDraft: stream failed, falling back to non-stream', streamErr instanceof Error ? streamErr.message : streamErr);
-        const draft = await generateDraft(request, signal);
-        if (signal.aborted) return;
-        console.log('[Store] requestDraft: non-stream complete, draft length:', draft.draft?.length);
-        set({ currentDraft: draft, isDraftLoading: false, isDraftStreaming: false, streamingDraftText: '' });
+        // The JSON fallback is handled by streamDraft itself. Never start a
+        // second charged generation after an uncertain network/stream failure.
+        throw streamErr;
       }
       get().incrementInteraction();
     } catch (err) {
@@ -318,10 +320,9 @@ export const useStore = create<AppState & Actions>((set, get) => ({
         isDraftStreaming: false,
         streamingDraftText: '',
         viewMode: 'draft',
-        currentDraft: null,
         error: errorMsg,
       });
-    }
+    } finally { clearTimeout(deadline); }
   },
 
   clearDraft: () => set({ currentDraft: null }),
@@ -384,14 +385,18 @@ export const useStore = create<AppState & Actions>((set, get) => ({
       case 'COMPOSE_DETECTED':
         get().setComposeContext(message.payload as ComposeContext);
         break;
-      case 'COMPOSE_CLOSED':
-        get().setComposeContext(null);
-        break;
-      case 'RECIPIENT_CHANGED': {
-        const { recipientEmail } = message.payload as { recipientEmail: string };
+      case 'COMPOSE_CLOSED': {
+        const closed = message.payload as Partial<ComposeContext>;
         const current = get().composeContext;
-        if (current) {
-          get().setComposeContext({ ...current, recipientEmail });
+        if ((!closed?.editorId || closed.editorId === current?.editorId)
+          && (!closed?.sourceTabId || closed.sourceTabId === current?.sourceTabId)) get().setComposeContext(null);
+        break;
+      }
+      case 'RECIPIENT_CHANGED': {
+        const { recipientEmail, editorId, sourceTabId, allRecipients } = message.payload as Partial<ComposeContext>;
+        const current = get().composeContext;
+        if (current && (!editorId || editorId === current.editorId) && (!sourceTabId || sourceTabId === current.sourceTabId)) {
+          get().setComposeContext({ ...current, recipientEmail: recipientEmail || null, allRecipients: allRecipients || current.allRecipients });
         }
         break;
       }
@@ -673,7 +678,7 @@ export const useStore = create<AppState & Actions>((set, get) => ({
   cancelDraft: () => {
     draftAbortController?.abort();
     draftAbortController = null;
-    set({ isDraftLoading: false, isDraftStreaming: false, streamingDraftText: '' });
+    set({ isDraftLoading: false, isDraftStreaming: false, streamingDraftText: '', error: 'Stopped. Your previous draft is preserved.' });
   },
 
   cancelRewrite: () => {

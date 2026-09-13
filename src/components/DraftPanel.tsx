@@ -20,6 +20,7 @@ interface Props {
   onInsert: (text: string, onResult?: (ok: boolean) => void) => void;
   onRegenerate: (tone?: string) => void;
   onBack: () => void;
+  onStop?: () => void;
 }
 
 const TONE_CHIPS = [
@@ -41,6 +42,7 @@ export function DraftPanel({
   onInsert,
   onRegenerate,
   onBack,
+  onStop,
 }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(draft.draft);
@@ -116,6 +118,8 @@ export function DraftPanel({
           </svg>
           Back
         </button>
+
+        {isLoading && onStop && <button type="button" onClick={onStop} className="text-xs text-brand-accent" aria-label="Stop generating draft">Stop</button>}
 
         {/* Voice match badge */}
         {!isLoading && draft.voiceMatch > 0 && (
