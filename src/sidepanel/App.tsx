@@ -115,6 +115,7 @@ function AppInner() {
   } = useStore();
 
   const [quickPrompt, setQuickPrompt] = useState('');
+  const [quickTone, setQuickTone] = useState('');
   useEffect(() => { setQuickPrompt(''); }, [composeContext?.sourceTabId, composeContext?.editorId, composeContext?.recipientEmail, composeContext?.threadId]);
 
   // --- Lifecycle ---
@@ -210,8 +211,9 @@ function AppInner() {
       composeType: composeContext.composeType,
       channelName: composeContext.channelName || undefined,
       prompt: quickPrompt || undefined,
+      tone: quickTone || undefined,
     });
-  }, [composeContext, quickPrompt, requestDraft, setError]);
+  }, [composeContext, quickPrompt, quickTone, requestDraft, setError]);
 
   const handleRewrite = useCallback(() => {
     if (!composeContext?.selectedText) return;
@@ -358,21 +360,18 @@ function AppInner() {
     );
   }
 
+  const isReplyCompose = !!composeContext?.messageToReplyTo;
+  const composeActionLabel = isReplyCompose ? 'Draft reply' : 'Draft email';
+  const composePromptPlaceholder = isReplyCompose
+    ? 'Describe the reply, or leave blank to use the conversation'
+    : 'Describe this email';
+  const recipientLabel = composeContext?.recipientName || composeContext?.recipientEmail;
+
   return (
     <div className="h-screen flex flex-col bg-brand-bg text-brand-text">
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b border-brand-border bg-brand-bg flex-shrink-0">
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setViewMode('sessions')}
-            className="w-6 h-6 flex items-center justify-center text-brand-text-3 hover:text-brand-text rounded-md hover:bg-brand-surface-2 transition-all"
-            title="Active Sessions"
-            aria-label="Active Sessions"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-            </svg>
-          </button>
           <div className="w-6 h-6 rounded-md bg-brand-accent/10 border border-brand-accent/15 flex items-center justify-center">
             <svg width="14" height="14" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
@@ -402,6 +401,17 @@ function AppInner() {
               {user.rateLimit.draftsUsedToday}/{user.rateLimit.draftsPerDay}
             </span>
           )}
+
+          <button
+            onClick={() => setViewMode('sessions')}
+            className="w-6 h-6 flex items-center justify-center text-brand-text-3 hover:text-brand-text rounded-md hover:bg-brand-surface-2 transition-all"
+            title="Active sessions"
+            aria-label="Active sessions"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          </button>
 
           {/* Sign out */}
           <button
@@ -626,10 +636,31 @@ function AppInner() {
 
         {/* Compose active -- context view needs composeContext */}
         {composeContext && viewMode === 'context' && (
-          <div className="space-y-4 animate-fade-in">
+          <div className="space-y-3 animate-fade-in">
+            <section className="rounded-lg border border-brand-accent/15 bg-brand-accent/[0.045] px-3 py-3">
+              <div className="flex items-start gap-2.5">
+                <div className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-md bg-brand-accent/10 text-brand-accent">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                  </svg>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <h2 className="text-xs font-semibold text-brand-text">{isReplyCompose ? 'Reply in your voice' : 'Draft a new email'}</h2>
+                    <span className="rounded-full border border-brand-border bg-brand-bg px-1.5 py-0.5 text-[9px] font-medium text-brand-text-3">
+                      {isReplyCompose ? 'Reply' : 'New email'}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 truncate text-[10px] text-brand-text-3">
+                    {recipientLabel ? `With context for ${recipientLabel}` : 'Add a recipient when you are ready'}
+                  </p>
+                </div>
+              </div>
+            </section>
+
             {contactContext ? (
-              <div className="space-y-2">
-                <p className="section-label">Contact</p>
+              <div className="rounded-lg border border-brand-border bg-brand-surface p-3">
                 <ContactCard
                   context={contactContext}
                   recipientName={composeContext.recipientName}
@@ -637,37 +668,30 @@ function AppInner() {
                 />
               </div>
             ) : isLoading ? (
-              <div className="flex flex-col items-center gap-3 py-10 justify-center animate-fade-in">
-                <div className="relative w-8 h-8">
+              <div className="flex items-center gap-2.5 rounded-lg border border-brand-border bg-brand-surface px-3 py-2.5 animate-fade-in">
+                <div className="relative h-4 w-4 flex-none">
                   <div className="absolute inset-0 border-2 border-brand-accent/15 rounded-full" />
                   <div className="absolute inset-0 border-2 border-brand-accent border-t-transparent rounded-full animate-spin" />
                 </div>
-                <span className="text-xs text-brand-text-3">Loading relationship context...</span>
+                <span className="text-[10px] text-brand-text-3">Loading relationship context...</span>
               </div>
             ) : (
-              <div className="text-center py-10 animate-fade-in">
-                <div className="w-10 h-10 rounded-lg bg-brand-surface-2 border border-brand-border flex items-center justify-center mx-auto mb-3">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-brand-text-3">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                    <circle cx="12" cy="7" r="4" />
-                  </svg>
-                </div>
-                <p className="text-xs text-brand-text-3">
+              <div className="flex items-center gap-2.5 rounded-lg border border-brand-border bg-brand-surface px-3 py-2.5 animate-fade-in">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="flex-none text-brand-text-3" aria-hidden="true">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+                <p className="text-[10px] text-brand-text-3">
                   {composeContext.recipientEmail
-                    ? `Looking up ${composeContext.recipientEmail}...`
-                    : 'Add a recipient to see relationship context.'}
+                    ? `No saved relationship context yet for ${composeContext.recipientEmail}.`
+                    : 'Add a recipient to personalize tone and relationship context.'}
                 </p>
               </div>
             )}
 
-            <section className="space-y-2" aria-labelledby="reply-starting-points">
-              <div>
-                <p id="reply-starting-points" className="section-label">Starting points</p>
-                <p className="mt-1 text-[10px] leading-relaxed text-brand-text-3">
-                  Choose an outcome, then edit the instruction before drafting.
-                </p>
-              </div>
-              <div className="grid grid-cols-1 gap-1.5">
+            <section className="space-y-1.5" aria-labelledby="reply-starting-points">
+              <p id="reply-starting-points" className="text-[10px] font-medium text-brand-text-3">Start with an outcome</p>
+              <div className="grid grid-cols-3 gap-1.5">
                 {[
                   ['Acknowledge', 'Acknowledge the message and confirm the next step.'],
                   ['Answer directly', 'Answer the main question directly and keep the reply brief.'],
@@ -677,31 +701,27 @@ function AppInner() {
                     key={label}
                     type="button"
                     onClick={() => setQuickPrompt(prompt)}
-                    className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition-colors ${
+                    className={`min-h-[44px] rounded-md border px-2 py-1.5 text-left text-[10px] font-medium leading-tight transition-colors ${
                       quickPrompt === prompt
                         ? 'border-brand-accent/35 bg-brand-accent/8 text-brand-accent'
                         : 'border-brand-border bg-brand-surface text-brand-text-2 hover:border-brand-border-strong hover:bg-brand-surface-2'
                     }`}
                   >
-                    <span className="text-[11px] font-medium">{label}</span>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                      <path d="M5 12h14" />
-                      <path d="m13 6 6 6-6 6" />
-                    </svg>
+                    {label}
                   </button>
                 ))}
               </div>
             </section>
 
-            <section className="space-y-2" aria-labelledby="reply-tools">
-              <p id="reply-tools" className="section-label">Tools</p>
+            <section className="space-y-1.5" aria-labelledby="reply-tools">
+              <p id="reply-tools" className="text-[10px] font-medium text-brand-text-3">More from Pranan</p>
               <div className="grid grid-cols-3 gap-1.5">
                 <button
                   type="button"
                   onClick={() => setViewMode('snippets')}
                   className="rounded-md border border-brand-border bg-brand-surface px-2 py-2 text-[10px] font-medium text-brand-text-2 hover:border-brand-border-strong hover:bg-brand-surface-2"
                 >
-                  Saved text
+                  Snippets
                 </button>
                 <button
                   type="button"
@@ -771,22 +791,34 @@ function AppInner() {
 
       {/* Bottom toolbar -- only when compose is active */}
       {composeContext && viewMode === 'context' && (
-        <footer className="px-4 py-3 border-t border-brand-border bg-brand-bg flex-shrink-0">
+        <footer className="px-4 py-3 border-t border-brand-border bg-brand-bg/95 backdrop-blur flex-shrink-0">
           <div className="mb-2.5">
             <VoicePromptField
               value={quickPrompt}
               onChange={setQuickPrompt}
               onSubmit={handleGenerateDraft}
               disabled={isDraftLoading}
+              placeholder={composePromptPlaceholder}
             />
           </div>
 
           {/* Action buttons */}
           <div className="flex items-center gap-2">
+            <select
+              value={quickTone}
+              onChange={(event) => setQuickTone(event.target.value)}
+              aria-label="Email tone"
+              className="h-[38px] max-w-[112px] flex-none rounded-md border border-brand-border bg-brand-surface px-2 text-[10px] font-medium text-brand-text-2 focus:border-brand-accent/40 focus:outline-none"
+            >
+              <option value="">Match my voice</option>
+              <option value="warm">Warm</option>
+              <option value="direct">Direct</option>
+              <option value="formal">Formal</option>
+            </select>
             <button
               onClick={handleGenerateDraft}
               disabled={isDraftLoading}
-              className="btn-accent flex-1 text-xs py-2.5 px-3 flex items-center justify-center gap-1.5"
+              className="btn-accent flex-1 min-h-[38px] text-xs py-2.5 px-3 flex items-center justify-center gap-1.5"
             >
               {isDraftLoading ? (
                 <>
@@ -799,7 +831,7 @@ function AppInner() {
                     <path d="M12 20h9" />
                     <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
                   </svg>
-                  Draft reply
+                  {composeActionLabel}
                 </>
               )}
             </button>
@@ -836,4 +868,3 @@ export default function App() {
     </ErrorBoundary>
   );
 }
-

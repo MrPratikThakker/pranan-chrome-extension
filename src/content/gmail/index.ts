@@ -255,6 +255,8 @@ function injectDraft(composeWindow: Element, draftText: string): boolean {
 
 const PRANAN_FLOAT_ATTR = 'data-pranan-float';
 const PRANAN_BAR_ATTR = 'data-pranan-bar';
+const PRANAN_COMPOSE_RAIL_ATTR = 'data-pranan-compose-rail';
+const PRANAN_COMPOSE_RAIL_DISMISSED_ATTR = 'data-pranan-compose-rail-dismissed';
 
 function injectComposeButtons(composeWindow: Element) {
   const recipients = extractRecipients(composeWindow);
@@ -269,7 +271,10 @@ function injectComposeButtons(composeWindow: Element) {
   } catch { /* sandbox */ }
 
   const anchor = injectFloatingIcon(composeWindow, recipientEmail);
-  if (anchor) activeInlineGenerate = () => openComposePopover(anchor, composeWindow);
+  if (anchor) {
+    injectAutomaticComposeRail(composeWindow, anchor);
+    activeInlineGenerate = () => openComposePopover(anchor, composeWindow);
+  }
 }
 
 /**
@@ -1440,13 +1445,196 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
   });
 }
 
+/**
+ * A quiet, always-visible entry point inside Gmail's compose surface.
+ *
+ * The toolbar icon remains as a durable fallback, while this rail makes the
+ * main action discoverable without covering the editor or asking the user to
+ * learn another icon. It lives in normal document flow directly above Gmail's
+ * footer, so Send and the message body remain reachable at every window size.
+ */
+function injectAutomaticComposeRail(composeWindow: Element, anchorHost: HTMLElement) {
+  if (composeWindow.hasAttribute(PRANAN_COMPOSE_RAIL_DISMISSED_ATTR)) return;
+  if (composeWindow.querySelector(`[${PRANAN_COMPOSE_RAIL_ATTR}]`)) return;
+
+  const editableBody = composeWindow.querySelector<HTMLElement>(
+    '[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]'
+  );
+  const sendButton = findOne<HTMLElement>('gmail.sendButton', SELECTORS.gmail.sendButton, composeWindow);
+  const toolbarRow = sendButton?.closest('.btC') as HTMLElement | null;
+  const footer = (toolbarRow?.closest('.aDj, .aDh') || sendButton?.closest('.aDj, .aDh')) as HTMLElement | null;
+  const insertionParent = footer?.parentElement;
+  if (!editableBody || !footer || !insertionParent) return;
+
+  const host = document.createElement('div');
+  host.setAttribute(PRANAN_COMPOSE_RAIL_ATTR, 'true');
+  host.style.cssText = 'box-sizing:border-box;width:100%;padding:4px 12px 1px;flex:none;';
+  const shadow = host.attachShadow({ mode: 'open' });
+  shadow.innerHTML = `
+    <style>
+      * { box-sizing: border-box; }
+      .rail {
+        height: 34px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 5px 0 9px;
+        border: 1px solid #e3e6ea;
+        border-radius: 10px;
+        background: #fff;
+        color: #3c4043;
+        box-shadow: 0 1px 2px rgba(60,64,67,.06);
+        font: 13px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        transition: border-color .15s, box-shadow .15s, background .15s;
+      }
+      .rail:focus-within { border-color: #a78bfa; box-shadow: 0 0 0 3px rgba(124,58,237,.08); }
+      .mark { width:18px; height:18px; flex:none; color:#6d28d9; }
+      input {
+        min-width: 0;
+        flex: 1;
+        height: 30px;
+        padding: 0;
+        border: 0;
+        outline: 0;
+        color: #202124;
+        background: transparent;
+        font: inherit;
+      }
+      input::placeholder { color:#6b7280; opacity:1; }
+      button {
+        width: 27px;
+        height: 27px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: none;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        color: #5f6368;
+        background: transparent;
+        cursor: pointer;
+      }
+      button:hover { color:#5b21b6; background:#f5f3ff; }
+      button:focus-visible, input:focus-visible { outline:2px solid #7c3aed; outline-offset:1px; }
+      .go { color:#fff; background:#6d28d9; }
+      .go:hover { color:#fff; background:#5b21b6; }
+      .dismiss { width:22px; color:#9aa0a6; }
+      svg { pointer-events:none; }
+      @media (prefers-color-scheme: dark) {
+        .rail { background:#292a2d; border-color:#4b5563; color:#f3f4f6; }
+        input { color:#f3f4f6; }
+        input::placeholder { color:#cbd5e1; }
+        button { color:#cbd5e1; }
+        .mark { color:#a78bfa; }
+        .go { color:#fff; background:#7c3aed; }
+      }
+      .rail[data-theme="dark"] { background:#292a2d; border-color:#4b5563; color:#f3f4f6; }
+      .rail[data-theme="dark"] input { color:#f3f4f6; }
+      .rail[data-theme="dark"] input::placeholder { color:#cbd5e1; }
+      .rail[data-theme="dark"] button { color:#cbd5e1; }
+      .rail[data-theme="dark"] .mark { color:#a78bfa; }
+      .rail[data-theme="dark"] .go { color:#fff; background:#7c3aed; }
+    </style>
+    <div class="rail" role="group" aria-label="Pranan email assistant">
+      <svg class="mark" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+        <circle cx="60" cy="60" r="33" stroke="currentColor" stroke-width="9"/><circle cx="60" cy="60" r="17" fill="currentColor"/>
+      </svg>
+      <input aria-label="Describe this email to Pranan" autocomplete="off" />
+      <button class="voice" type="button" aria-label="Draft with voice" title="Draft with voice">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <button class="go" type="button" aria-label="Draft with Pranan" title="Draft with Pranan">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="dismiss" type="button" aria-label="Hide Pranan prompt" title="Hide for this email">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  `;
+
+  const input = shadow.querySelector<HTMLInputElement>('input')!;
+  const rail = shadow.querySelector<HTMLElement>('.rail')!;
+  const syncTheme = () => {
+    const isDark = composeUsesDarkTheme(composeWindow);
+    const theme = isDark ? 'dark' : 'light';
+    host.setAttribute('data-theme', theme);
+    rail.setAttribute('data-theme', theme);
+    rail.style.backgroundColor = isDark ? '#292a2d' : '#ffffff';
+    rail.style.borderColor = isDark ? '#4b5563' : '#e3e6ea';
+    rail.style.color = isDark ? '#f3f4f6' : '#3c4043';
+    input.style.color = isDark ? '#f3f4f6' : '#202124';
+  };
+  syncTheme();
+  const contextMode = () => {
+    const draft = readGmailComposeText(editableBody).trim();
+    if (draft) return 'Improve this draft';
+    if (getThreadContext(composeWindow)) return 'Reply in your voice';
+    return 'Describe this email';
+  };
+  const refreshPrompt = () => {
+    const label = contextMode();
+    input.placeholder = label;
+    input.setAttribute('aria-label', `${label} with Pranan`);
+  };
+  refreshPrompt();
+
+  const openExpanded = (options: ComposePopoverOptions = {}) => {
+    openComposePopover(anchorHost, composeWindow, { initialPrompt: input.value.trim(), ...options });
+  };
+  const submit = () => {
+    const canDraft = input.value.trim() || readGmailComposeText(editableBody).trim() || getThreadContext(composeWindow);
+    openExpanded({ autoSubmit: !!canDraft });
+  };
+
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      submit();
+    }
+  });
+  shadow.querySelector('.go')!.addEventListener('click', submit);
+  shadow.querySelector('.voice')!.addEventListener('click', () => openExpanded({ startVoice: true }));
+  shadow.querySelector('.dismiss')!.addEventListener('click', () => {
+    composeWindow.setAttribute(PRANAN_COMPOSE_RAIL_DISMISSED_ATTR, 'true');
+    host.remove();
+    anchorHost.shadowRoot?.querySelector<HTMLElement>('button')?.focus();
+  });
+  editableBody.addEventListener('input', refreshPrompt);
+  insertionParent.insertBefore(host, footer);
+  const themeObserver = new MutationObserver(() => {
+    if (!host.isConnected) { themeObserver.disconnect(); return; }
+    syncTheme();
+  });
+  themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
+}
+
+function composeUsesDarkTheme(composeWindow: Element): boolean {
+  const candidates = [composeWindow, composeWindow.closest('[role="dialog"], .M9, .ip.iq'), document.body];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const color = window.getComputedStyle(candidate).backgroundColor;
+    const match = color.match(/rgba?\((\d+)[, ]+(\d+)[, ]+(\d+)(?:[, /]+([\d.]+))?/i);
+    if (!match || (match[4] !== undefined && Number(match[4]) < 0.5)) continue;
+    const [, red, green, blue] = match.map(Number);
+    return (0.2126 * red + 0.7152 * green + 0.0722 * blue) < 128;
+  }
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+}
+
 // ---------------------------------------------------------------------------
 // v0.7 Surface B: Compose-toolbar pop-over with proactive suggestions
 // ---------------------------------------------------------------------------
 
 const POPOVER_ID = 'pranan-compose-popover';
 
-function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) {
+interface ComposePopoverOptions {
+  initialPrompt?: string;
+  autoSubmit?: boolean;
+  startVoice?: boolean;
+}
+
+function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, options: ComposePopoverOptions = {}) {
   const composeWindow = resolveLiveCompose(
     anchorHost,
     capturedCompose,
@@ -1456,7 +1644,16 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
 
   const existing = document.getElementById(POPOVER_ID);
   if (existing) {
-    existing.remove();
+    const plainToolbarToggle = options.initialPrompt === undefined && !options.autoSubmit && !options.startVoice;
+    if (plainToolbarToggle) {
+      existing.remove();
+      return;
+    }
+    const existingPrompt = existing.querySelector<HTMLTextAreaElement>('[data-pranan-prompt]');
+    if (options.initialPrompt && existingPrompt) existingPrompt.value = options.initialPrompt;
+    if (options.startVoice) existing.querySelector<HTMLButtonElement>('[data-pranan-voice]')?.click();
+    else if (options.autoSubmit) existing.querySelector<HTMLButtonElement>('[data-pranan-generate]')?.click();
+    else existingPrompt?.focus();
     return;
   }
   if (!composeWindow) return;
@@ -1474,6 +1671,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
 
   const popover = document.createElement('div');
   popover.id = POPOVER_ID;
+  popover.setAttribute('data-theme', composeUsesDarkTheme(composeWindow) ? 'dark' : 'light');
   popover.setAttribute('role', 'dialog');
   popover.setAttribute('aria-label', 'Draft with Pranan');
   popover.style.cssText = `
@@ -1519,6 +1717,11 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
         #${POPOVER_ID} [data-pranan-icon-button] { color:#cbd5e1; }
         #${POPOVER_ID} [data-pranan-meta] { color:#cbd5e1!important; }
       }
+      #${POPOVER_ID}[data-theme="dark"] { background:#202124!important; color:#f3f4f6!important; border-color:#4b5563!important; }
+      #${POPOVER_ID}[data-theme="dark"] [data-pranan-prompt-wrap] { background:#292a2d!important; border-color:#4b5563!important; }
+      #${POPOVER_ID}[data-theme="dark"] textarea, #${POPOVER_ID}[data-theme="dark"] select { color:#f3f4f6!important; background:transparent!important; }
+      #${POPOVER_ID}[data-theme="dark"] [data-pranan-icon-button] { color:#cbd5e1; }
+      #${POPOVER_ID}[data-theme="dark"] [data-pranan-meta] { color:#cbd5e1!important; }
     </style>
     <div style="height:44px;box-sizing:border-box;padding:6px 8px 4px 12px;display:flex;align-items:center;gap:9px;">
       <span style="width:24px;height:24px;border-radius:7px;background:#f5f3ff;display:inline-flex;align-items:center;justify-content:center;flex:none;">
@@ -1565,6 +1768,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
   const toneSelect = popover.querySelector<HTMLSelectElement>('[data-pranan-tone]')!;
   const status = popover.querySelector<HTMLElement>('[data-pranan-status]')!;
   const suggestions = popover.querySelector<HTMLElement>('[data-pranan-suggestions]')!;
+  if (options.initialPrompt) promptEl.value = options.initialPrompt;
 
   promptEl.addEventListener('focus', () => {
     promptWrap.style.borderColor = '#a78bfa';
@@ -1666,7 +1870,12 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
   const popoverResult = (message: { type: string; payload?: { requestId?: string; message?: string } }) => {
     if (!popoverRequest || message.payload?.requestId !== popoverRequest) return;
     if (message.type === 'DRAFT_SKIPPED') finishPopover(message.payload.message || 'Drafting failed. Your instructions are preserved.');
-    else if (message.type === 'INSERT_DRAFT') { popoverRequest = null; closePopover(); }
+    else if (message.type === 'INSERT_DRAFT') {
+      popoverRequest = null;
+      const railInput = composeWindow.querySelector<HTMLElement>(`[${PRANAN_COMPOSE_RAIL_ATTR}]`)?.shadowRoot?.querySelector<HTMLInputElement>('input');
+      if (railInput) railInput.value = '';
+      closePopover();
+    }
   };
   const popoverChanged = (event: Event) => {
     if ((event as CustomEvent).detail?.requestId === popoverRequest) finishPopover('Your draft or recipients changed. Your text was kept. Review your instructions and try again.');
@@ -1767,7 +1976,11 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
     }).catch(() => {});
   }
 
-  requestAnimationFrame(() => promptEl.focus());
+  requestAnimationFrame(() => {
+    if (options.startVoice) voiceBtn.click();
+    else if (options.autoSubmit) generateBtn.click();
+    else promptEl.focus();
+  });
 }
 
 function escapeText(s: string): string {
@@ -2251,6 +2464,7 @@ function onComposeClosed(composeWindow: Element) {
   // Clean up floating button
   const floats = composeWindow.querySelectorAll(`[${PRANAN_FLOAT_ATTR}]`);
   floats.forEach(f => f.remove());
+  composeWindow.querySelectorAll(`[${PRANAN_COMPOSE_RAIL_ATTR}]`).forEach(rail => rail.remove());
   // Also check parent containers
   const bodyContainer = findOne('gmail.composeBodyContainer', SELECTORS.gmail.composeBodyContainer, composeWindow);
   if (bodyContainer) {

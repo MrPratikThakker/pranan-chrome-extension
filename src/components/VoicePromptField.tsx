@@ -10,9 +10,10 @@ interface Props {
   onChange(value: string): void;
   onSubmit(): void;
   disabled?: boolean;
+  placeholder?: string;
 }
 
-export function VoicePromptField({ value, onChange, onSubmit, disabled = false }: Props) {
+export function VoicePromptField({ value, onChange, onSubmit, disabled = false, placeholder = 'Describe what this message should accomplish' }: Props) {
   const [mode, setMode] = useState<VoiceMode>('idle');
   const [status, setStatus] = useState<string | null>(null);
   const valueRef = useRef(value);
@@ -100,9 +101,11 @@ export function VoicePromptField({ value, onChange, onSubmit, disabled = false }
 
   return (
     <div className="space-y-1.5">
-      <div className="flex items-stretch gap-2">
+      <div className={`rounded-lg border bg-brand-surface transition-all focus-within:border-brand-accent/40 focus-within:bg-brand-surface-2 focus-within:ring-2 focus-within:ring-brand-accent/10 ${
+        voiceActive ? 'border-brand-accent/40' : 'border-brand-border'
+      }`}>
         <textarea
-          rows={2}
+          rows={3}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
@@ -112,23 +115,30 @@ export function VoicePromptField({ value, onChange, onSubmit, disabled = false }
             }
           }}
           aria-label="Instructions for Pranan"
-          placeholder="Tell Pranan what the reply should accomplish"
-          className="min-h-[46px] min-w-0 flex-1 resize-none text-xs leading-[17px] px-3 py-1.5 rounded-md border border-brand-border bg-brand-surface text-brand-text placeholder:text-brand-text-3/60 focus:outline-none focus:border-brand-accent/40 focus:bg-brand-surface-2 transition-all"
+          placeholder={placeholder}
+          className="block min-h-[68px] w-full resize-none border-0 bg-transparent px-3 pt-2.5 pb-1 text-xs leading-[18px] text-brand-text placeholder:text-brand-text-3/60 focus:outline-none"
         />
-        <button
-          type="button"
-          onClick={() => { void toggleVoice(); }}
-          disabled={disabled || mode === 'starting' || mode === 'transcribing'}
-          aria-label={voiceActive ? 'Stop voice input' : 'Dictate Pranan instructions'}
-          aria-pressed={voiceActive}
-          className={`min-h-[46px] flex-none rounded-md border px-2.5 text-[11px] font-medium transition-colors ${
-            voiceActive
-              ? 'border-brand-accent/40 bg-brand-accent/10 text-brand-accent'
-              : 'border-brand-border bg-brand-surface text-brand-text-2 hover:border-brand-border-strong hover:text-brand-text'
-          } disabled:cursor-not-allowed disabled:opacity-50`}
-        >
-          {voiceLabel}
-        </button>
+        <div className="flex items-center justify-between gap-2 px-2 pb-2">
+          <button
+            type="button"
+            onClick={() => { void toggleVoice(); }}
+            disabled={disabled || mode === 'starting' || mode === 'transcribing'}
+            aria-label={voiceActive ? 'Stop voice input' : 'Dictate Pranan instructions'}
+            aria-pressed={voiceActive}
+            className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[10px] font-medium transition-colors ${
+              voiceActive
+                ? 'bg-brand-accent/10 text-brand-accent'
+                : 'text-brand-text-3 hover:bg-brand-surface-3 hover:text-brand-text'
+            } disabled:cursor-not-allowed disabled:opacity-50`}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+            {voiceLabel}
+          </button>
+          <span className="text-[9px] text-brand-text-3/60">Enter to draft</span>
+        </div>
       </div>
       {status && (
         <p role="status" aria-live="polite" className="px-0.5 text-[10px] leading-relaxed text-brand-text-3">

@@ -77,7 +77,7 @@ export function ContactCard({ context, recipientName, recipientEmail }: Props) {
       {/* Communication DNA */}
       {context.communicationDNA && (
         <div className="glass-card p-3">
-          <h4 className="section-label mb-2.5" style={{ fontSize: '9px' }}>Communication Style</h4>
+          <h4 className="mb-2.5 text-[10px] font-semibold text-brand-text-2">Communication style</h4>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
             <div className="flex items-center justify-between">
               <span className="text-brand-text-3">Formality</span>
@@ -105,7 +105,7 @@ export function ContactCard({ context, recipientName, recipientEmail }: Props) {
       {/* Recent Topics */}
       {context.recentTopics.length > 0 && (
         <div>
-          <h4 className="section-label mb-2" style={{ fontSize: '9px' }}>Topics</h4>
+          <h4 className="mb-2 text-[10px] font-semibold text-brand-text-2">Recent topics</h4>
           <div className="flex flex-wrap gap-1.5">
             {context.recentTopics.slice(0, 6).map((topic, i) => (
               <span
@@ -122,7 +122,7 @@ export function ContactCard({ context, recipientName, recipientEmail }: Props) {
       {/* Key Memories */}
       {context.memories.length > 0 && (
         <div>
-          <h4 className="section-label mb-2" style={{ fontSize: '9px' }}>Context</h4>
+          <h4 className="mb-2 text-[10px] font-semibold text-brand-text-2">Useful context</h4>
           <div className="space-y-1.5">
             {context.memories.slice(0, 4).map((memory, i) => (
               <div key={i} className="text-[11px] text-brand-text-2 flex items-start gap-2 leading-relaxed">
