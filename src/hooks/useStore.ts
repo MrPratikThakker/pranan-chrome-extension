@@ -50,7 +50,7 @@ interface Actions {
   setAuth: (user: AuthResponse | null, token?: string) => void;
   checkAuth: () => Promise<void>;
   hydrateAuthHint: () => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 
   // Context
   setPlatform: (platform: Platform) => void;
@@ -181,8 +181,12 @@ export const useStore = create<AppState & Actions>((set, get) => ({
     }
   },
 
-  logout: () => {
-    chrome.storage.local.remove(['authToken', 'lastKnownAuthValid']);
+  logout: async () => {
+    try {
+      const { revokeActiveSession } = await import('@/lib/api-client');
+      await revokeActiveSession('current');
+    } catch { /* local token deletion is the final safety boundary */ }
+    await chrome.storage.local.remove(['authToken', 'refreshToken', 'lastKnownAuthValid']);
     set({
       isAuthenticated: false,
       isAuthChecked: true,
@@ -697,7 +701,5 @@ export const useStore = create<AppState & Actions>((set, get) => ({
     chrome.storage.local.set({ interactionCount: count });
   },
 }));
-
-
 
 
