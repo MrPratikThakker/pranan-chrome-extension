@@ -19,6 +19,7 @@ import { BriefingPanel } from '@/components/BriefingPanel';
 import { NudgesPanel } from '@/components/NudgesPanel';
 import { SnippetsPanel } from '@/components/SnippetsPanel';
 import { SessionsPanel } from '@/components/SessionsPanel';
+import { VoicePromptField } from '@/components/VoicePromptField';
 import { dismissNudge, draftFromNudge } from '@/lib/api-client';
 import type { ExtensionMessage, Platform, MeetingBriefing } from '@/types';
 import { APP_ORIGIN, appUrl } from '@/lib/config';
@@ -625,13 +626,16 @@ function AppInner() {
 
         {/* Compose active -- context view needs composeContext */}
         {composeContext && viewMode === 'context' && (
-          <>
+          <div className="space-y-4 animate-fade-in">
             {contactContext ? (
-              <ContactCard
-                context={contactContext}
-                recipientName={composeContext.recipientName}
-                recipientEmail={composeContext.recipientEmail}
-              />
+              <div className="space-y-2">
+                <p className="section-label">Contact</p>
+                <ContactCard
+                  context={contactContext}
+                  recipientName={composeContext.recipientName}
+                  recipientEmail={composeContext.recipientEmail}
+                />
+              </div>
             ) : isLoading ? (
               <div className="flex flex-col items-center gap-3 py-10 justify-center animate-fade-in">
                 <div className="relative w-8 h-8">
@@ -655,7 +659,67 @@ function AppInner() {
                 </p>
               </div>
             )}
-          </>
+
+            <section className="space-y-2" aria-labelledby="reply-starting-points">
+              <div>
+                <p id="reply-starting-points" className="section-label">Starting points</p>
+                <p className="mt-1 text-[10px] leading-relaxed text-brand-text-3">
+                  Choose an outcome, then edit the instruction before drafting.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-1.5">
+                {[
+                  ['Acknowledge', 'Acknowledge the message and confirm the next step.'],
+                  ['Answer directly', 'Answer the main question directly and keep the reply brief.'],
+                  ['Clarify', 'Ask one clear follow-up question before committing to anything.'],
+                ].map(([label, prompt]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setQuickPrompt(prompt)}
+                    className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition-colors ${
+                      quickPrompt === prompt
+                        ? 'border-brand-accent/35 bg-brand-accent/8 text-brand-accent'
+                        : 'border-brand-border bg-brand-surface text-brand-text-2 hover:border-brand-border-strong hover:bg-brand-surface-2'
+                    }`}
+                  >
+                    <span className="text-[11px] font-medium">{label}</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M5 12h14" />
+                      <path d="m13 6 6 6-6 6" />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="space-y-2" aria-labelledby="reply-tools">
+              <p id="reply-tools" className="section-label">Tools</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('snippets')}
+                  className="rounded-md border border-brand-border bg-brand-surface px-2 py-2 text-[10px] font-medium text-brand-text-2 hover:border-brand-border-strong hover:bg-brand-surface-2"
+                >
+                  Saved text
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('nudges')}
+                  className="rounded-md border border-brand-border bg-brand-surface px-2 py-2 text-[10px] font-medium text-brand-text-2 hover:border-brand-border-strong hover:bg-brand-surface-2"
+                >
+                  Follow-ups
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('briefing')}
+                  className="rounded-md border border-brand-border bg-brand-surface px-2 py-2 text-[10px] font-medium text-brand-text-2 hover:border-brand-border-strong hover:bg-brand-surface-2"
+                >
+                  Briefings
+                </button>
+              </div>
+            </section>
+          </div>
         )}
 
         {/* Draft/Rewrite/Grammar views render independently of composeContext
@@ -708,24 +772,13 @@ function AppInner() {
       {/* Bottom toolbar -- only when compose is active */}
       {composeContext && viewMode === 'context' && (
         <footer className="px-4 py-3 border-t border-brand-border bg-brand-bg flex-shrink-0">
-          {/* Quick prompt input */}
-          <div className="flex items-center gap-2 mb-2.5">
-            <div className="flex-1 relative">
-              <input
-                type="text"
-                value={quickPrompt}
-                onChange={(e) => setQuickPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleGenerateDraft();
-                  }
-                }}
-                aria-label="Instructions for Pranan"
-                placeholder="What should this say? (optional)"
-                className="w-full text-xs px-3 py-2.5 rounded-md border border-brand-border bg-brand-surface text-brand-text placeholder:text-brand-text-3/50 focus:outline-none focus:border-brand-accent/40 focus:bg-brand-surface-2 transition-all"
-              />
-            </div>
+          <div className="mb-2.5">
+            <VoicePromptField
+              value={quickPrompt}
+              onChange={setQuickPrompt}
+              onSubmit={handleGenerateDraft}
+              disabled={isDraftLoading}
+            />
           </div>
 
           {/* Action buttons */}
@@ -783,5 +836,4 @@ export default function App() {
     </ErrorBoundary>
   );
 }
-
 
