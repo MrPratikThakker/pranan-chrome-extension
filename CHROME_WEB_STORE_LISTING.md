@@ -1,6 +1,6 @@
-# Chrome Web Store listing: Pranan 0.8.66
+# Chrome Web Store listing: Pranan 0.8.67
 
-Use this file as the source of truth for the Chrome Web Store dashboard. The copy and assets describe the current extension behavior and match manifest version `0.8.66`.
+Use this file as the source of truth for the Chrome Web Store dashboard. The copy and assets describe the current extension behavior and match manifest version `0.8.67`.
 
 ## Product details
 
@@ -22,7 +22,7 @@ Use this file as the source of truth for the Chrome Web Store dashboard. The cop
 
 ## Detailed description
 
-> Pranan helps you write context-aware replies in your voice, directly inside Gmail.
+> Pranan is your digital twin for email. It writes context-aware replies in your voice, directly inside Gmail.
 >
 > The compact Pranan prompt appears when you open a Gmail compose window. Describe the outcome, speak your instruction, or leave the field blank to use the conversation. Press Enter and Pranan prepares a reply. If you have already started writing, the prompt changes to help you improve the draft.
 >
@@ -45,30 +45,30 @@ Use this file as the source of truth for the Chrome Web Store dashboard. The cop
 
 Upload these five localized screenshots in this order. Each file is 1280×800 PNG and uses square, full-bleed edges.
 
-1. `store-assets/v0.8.66/01-reply-in-your-voice.png`
+1. `store-assets/v0.8.67/01-reply-in-your-voice.png`
    Caption: **Reply in your voice, right where you write**
-2. `store-assets/v0.8.66/02-voice-input.png`
+2. `store-assets/v0.8.67/02-voice-input.png`
    Caption: **Speak the outcome and let Pranan draft the reply**
-3. `store-assets/v0.8.66/03-relationship-context.png`
+3. `store-assets/v0.8.67/03-relationship-context.png`
    Caption: **See relationship context before you respond**
-4. `store-assets/v0.8.66/04-outcome-shortcuts.png`
+4. `store-assets/v0.8.67/04-outcome-shortcuts.png`
    Caption: **Acknowledge, answer directly, or clarify in one click**
-5. `store-assets/v0.8.66/05-improve-draft.png`
+5. `store-assets/v0.8.67/05-improve-draft.png`
    Caption: **Improve an existing draft without losing your voice**
 
-The screenshots are high-fidelity product illustrations based on the shipped 0.8.66 interface. They use fictional recipient information and demonstrate supported product states.
+The screenshots are high-fidelity product illustrations based on the shipped 0.8.67 interface. They use fictional recipient information and demonstrate supported product states.
 
 ## Promotional images
 
 **Small promo tile, required**
 
-> `store-assets/v0.8.66/promo-small-440x280.png`
+> `store-assets/v0.8.67/promo-small-440x280.png`
 
 **Marquee promo image, optional**
 
-> `store-assets/v0.8.66/promo-marquee-1400x560.png`
+> `store-assets/v0.8.67/promo-marquee-1400x560.png`
 
-The promotional artwork uses an AI-generated abstract background with deterministic Pranan branding and product UI layered on top. It contains no third-party marks or user data.
+The promotional artwork uses Pranan's canonical logo, Instrument Serif, Inter, JetBrains Mono, twilight palette, and current product UI. It contains no third-party marks or user data.
 
 ## Store icon
 
@@ -78,7 +78,7 @@ The existing icon is 128×128 PNG. Its visible artwork is contained inside the r
 
 ## Single-purpose statement
 
-> Pranan is an AI communication assistant that helps users draft and improve context-aware messages in their own voice.
+> Pranan is a digital twin for email that helps users draft and improve context-aware messages in their own voice.
 
 ## Permission justifications
 
@@ -132,7 +132,7 @@ The existing icon is 128×128 PNG. Its visible artwork is contained inside the r
 
 ## Publishing checklist
 
-- [x] Manifest and package version are 0.8.66
+- [x] Manifest and package version are 0.8.67
 - [x] Store icon is present at 128×128
 - [x] Five current screenshots are prepared at 1280×800
 - [x] Small promo tile is prepared at 440×280
