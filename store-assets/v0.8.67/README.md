@@ -1,4 +1,4 @@
-# Pranan Chrome Web Store assets, version 0.8.66
+# Pranan Chrome Web Store assets, version 0.8.67
 
 This folder contains the complete graphic set for the Chrome Web Store listing.
 
@@ -11,9 +11,10 @@ This folder contains the complete graphic set for the Chrome Web Store listing.
 | `05-improve-draft.png` | 1280×800 | Draft improvement screenshot |
 | `promo-small-440x280.png` | 440×280 | Required small promo tile |
 | `promo-marquee-1400x560.png` | 1400×560 | Optional marquee promo image |
-| `source/pranan-brand-background.png` | 1984×793 | Generated source artwork |
+| `source/logo-full.svg` | SVG | Canonical Pranan logo |
+| `source/*.woff2` | WOFF2 | Canonical Instrument Serif, Inter, and JetBrains Mono fonts |
 
-The five screenshots are high-fidelity product illustrations based on the shipped 0.8.66 Gmail and side-panel UI. They use fictional data and supported states. The two promotional images combine generated abstract artwork with deterministic Pranan typography and product UI.
+The five screenshots are high-fidelity product illustrations based on the shipped 0.8.67 Gmail and side-panel UI. They use fictional data and supported states. Every asset is generated deterministically from Pranan's canonical logo, typography, twilight palette, and product geometry.
 
 Regenerate every final PNG from the repository root with:
 

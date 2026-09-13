@@ -1787,7 +1787,13 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
     toneSelect.addEventListener('change', () => { chrome.storage.local.set({ [toneKey]: toneSelect.value }).catch(() => {}); });
   } catch { /* fixture */ }
 
-  const closePopover = () => popover.remove();
+  let stopActiveVoice = () => {};
+  const closePopover = () => {
+    stopActiveVoice();
+    popover.remove();
+    document.removeEventListener('mousedown', outsideClick);
+    document.removeEventListener('keydown', escListener);
+  };
   popover.querySelector('[data-pranan-close]')!.addEventListener('click', closePopover);
   popover.querySelector('[data-pranan-side-panel]')!.addEventListener('click', () => {
     safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
@@ -1820,6 +1826,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
     activeVoice = null;
     voiceStarting = false;
     voiceBtn.disabled = false;
+    voiceBtn.setAttribute('aria-label', 'Dictate instructions');
     voiceBtn.setAttribute('aria-pressed', 'false');
     voiceBtn.title = 'Dictate instructions';
     generateBtn.disabled = false;
@@ -1829,13 +1836,13 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
     promptEl.dispatchEvent(new Event('input', { bubbles: true }));
   };
   const speech = createSpeechInput({
-    onStart: () => { activeVoice = 'speech'; voiceBtn.setAttribute('aria-pressed', 'true'); voiceBtn.title = 'Stop listening'; generateBtn.disabled = true; showStatus('Listening. Select the microphone again to stop.'); },
+    onStart: () => { activeVoice = 'speech'; voiceBtn.disabled = false; voiceBtn.setAttribute('aria-label', 'Stop voice input'); voiceBtn.setAttribute('aria-pressed', 'true'); voiceBtn.title = 'Stop listening'; generateBtn.disabled = true; showStatus('Listening. Select the microphone again to stop.'); },
     onTranscript: applyVoiceTranscript,
     onError: message => showStatus(message, true),
     onEnd: setVoiceIdle,
   });
   const recordedSpeech = createRecordedSpeechInput({
-    onStart: () => { activeVoice = 'recording'; voiceBtn.setAttribute('aria-pressed', 'true'); voiceBtn.title = 'Stop listening'; generateBtn.disabled = true; showStatus('Listening. Select the microphone again to stop.'); },
+    onStart: () => { activeVoice = 'recording'; voiceBtn.disabled = false; voiceBtn.setAttribute('aria-label', 'Stop voice input'); voiceBtn.setAttribute('aria-pressed', 'true'); voiceBtn.title = 'Stop listening'; generateBtn.disabled = true; showStatus('Listening. Select the microphone again to stop.'); },
     onAudio: async audio => {
       activeVoice = 'transcribing';
       voiceBtn.disabled = true;
@@ -1845,6 +1852,10 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
     onError: message => showStatus(message, true),
     onEnd: setVoiceIdle,
   });
+  stopActiveVoice = () => {
+    if (activeVoice === 'speech') speech.stop();
+    else if (activeVoice === 'recording') recordedSpeech.stop();
+  };
   voiceBtn.addEventListener('click', async () => {
     if (activeVoice === 'speech') { speech.stop(); return; }
     if (activeVoice === 'recording') { recordedSpeech.stop(); return; }
