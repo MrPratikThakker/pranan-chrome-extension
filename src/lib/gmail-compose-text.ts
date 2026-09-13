@@ -17,7 +17,7 @@ export function readGmailComposeText(body: HTMLElement | null): string {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
     if (!(node instanceof HTMLElement)) return '';
     if (['SCRIPT', 'STYLE'].includes(node.tagName) || node.hidden || node.getAttribute('aria-hidden') === 'true') return '';
-    if (node.matches('.gmail_signature, [data-smartmail="gmail_signature"]')) return '';
+    if (node.matches('.gmail_signature, .gmail_signature_prefix, [data-smartmail="gmail_signature"]')) return '';
     if (node.tagName === 'BR') return '\n';
     let text = '';
     for (const child of Array.from(node.childNodes)) {

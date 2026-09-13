@@ -247,27 +247,29 @@ function injectDraft(composeWindow: Element, draftText: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 1: Inline Button Injection
-// Injects a prompt bar above the compose window (like Voila) and also a
-// small floating icon inside the compose body (like Grammarly).
+// Phase 1: Native compose action
+// Pranan lives beside Gmail's own compose tools. The older full-width bar is
+// available only as an explicit fallback because it duplicated the toolbar
+// action and visually competed with Gmail and other installed extensions.
 // ---------------------------------------------------------------------------
 
 const PRANAN_FLOAT_ATTR = 'data-pranan-float';
 const PRANAN_BAR_ATTR = 'data-pranan-bar';
 
-/**
- * Injects the Pranan prompt bar above the compose window (Voila-style)
- * and a small icon inside the compose body (Grammarly-style).
- */
 function injectComposeButtons(composeWindow: Element) {
   const recipients = extractRecipients(composeWindow);
   const recipientEmail = recipients[0] || null;
 
-  // --- 1. Prompt bar above compose (Voila position) ---
-  injectPromptBar(composeWindow, recipientEmail);
+  // Keep the old surface available for targeted diagnostics without making it
+  // the default product experience.
+  try {
+    if (window.localStorage.getItem('PRANAN_LEGACY_COMPOSE_BAR') === '1') {
+      injectPromptBar(composeWindow, recipientEmail);
+    }
+  } catch { /* sandbox */ }
 
-  // --- 2. Small floating icon in compose body (Grammarly position) ---
-  injectFloatingIcon(composeWindow, recipientEmail);
+  const anchor = injectFloatingIcon(composeWindow, recipientEmail);
+  if (anchor) activeInlineGenerate = () => openComposePopover(anchor, composeWindow);
 }
 
 /**
@@ -1312,7 +1314,7 @@ function injectPromptBarLegacy(composeContainer: Element, composeWindow: Element
     () => resolveLiveCompose(bar, composeWindow, SELECTORS.gmail.composeBody.join(', '), SELECTORS.gmail.composeWindow.join(', ')) || composeWindow,
   );
 }
-function injectFloatingIcon(composeWindow: Element, recipientEmail: string | null) {
+function injectFloatingIcon(composeWindow: Element, recipientEmail: string | null): HTMLElement | null {
   // Find Gmail's send toolbar (.btC) — the bottom row with Send + Aa + emoji + attach.
   // Place the Pranan icon RIGHT AFTER the Send button, where Voila / Loom inject.
   const sendButton = findOne<HTMLElement>('gmail.sendButton', SELECTORS.gmail.sendButton, composeWindow);
@@ -1323,10 +1325,11 @@ function injectFloatingIcon(composeWindow: Element, recipientEmail: string | nul
     const composeBody = composeWindow.querySelector(
       '[contenteditable="true"][aria-label="Message Body"], .Am.aiL [contenteditable="true"]'
     ) as HTMLElement | null;
-    if (!composeBody) return;
+    if (!composeBody) return null;
     const bodyContainer = composeBody.closest('.aO7, .Am, .aoP, .M9') || composeBody.parentElement;
-    if (!bodyContainer) return;
-    if (bodyContainer.querySelector(`[${PRANAN_FLOAT_ATTR}]`)) return;
+    if (!bodyContainer) return null;
+    const existingFallback = bodyContainer.querySelector<HTMLElement>(`[${PRANAN_FLOAT_ATTR}]`);
+    if (existingFallback) return existingFallback;
     const containerEl = bodyContainer as HTMLElement;
     if (window.getComputedStyle(containerEl).position === 'static') containerEl.style.position = 'relative';
     const fallbackHost = document.createElement('div');
@@ -1334,11 +1337,12 @@ function injectFloatingIcon(composeWindow: Element, recipientEmail: string | nul
     fallbackHost.style.cssText = `position:absolute;bottom:6px;right:52px;z-index:999`;
     mountPrananToolbarButton(fallbackHost, composeWindow, recipientEmail);
     containerEl.appendChild(fallbackHost);
-    return;
+    return fallbackHost;
   }
 
   // Dedup
-  if (toolbar.querySelector(`[${PRANAN_FLOAT_ATTR}]`)) return;
+  const existing = toolbar.querySelector<HTMLElement>(`[${PRANAN_FLOAT_ATTR}]`);
+  if (existing) return existing;
 
   const host = document.createElement('div');
   host.setAttribute(PRANAN_FLOAT_ATTR, 'true');
@@ -1373,7 +1377,7 @@ function injectFloatingIcon(composeWindow: Element, recipientEmail: string | nul
   if (toolbarParent) {
     toolbarParent.appendChild(host);
   }
-  return;
+  return host;
 }
 
 function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, recipientEmail: string | null) {
@@ -1432,27 +1436,7 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
   shadow.querySelector('.pranan-icon-btn')!.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    let v6 = true;
-    try {
-      const flag = window.localStorage.getItem('PRANAN_V6_BAR');
-      if (flag === '0') v6 = false;
-    } catch { /* sandbox */ }
-    if (v6) {
-      openComposePopover(host, composeWindow);
-      return;
-    }
-    const recipientName = recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
-    safeSendMessage({
-      type: 'INLINE_DRAFT_REQUEST',
-      payload: {
-        platform: 'gmail',
-        recipientEmail,
-        recipientName,
-        messageToReplyTo: getThreadContext(composeWindow),
-        channelName: null,
-        subject: getSubject(composeWindow),
-      },
-    }).catch(() => {});
+    openComposePopover(host, composeWindow);
   });
 }
 
@@ -1463,9 +1447,6 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
 const POPOVER_ID = 'pranan-compose-popover';
 
 function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) {
-  // The popover is opened from the bar, so it inherits the bar's captured
-  // compose reference and inherits its staleness with it. Re-resolve from the
-  // popover's own anchor for the same reason the bar does. See live-compose.ts.
   const composeWindow = resolveLiveCompose(
     anchorHost,
     capturedCompose,
@@ -1473,137 +1454,219 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
     SELECTORS.gmail.composeWindow.join(', '),
   ) || capturedCompose;
 
-  // Toggle if already open
   const existing = document.getElementById(POPOVER_ID);
   if (existing) {
     existing.remove();
     return;
   }
+  if (!composeWindow) return;
 
-  // Build pop-over container
+  const editableBody = composeWindow.querySelector<HTMLElement>(
+    '[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]'
+  );
+  const messageToReplyTo = getThreadContext(composeWindow);
+  const initialDraft = editableBody ? readGmailComposeText(editableBody) : '';
+  const recipients = extractRecipients(composeWindow);
+  const target = replyTarget(composeWindow, recipients);
+  // Prefer Gmail's sender name. When Gmail has not exposed it yet, keep the
+  // complete address so local parts such as "me" are not misleading.
+  const recipientLabel = target.name || target.email || null;
+
   const popover = document.createElement('div');
   popover.id = POPOVER_ID;
+  popover.setAttribute('role', 'dialog');
+  popover.setAttribute('aria-label', 'Draft with Pranan');
   popover.style.cssText = `
     position: fixed;
     z-index: 2147483646;
-    width: 540px;
-    max-width: calc(100vw - 16px);
+    width: 420px;
+    max-width: calc(100vw - 24px);
     box-sizing: border-box;
-    max-height: 80vh;
+    max-height: calc(100vh - 24px);
     background: #ffffff;
-    border-radius: 14px;
-    box-shadow: 0 24px 60px -20px rgba(0,0,0,0.4);
-    border: 1px solid #e5e7eb;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    overflow: hidden;
+    border-radius: 12px;
+    box-shadow: 0 18px 48px rgba(15,23,42,0.18), 0 2px 8px rgba(15,23,42,0.10);
+    border: 1px solid rgba(15,23,42,0.10);
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    overflow: auto;
     color: #1f2937;
     display: flex;
     flex-direction: column;
   `;
-  // Position above the anchor button
+
   const rect = anchorHost.getBoundingClientRect();
-  const top = Math.max(8, rect.top - 520);
-  const left = Math.max(8, Math.min(window.innerWidth - 560, rect.left - 240));
-  popover.style.top = `${top}px`;
+  const composeRect = composeWindow.getBoundingClientRect();
+  // Keep the card inside Gmail's compose surface. Right-aligning it to the
+  // toolbar icon pushed most of the card over Gmail's folders on wide layouts.
+  const composeAlignedLeft = Math.max(composeRect.left + 12, rect.right - 420);
+  const left = Math.max(12, Math.min(window.innerWidth - 432, composeAlignedLeft));
   popover.style.left = `${left}px`;
+  popover.style.bottom = `${Math.max(12, window.innerHeight - rect.top + 8)}px`;
 
   popover.innerHTML = `
-    <div style="padding: 18px 22px 12px 22px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 12px;">
-      <svg viewBox="0 0 120 120" width="22" height="22" fill="none">
-        <circle cx="60" cy="60" r="33" stroke="#8b5cf6" stroke-width="7" fill="none"/>
-        <circle cx="60" cy="60" r="16" fill="#8b5cf6"/>
-      </svg>
-      <div style="flex:1;">
-        <div style="font-family: 'Poppins', Inter, sans-serif; font-weight: 500; font-size: 16px; color: #0f172a; letter-spacing: -0.015em;">Draft with Pranan</div>
-        <div style="font-size: 12px; color: #64748b; margin-top: 2px;" data-pranan-subtitle>Loading suggestions...</div>
-      </div>
-      <button data-pranan-close aria-label="Close" style="background: none; border: none; color: #94a3b8; font-size: 20px; cursor: pointer; line-height: 1;">&times;</button>
-    </div>
-    <div data-pranan-suggestions style="padding: 8px 12px; overflow-y: auto; max-height: 320px;">
-      <div style="padding: 36px 16px; text-align: center; color: #94a3b8; font-size: 13px;">Pulling your inbox signals...</div>
-    </div>
-    <div style="padding: 8px 24px; color: #94a3b8; font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; display: flex; align-items: center; gap: 12px;">
-      <span style="flex:1; height: 1px; background: #f1f5f9;"></span>
-      or write something new
-      <span style="flex:1; height: 1px; background: #f1f5f9;"></span>
-    </div>
-    <div style="padding: 4px 24px 14px 24px;">
-      <textarea data-pranan-prompt aria-label="Instructions for Pranan" placeholder='Draft a new email. e.g. "Intro Marshall to Wajee about Singapore"' style="box-sizing: border-box; width: 100%; min-height: 64px; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 10px; font-size: 13px; color: #1f2937; background: white; font-family: inherit; resize: vertical; outline: none;"></textarea>
-    </div>
-    <div style="padding: 10px 24px; border-top: 1px solid #f1f5f9; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
-      <div style="display: flex; align-items: center; gap: 6px;">
-        <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid #ddd6fe; border-radius: 7px; font-size: 11px; color: #6d28d9; background: #faf5ff;">
-          <span style="width: 5px; height: 5px; border-radius: 50%; background: currentColor;"></span>
-          Writing as you
-        </span>
-        <span style="display: inline-flex; align-items: center; padding: 4px 10px; border: 1px solid #e5e7eb; border-radius: 7px; font-size: 11px; color: #475569; background: white;">Tone: warm</span>
-      </div>
-      <div style="display: flex; align-items: center; gap: 10px;">
-        <span style="color: #94a3b8; font-size: 11px;">or press Enter</span>
-        <button data-pranan-freeform-generate style="background: linear-gradient(135deg, #6d28d9, #a78bfa); color: #ffffff; border: none; border-radius: 8px; padding: 7px 16px; font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; line-height: 1.2;">Generate</button>
-      </div>
-    </div>
-    <div style="padding: 9px 22px; background: #faf5ff; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #6d28d9;">
-      <span style="display: inline-flex; align-items: center; gap: 6px;">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6l-8-4z" stroke="#6d28d9" stroke-width="2"/></svg>
-        Private workspace &middot; Pranan AI
+    <style>
+      #${POPOVER_ID} button, #${POPOVER_ID} select, #${POPOVER_ID} textarea { font: inherit; }
+      #${POPOVER_ID} button { cursor: pointer; }
+      #${POPOVER_ID} :is(button,select,textarea):focus-visible { outline: 2px solid #7c3aed; outline-offset: 2px; }
+      #${POPOVER_ID} [data-pranan-icon-button] { width: 32px; height: 32px; display:inline-flex; align-items:center; justify-content:center; padding:0; border:0; border-radius:8px; color:#64748b; background:transparent; }
+      #${POPOVER_ID} [data-pranan-icon-button]:hover { color:#5b21b6; background:#f5f3ff; }
+      #${POPOVER_ID} [data-pranan-intent] { border:1px solid #e9e5f5; border-radius:999px; padding:5px 9px; color:#5b21b6; background:#faf9ff; white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+      #${POPOVER_ID} [data-pranan-intent]:hover { border-color:#c4b5fd; background:#f5f3ff; }
+      @media (prefers-color-scheme:dark) {
+        #${POPOVER_ID} { background:#202124!important; color:#f3f4f6!important; border-color:#4b5563!important; }
+        #${POPOVER_ID} [data-pranan-prompt-wrap] { background:#292a2d!important; border-color:#4b5563!important; }
+        #${POPOVER_ID} textarea, #${POPOVER_ID} select { color:#f3f4f6!important; background:transparent!important; }
+        #${POPOVER_ID} [data-pranan-icon-button] { color:#cbd5e1; }
+        #${POPOVER_ID} [data-pranan-meta] { color:#cbd5e1!important; }
+      }
+    </style>
+    <div style="height:44px;box-sizing:border-box;padding:6px 8px 4px 12px;display:flex;align-items:center;gap:9px;">
+      <span style="width:24px;height:24px;border-radius:7px;background:#f5f3ff;display:inline-flex;align-items:center;justify-content:center;flex:none;">
+        <svg viewBox="0 0 120 120" width="17" height="17" fill="none" aria-hidden="true">
+          <circle cx="60" cy="60" r="33" stroke="#7c3aed" stroke-width="8"/><circle cx="60" cy="60" r="16" fill="#7c3aed"/>
+        </svg>
       </span>
-      <a href="https://app.pranan.ai/settings" target="_blank" style="color: #6d28d9; text-decoration: none;">Settings</a>
+      <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;">
+        <strong style="font-size:13px;color:inherit;">Pranan</strong>
+        <span data-pranan-meta style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#64748b;">${escapeText(recipientLabel ? `Replying to ${recipientLabel}` : 'Email assistant')}</span>
+      </div>
+      <button data-pranan-side-panel data-pranan-icon-button aria-label="Open full Pranan panel" title="Open full Pranan panel">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 3h10a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H8M3 8l4 4-4 4M7 12h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button data-pranan-close data-pranan-icon-button aria-label="Close Pranan" title="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
     </div>
+    <div style="padding:0 12px 10px;">
+      <div data-pranan-prompt-wrap style="border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;transition:border-color .15s,box-shadow .15s;">
+        <textarea data-pranan-prompt aria-label="Instructions for Pranan" placeholder="${initialDraft.trim() ? 'How should Pranan improve this draft?' : messageToReplyTo ? 'Add guidance, or draft from this thread' : 'What should this email say?'}" style="display:block;box-sizing:border-box;width:100%;min-height:70px;max-height:150px;padding:10px 11px 6px;border:0;outline:0;resize:vertical;color:#1f2937;background:transparent;font:13px/1.45 inherit;"></textarea>
+        <div style="min-height:38px;padding:3px 6px 5px 9px;display:flex;align-items:center;gap:6px;">
+          <button data-pranan-voice data-pranan-icon-button aria-label="Dictate instructions" aria-pressed="false" title="Dictate instructions">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+          <select data-pranan-tone aria-label="Reply tone" style="height:30px;max-width:110px;padding:0 24px 0 8px;border:0;border-radius:7px;color:#475569;background:transparent;cursor:pointer;">
+            <option value="">Auto tone</option><option value="warm">Warm</option><option value="direct">Direct</option><option value="formal">Formal</option>
+          </select>
+          <span style="flex:1"></span>
+          <button data-pranan-generate style="height:32px;padding:0 13px;border:0;border-radius:8px;background:#6d28d9;color:#fff;font-weight:600;white-space:nowrap;">${initialDraft.trim() ? 'Improve draft' : messageToReplyTo ? 'Draft reply' : 'Draft email'}</button>
+        </div>
+      </div>
+    </div>
+    <div data-pranan-suggestions hidden style="padding:0 12px 9px;display:flex;gap:6px;overflow-x:auto;"></div>
+    <div data-pranan-status role="status" aria-live="polite" style="min-height:17px;padding:0 13px 9px;color:#64748b;font-size:11px;">${messageToReplyTo && !initialDraft.trim() ? 'Tip: leave instructions empty to draft from the conversation.' : 'Enter to draft. Shift + Enter for a new line.'}</div>
   `;
 
   document.body.appendChild(popover);
 
-  // Wire close
-  popover.querySelector('[data-pranan-close]')!.addEventListener('click', () => popover.remove());
-  // Close on outside click
+  const promptEl = popover.querySelector<HTMLTextAreaElement>('[data-pranan-prompt]')!;
+  const promptWrap = popover.querySelector<HTMLElement>('[data-pranan-prompt-wrap]')!;
+  const generateBtn = popover.querySelector<HTMLButtonElement>('[data-pranan-generate]')!;
+  const voiceBtn = popover.querySelector<HTMLButtonElement>('[data-pranan-voice]')!;
+  const toneSelect = popover.querySelector<HTMLSelectElement>('[data-pranan-tone]')!;
+  const status = popover.querySelector<HTMLElement>('[data-pranan-status]')!;
+  const suggestions = popover.querySelector<HTMLElement>('[data-pranan-suggestions]')!;
+
+  promptEl.addEventListener('focus', () => {
+    promptWrap.style.borderColor = '#a78bfa';
+    promptWrap.style.boxShadow = '0 0 0 3px rgba(124,58,237,.08)';
+  });
+  promptEl.addEventListener('blur', () => {
+    promptWrap.style.borderColor = '#e5e7eb';
+    promptWrap.style.boxShadow = 'none';
+  });
+
+  const toneKey = 'replyTone:' + (extractSelfEmail(document.title) || 'default');
+  try {
+    chrome.storage.local.get(toneKey).then(saved => {
+      if (['', 'warm', 'direct', 'formal'].includes(saved[toneKey])) toneSelect.value = saved[toneKey];
+    }).catch(() => {});
+    toneSelect.addEventListener('change', () => { chrome.storage.local.set({ [toneKey]: toneSelect.value }).catch(() => {}); });
+  } catch { /* fixture */ }
+
+  const closePopover = () => popover.remove();
+  popover.querySelector('[data-pranan-close]')!.addEventListener('click', closePopover);
+  popover.querySelector('[data-pranan-side-panel]')!.addEventListener('click', () => {
+    safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
+    closePopover();
+  });
   const outsideClick = (e: MouseEvent) => {
     if (!popover.contains(e.target as Node) && !anchorHost.contains(e.target as Node)) {
-      popover.remove();
+      closePopover();
       document.removeEventListener('mousedown', outsideClick);
     }
   };
   setTimeout(() => document.addEventListener('mousedown', outsideClick), 50);
-  // Close on Escape
   const escListener = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') { popover.remove(); document.removeEventListener('keydown', escListener); }
+    if (e.key === 'Escape') { closePopover(); document.removeEventListener('keydown', escListener); anchorHost.shadowRoot?.querySelector<HTMLElement>('button')?.focus(); }
   };
   document.addEventListener('keydown', escListener);
 
-  /**
-   * Send the freeform prompt.
-   *
-   * Reported by Drishti on 7 Aug: "we don't really have a generate option here".
-   * Her recording shows her typing a prompt into this panel, reading the hint,
-   * saying "I am unable to understand what this is", pressing Enter, getting
-   * nothing, then giving up and pasting the same prompt into the other bar --
-   * where it worked first time.
-   *
-   * She was right. This panel had NO submit control at all. The only way to
-   * send was Cmd/Ctrl+Enter, advertised as two symbols at 10px in grey, and
-   * plain Enter -- the obvious thing to try -- did nothing at all. Every other
-   * Pranan surface has a Generate button; this one asked you to already know a
-   * keyboard shortcut.
-   *
-   * Now: a Generate button, plain Enter, and Cmd/Ctrl+Enter all do the same
-   * thing. Shift+Enter still inserts a newline.
-   */
-  const promptEl = popover.querySelector('[data-pranan-prompt]') as HTMLTextAreaElement;
-  const freeformBtn = popover.querySelector('[data-pranan-freeform-generate]') as HTMLButtonElement;
-
   let popoverRequest: string | null = null;
+  let requestTimer: ReturnType<typeof setTimeout> | null = null;
+  let voicePrefix = '';
+  let voiceStarting = false;
+  let activeVoice: 'speech' | 'recording' | 'transcribing' | null = null;
+
+  const showStatus = (message: string, error = false) => {
+    status.textContent = message;
+    status.style.color = error ? '#b45309' : '#64748b';
+  };
+
+  const setVoiceIdle = () => {
+    activeVoice = null;
+    voiceStarting = false;
+    voiceBtn.disabled = false;
+    voiceBtn.setAttribute('aria-pressed', 'false');
+    voiceBtn.title = 'Dictate instructions';
+    generateBtn.disabled = false;
+  };
+  const applyVoiceTranscript = (transcript: string) => {
+    promptEl.value = [voicePrefix, transcript.trim()].filter(Boolean).join(' ');
+    promptEl.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const speech = createSpeechInput({
+    onStart: () => { activeVoice = 'speech'; voiceBtn.setAttribute('aria-pressed', 'true'); voiceBtn.title = 'Stop listening'; generateBtn.disabled = true; showStatus('Listening. Select the microphone again to stop.'); },
+    onTranscript: applyVoiceTranscript,
+    onError: message => showStatus(message, true),
+    onEnd: setVoiceIdle,
+  });
+  const recordedSpeech = createRecordedSpeechInput({
+    onStart: () => { activeVoice = 'recording'; voiceBtn.setAttribute('aria-pressed', 'true'); voiceBtn.title = 'Stop listening'; generateBtn.disabled = true; showStatus('Listening. Select the microphone again to stop.'); },
+    onAudio: async audio => {
+      activeVoice = 'transcribing';
+      voiceBtn.disabled = true;
+      showStatus('Transcribing your instructions...');
+      applyVoiceTranscript(await transcribeAudio(audio));
+    },
+    onError: message => showStatus(message, true),
+    onEnd: setVoiceIdle,
+  });
+  voiceBtn.addEventListener('click', async () => {
+    if (activeVoice === 'speech') { speech.stop(); return; }
+    if (activeVoice === 'recording') { recordedSpeech.stop(); return; }
+    if (activeVoice === 'transcribing' || voiceStarting) return;
+    voicePrefix = promptEl.value.trim();
+    voiceStarting = true;
+    voiceBtn.disabled = true;
+    showStatus('Starting microphone...');
+    if (!speech.start()) await recordedSpeech.start();
+    voiceStarting = false;
+  });
+
   const finishPopover = (message?: string) => {
     submitting = false;
     if (popoverRequest) composeTransactions.cancel(popoverRequest);
     popoverRequest = null;
-    freeformBtn.textContent = 'Try again'; freeformBtn.style.opacity = '1'; freeformBtn.style.pointerEvents = 'auto';
-    const status = popover.querySelector('[data-pranan-subtitle]');
-    if (status && message) { status.setAttribute('role', 'status'); status.textContent = message; }
+    if (requestTimer) clearTimeout(requestTimer);
+    requestTimer = null;
+    generateBtn.disabled = false;
+    generateBtn.textContent = 'Try again';
+    if (message) showStatus(message, true);
   };
   const popoverResult = (message: { type: string; payload?: { requestId?: string; message?: string } }) => {
     if (!popoverRequest || message.payload?.requestId !== popoverRequest) return;
     if (message.type === 'DRAFT_SKIPPED') finishPopover(message.payload.message || 'Drafting failed. Your instructions are preserved.');
-    else if (message.type === 'INSERT_DRAFT') { popoverRequest = null; popover.remove(); }
+    else if (message.type === 'INSERT_DRAFT') { popoverRequest = null; closePopover(); }
   };
   const popoverChanged = (event: Event) => {
     if ((event as CustomEvent).detail?.requestId === popoverRequest) finishPopover('Your draft or recipients changed. Your text was kept. Review your instructions and try again.');
@@ -1613,6 +1676,9 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
   const popoverCleanup = new MutationObserver(() => {
     if (popover.isConnected) return;
     if (popoverRequest) { composeTransactions.cancel(popoverRequest); safeSendMessage({ type: 'CANCEL_INLINE_DRAFT', payload: { requestId: popoverRequest } }).catch(() => {}); }
+    if (requestTimer) clearTimeout(requestTimer);
+    speech.stop();
+    recordedSpeech.stop();
     chrome.runtime.onMessage.removeListener(popoverResult);
     window.removeEventListener('pranan:editor-changed', popoverChanged);
     document.removeEventListener('keydown', escListener); document.removeEventListener('mousedown', outsideClick);
@@ -1622,57 +1688,36 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
   let submitting = false;
   const submitFreeformPrompt = async () => {
       if (submitting) return;
-      const text = promptEl.value.trim();
-      // Nothing to send: put the cursor where the user needs to type rather
-      // than failing silently, which is the bug this whole change is about.
-      if (!text) { promptEl.focus(); return; }
-      submitting = true;
-      freeformBtn.textContent = 'Drafting...';
-      freeformBtn.style.opacity = '0.65';
-      freeformBtn.style.pointerEvents = 'none';
-
-      const liveRecipients = composeWindow ? extractRecipients(composeWindow) : [];
-      const recipientEmail = liveRecipients[0] || null;
-      const recipientName = composeWindow && recipientEmail ? extractRecipientName(composeWindow, recipientEmail) : null;
-      const messageToReplyTo = composeWindow ? getThreadContext(composeWindow) : null;
-      const editableBody = composeWindow
-        ? (composeWindow.querySelector('[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]') as HTMLElement | null)
-        : null;
-      if (!editableBody) {
-        submitting = false;
-        const subtitle = popover.querySelector('[data-pranan-subtitle]');
-        if (subtitle) subtitle.textContent = 'Open a message body before generating. Your instructions and existing text have not changed.';
-        freeformBtn.textContent = 'Try again';
-        freeformBtn.style.opacity = '1';
-        freeformBtn.style.pointerEvents = 'auto';
-        return;
-      }
+      if (!editableBody) { showStatus('Open a message body before drafting.', true); return; }
       const currentDraft = readGmailComposeText(editableBody);
-      if (currentDraft.length > MAX_COMPOSE_DRAFT_CHARS) {
-        submitting = false;
-        const subtitle = popover.querySelector('[data-pranan-subtitle]');
-        if (subtitle) subtitle.textContent = 'This draft is too long to revise. Shorten it to 12,000 characters or fewer. Your text has not changed.';
-        freeformBtn.textContent = 'Try again';
-        freeformBtn.style.opacity = '1';
-        freeformBtn.style.pointerEvents = 'auto';
-        return;
-      }
+      let text = promptEl.value.trim();
+      if (!text && currentDraft.trim()) text = 'Improve this draft while preserving every fact, request and commitment.';
+      if (!text && !messageToReplyTo) { promptEl.focus(); showStatus('Describe what this email should say.', true); return; }
+      if (currentDraft.length > MAX_COMPOSE_DRAFT_CHARS) { showStatus('Shorten this draft to 12,000 characters or fewer.', true); return; }
+      submitting = true;
+      generateBtn.textContent = 'Drafting...';
+      generateBtn.disabled = true;
+      showStatus('Drafting in your voice. Your current text stays unchanged until the draft is ready.');
+
+      const liveRecipients = extractRecipients(composeWindow);
+      const liveTarget = replyTarget(composeWindow, liveRecipients);
       const editorId = stampEditor(editableBody);
       popoverRequest = composeTransactions.start(editorId!, editableBody, composeIdentity(composeWindow!));
       const pendingPayload = {
           requestId: popoverRequest,
           mailboxEmail: extractSelfEmail(document.title) || undefined,
           platform: 'gmail',
-          recipientEmail,
-          recipientName,
+          recipientEmail: liveTarget.email,
+          recipientName: liveTarget.name,
           messageToReplyTo,
           channelName: null,
           subject: composeWindow ? getSubject(composeWindow) : null,
           userPrompt: text,
           currentDraft: currentDraft || undefined,
-          originSurface: 'inline-bar',
+          originSurface: 'compose-toolbar',
           composeType: messageToReplyTo ? 'reply' : 'new',
           editorId,
+          tone: toneSelect.value || undefined,
       };
 
       // Wait for the worker to take it before dismissing. Closing immediately
@@ -1686,80 +1731,43 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element) 
       if (!ok) {
         finishPopover();
         submitting = false;
-        const subtitle = popover.querySelector('[data-pranan-subtitle]');
-        if (subtitle) subtitle.textContent = 'Could not reach Pranan. Your instructions are preserved. Reload Gmail if retry fails.';
-        freeformBtn.textContent = 'Try again';
-        freeformBtn.style.opacity = '1';
-        freeformBtn.style.pointerEvents = 'auto';
+        showStatus('Could not reach Pranan. Your instructions are preserved. Reload Gmail if retry fails.', true);
         return;
       }
-      setTimeout(() => { if (popoverRequest) { safeSendMessage({ type: 'CANCEL_INLINE_DRAFT', payload: { requestId: popoverRequest } }).catch(() => {}); finishPopover('Drafting timed out. Your instructions and draft are unchanged. Try again.'); } }, 30000);
+      requestTimer = setTimeout(() => { if (popoverRequest) { safeSendMessage({ type: 'CANCEL_INLINE_DRAFT', payload: { requestId: popoverRequest } }).catch(() => {}); finishPopover('Drafting timed out. Your instructions and draft are unchanged. Try again.'); submitting = false; } }, 30000);
   };
 
-  freeformBtn.addEventListener('click', (e) => { e.preventDefault(); void submitFreeformPrompt(); });
+  generateBtn.addEventListener('click', (e) => { e.preventDefault(); void submitFreeformPrompt(); });
   promptEl.addEventListener('keydown', (e) => {
-    // Shift+Enter keeps its normal meaning: a new line.
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void submitFreeformPrompt();
     }
   });
 
-  // Fetch suggestions
-  safeSendMessage({ type: 'GET_PROACTIVE_SUGGESTIONS' })
-    .then((res: { suggestions?: Array<Record<string, string>>; error?: string }) => {
-      const sugList = popover.querySelector('[data-pranan-suggestions]') as HTMLElement;
-      const subtitle = popover.querySelector('[data-pranan-subtitle]') as HTMLElement;
-      if (!sugList) return;
-      const suggestions = res?.suggestions || [];
-      if (suggestions.length === 0) {
-        subtitle.textContent = 'Inbox under control';
-        sugList.innerHTML = `
-          <div style="padding: 32px 16px; text-align: center;">
-            <div style="width: 48px; height: 48px; margin: 0 auto 12px auto; border-radius: 12px; background: #f5f3ff; display: flex; align-items: center; justify-content: center;">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#6d28d9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-            <div style="font-size: 15px; font-weight: 600; color: #1f2937; margin-bottom: 4px;">Inbox under control.</div>
-            <div style="font-size: 12px; color: #64748b;">No follow-ups overdue. Write something new below.</div>
-          </div>
-        `;
-        return;
+  if (messageToReplyTo) {
+    safeSendMessage({
+      type: 'GET_REPLY_INTENTS',
+      payload: {
+        platform: 'gmail', mailboxEmail: extractSelfEmail(document.title) || undefined,
+        recipientEmail: target.email, recipientName: target.name,
+        subject: getSubject(composeWindow), messageToReplyTo,
+      },
+    }).then((res: { intents?: string[] } | undefined) => {
+      const intents = (res?.intents || []).slice(0, 3);
+      if (!intents.length || !popover.isConnected) return;
+      suggestions.hidden = false;
+      suggestions.style.display = 'flex';
+      for (const intent of intents) {
+        const button = document.createElement('button');
+        button.type = 'button'; button.setAttribute('data-pranan-intent', '1'); button.textContent = intent;
+        button.addEventListener('click', () => { promptEl.value = intent; promptEl.focus(); });
+        suggestions.append(button);
       }
-      subtitle.textContent = `${suggestions.length} email${suggestions.length === 1 ? '' : 's'} you were going to write`;
-      sugList.innerHTML = suggestions.map((s, i) => `
-        <div data-pranan-sug-idx="${i}" data-pranan-thread="${escapeAttr(s.thread_id)}" style="padding: 12px 14px; border-radius: 8px; margin-bottom: 4px; cursor: pointer; display: flex; align-items: flex-start; gap: 12px; border: 1px solid transparent;">
-          <div style="width: 32px; height: 32px; border-radius: 8px; background: #f5f3ff; color: #6d28d9; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex-shrink: 0;">${escapeText((s.sender_name || s.sender_email || 'S').charAt(0).toUpperCase())}</div>
-          <div style="flex: 1; min-width: 0;">
-            <div style="font-size: 13px; color: #0f172a; font-weight: 500; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeText(s.subject || '(no subject)')}</div>
-            <div style="font-size: 11px; color: #64748b; margin-top: 3px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-              <span>${escapeText(s.received_ago || '')}</span>
-              <span style="width: 3px; height: 3px; border-radius: 50%; background: currentColor;"></span>
-              <span style="color: #6d28d9;">${escapeText('→ ' + (s.sender_name || s.sender_email || '') + ' (' + (s.tier || 'unknown') + ')')}</span>
-              <span style="width: 3px; height: 3px; border-radius: 50%; background: currentColor;"></span>
-              <span>Tone: ${escapeText(s.suggested_tone || 'warm')}</span>
-            </div>
-          </div>
-        </div>
-      `).join('');
-      // Wire click handlers
-      sugList.querySelectorAll<HTMLElement>('[data-pranan-sug-idx]').forEach((row) => {
-        row.addEventListener('mouseenter', () => { row.style.background = '#faf5ff'; row.style.borderColor = '#ddd6fe'; });
-        row.addEventListener('mouseleave', () => { row.style.background = 'transparent'; row.style.borderColor = 'transparent'; });
-        row.addEventListener('click', () => {
-          const threadId = row.getAttribute('data-pranan-thread');
-          if (threadId) {
-            safeSendMessage({ type: 'OPEN_THREAD', payload: { threadId } }).catch(() => {});
-            popover.remove();
-          }
-        });
-      });
-    })
-    .catch((err) => {
-      const sugList = popover.querySelector('[data-pranan-suggestions]') as HTMLElement;
-      const subtitle = popover.querySelector('[data-pranan-subtitle]') as HTMLElement;
-      if (subtitle) subtitle.textContent = 'Could not load suggestions';
-      if (sugList) sugList.innerHTML = `<div style="padding: 20px; color: #b91c1c; font-size: 13px;">${escapeText(String(err))}</div>`;
-    });
+    }).catch(() => {});
+  }
+
+  requestAnimationFrame(() => promptEl.focus());
 }
 
 function escapeText(s: string): string {

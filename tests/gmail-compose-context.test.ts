@@ -10,6 +10,11 @@ it('does not borrow a visible thread for new mail', () => {
   expect(replyTarget(dialog, ['other@example.test']).email).toBe('other@example.test');
 });
 it('labels sender outside the Gmail body wrapper', () => { expect(scopedThreadContext(document.querySelector('.reply')!)).toBe('From: alex@example.test\nPlease confirm pricing'); });
+it('keeps thread context when Gmail mounts a hidden subject field in an inline reply', () => {
+  document.querySelector('.reply')!.insertAdjacentHTML('afterbegin', '<input name="subjectbox" type="hidden">');
+  expect(scopedThreadContext(document.querySelector('.reply')!)).toBe('From: alex@example.test\nPlease confirm pricing');
+  expect(replyTarget(document.querySelector('.reply')!, ['alex@example.test'])).toEqual({ email: 'alex@example.test', name: 'alex@example.test' });
+});
 it('respects edited recipients instead of adding the last sender back', () => { expect(replyTarget(document.querySelector('.reply')!, ['other@example.test']).email).toBe('other@example.test'); });
 it('does not greet self when following up after our own message', () => {
   document.querySelector('.reply')!.insertAdjacentHTML('beforebegin', message('owner@example.test', 'Can you confirm?'));

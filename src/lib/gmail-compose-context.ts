@@ -4,7 +4,10 @@ const MESSAGE_BODY = '.a3s.aiL, .ii.gt .a3s, [data-message-id] .a3s';
 
 /** Never borrow the open reading thread for an independent compose dialog. */
 export function composeThread(compose: Element): Element | null {
-  if (compose.closest('[role="dialog"]') || compose.querySelector('input[name="subjectbox"]')) return null;
+  // Gmail now mounts a hidden subjectbox inside inline reply composers too.
+  // The dialog boundary is the reliable distinction between new mail and an
+  // inline reply; treating every subjectbox as new mail drops the thread.
+  if (compose.closest('[role="dialog"]')) return null;
   let scope: Element | null = compose.parentElement;
   while (scope && scope !== document.body) {
     if (scope.querySelector(MESSAGE_BODY)) return scope;

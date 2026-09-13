@@ -23,19 +23,25 @@ const src = stripComments(raw);
  * Pranan surface has a Generate button.
  */
 describe('the Draft with Pranan panel can be submitted', () => {
-  it('does not hard-code a stale model provider in the privacy footer', () => {
-    expect(src).toContain('Private workspace &middot; Pranan AI');
+  it('does not expose a stale model provider in the compact compose UI', () => {
+    expect(src).toContain("popover.setAttribute('aria-label', 'Draft with Pranan')");
     expect(src).not.toContain('Private workspace &middot; Anthropic');
   });
 
-  it('has a Generate button, not just a keyboard shortcut', () => {
-    expect(src).toContain('data-pranan-freeform-generate');
-    const footer = src.slice(src.indexOf('data-pranan-freeform-generate'));
-    expect(footer.slice(0, 400)).toContain('>Generate<');
+  it('has a clear context-aware draft button, not just a keyboard shortcut', () => {
+    expect(src).toContain('data-pranan-generate');
+    const action = src.slice(src.indexOf('data-pranan-generate'));
+    expect(action.slice(0, 700)).toContain("'Draft reply'");
   });
 
   it('wires that button to the submit path', () => {
-    expect(src).toMatch(/freeformBtn\.addEventListener\('click'[\s\S]{0,120}submitFreeformPrompt\(\)/);
+    expect(src).toMatch(/generateBtn\.addEventListener\('click'[\s\S]{0,120}submitFreeformPrompt\(\)/);
+  });
+
+  it('keeps the full-width composer bar behind an explicit diagnostic flag', () => {
+    const inject = src.slice(src.indexOf('function injectComposeButtons'), src.indexOf('function rescueComposeTitle'));
+    expect(inject).toContain("PRANAN_LEGACY_COMPOSE_BAR') === '1'");
+    expect(inject).toContain('injectFloatingIcon(composeWindow, recipientEmail)');
   });
 
   it('submits on plain Enter — the thing she actually tried', () => {

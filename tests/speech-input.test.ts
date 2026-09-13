@@ -24,12 +24,32 @@ it('puts the editable transcript in the instruction field before generation', ()
 });
 
 it('keeps microphone refusal as a recoverable typed-input state', () => {
-  const error = vi.fn(); createSpeechInput({ onStart: vi.fn(), onTranscript: vi.fn(), onError: error, onEnd: vi.fn() }).start();
+  const error = vi.fn(); const end = vi.fn(); createSpeechInput({ onStart: vi.fn(), onTranscript: vi.fn(), onError: error, onEnd: end }).start();
   instance.onerror({ error: 'not-allowed' });
   expect(error).toHaveBeenCalledWith('Microphone access was not allowed. You can keep typing your instructions.');
+  expect(end).toHaveBeenCalledOnce();
+  instance.onend();
+  expect(end).toHaveBeenCalledOnce();
 });
 
 it('returns unavailable without throwing in unsupported browsers', () => {
   delete (window as any).webkitSpeechRecognition;
   expect(createSpeechInput({ onStart: vi.fn(), onTranscript: vi.fn(), onError: vi.fn(), onEnd: vi.fn() }).start()).toBe(false);
+});
+
+it('recovers when Chrome never reports that the microphone started', () => {
+  vi.useFakeTimers();
+  class StalledRecognition {
+    continuous = false; interimResults = false; lang = '';
+    onstart: any; onresult: any; onerror: any; onend: any;
+    start() {}
+    stop() { this.onend?.(); }
+  }
+  (window as any).webkitSpeechRecognition = StalledRecognition;
+  const error = vi.fn(); const end = vi.fn();
+  createSpeechInput({ onStart: vi.fn(), onTranscript: vi.fn(), onError: error, onEnd: end }).start();
+  vi.advanceTimersByTime(4_000);
+  expect(error).toHaveBeenCalledWith('Microphone did not start. Check Chrome microphone access, then try again.');
+  expect(end).toHaveBeenCalledOnce();
+  vi.useRealTimers();
 });
