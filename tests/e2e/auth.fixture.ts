@@ -217,6 +217,12 @@ export async function launchAuthedExtensionContext(): Promise<{
   await pairingPage.waitForURL(/\/auth\/companion-callback\?nonce=/, { timeout: 20_000 });
   await pairingPage.getByText(/you're connected/i).waitFor({ state: 'visible', timeout: 20_000 });
 
+  // The callback page renders its success state after a fallback timeout even
+  // when no extension is present. The hidden acknowledgement is stronger: the
+  // content script creates it only after the service worker stores the token,
+  // validates it against /api/companion/auth, and returns { ok: true }.
+  await pairingPage.locator('#pranan-companion-ack').waitFor({ state: 'attached', timeout: 10_000 });
+
   await expect.poll(
     () => worker.evaluate(async () => {
       const stored = await chrome.storage.local.get(['authToken', 'refreshToken']);
@@ -225,11 +231,6 @@ export async function launchAuthedExtensionContext(): Promise<{
     { message: 'Companion callback should store an independent token pair', timeout: 10_000 },
   ).toBe(true);
 
-  const authStatus = await worker.evaluate(async () => {
-    const response = await chrome.runtime.sendMessage({ type: 'AUTH_STATUS' });
-    return response?.auth?.valid === true;
-  });
-  expect(authStatus, 'Companion session should validate before authenticated UI tests run').toBe(true);
   await pairingPage.close();
 
   return { context, extensionId };
