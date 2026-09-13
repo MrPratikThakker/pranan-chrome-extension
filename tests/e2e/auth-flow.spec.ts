@@ -7,9 +7,9 @@
  *   - v0.4.5 side panel banner persisting after recovery
  *   - v0.4.6 popup not auto-clearing on AUTH_RECOVERED
  *
- * Strategy: load the extension into an authed Chromium context (cookies
- * pre-applied from cached storage state in global setup). Open the
- * extension's popup.html / sidepanel.html. Assert the right state.
+ * Strategy: load the extension into an authed Chromium context, pair it via
+ * the production companion-session flow, then open popup.html and
+ * sidepanel.html. Assert both the visible state and completed API responses.
  *
  * Run only when TEST_USER_EMAIL + TEST_USER_PASSWORD are configured.
  * Otherwise skip (so unauth smoke still runs).
@@ -42,6 +42,10 @@ test('Scenario A — authed popup opens with no Connect Account flash', async ()
     if (m.type() === 'error') errors.push(m.text());
   });
 
+  const todayResponse = page.waitForResponse(
+    (response) => response.url().includes('/api/companion/today'),
+    { timeout: 10_000 },
+  );
   await page.goto(`chrome-extension://${extensionId}/popup.html`);
 
   // The 'Pranan' brand text always renders. Wait for it.
@@ -57,6 +61,9 @@ test('Scenario A — authed popup opens with no Connect Account flash', async ()
     .catch(() => false);
   expect(connectVisible, 'Authed popup should not render Connect Account').toBe(false);
 
+  const today = await todayResponse;
+  expect(today.status(), 'Authenticated popup snapshot request should succeed').toBe(200);
+
   // No console errors on mount.
   expect(errors, `Console errors during popup mount:\n${errors.join('\n')}`).toEqual([]);
 });
@@ -68,6 +75,10 @@ test('Scenario B — authed sidepanel opens with no Not Authenticated banner', a
     if (m.type() === 'error') errors.push(m.text());
   });
 
+  const authResponse = page.waitForResponse(
+    (response) => response.url().endsWith('/api/companion/auth'),
+    { timeout: 10_000 },
+  );
   await page.goto(`chrome-extension://${extensionId}/sidepanel.html`);
 
   // Wait for the panel to mount.
@@ -80,6 +91,9 @@ test('Scenario B — authed sidepanel opens with no Not Authenticated banner', a
     .isVisible()
     .catch(() => false);
   expect(banner, 'Authed sidepanel should not render Not Authenticated banner').toBe(false);
+
+  const auth = await authResponse;
+  expect(auth.status(), 'Side panel companion auth request should succeed').toBe(200);
 
   expect(errors, `Console errors during sidepanel mount:\n${errors.join('\n')}`).toEqual([]);
 });
