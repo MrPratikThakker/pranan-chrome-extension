@@ -7,12 +7,14 @@
  *      https://app.pranan.ai/login, sign in with the test account
  *      credentials from env vars, wait for /home to load.
  *   2. Save the resulting cookies + localStorage to disk.
- *   3. Each individual test loads that state and is instantly authed.
+ *   3. The extension context uses those cookies to run the real companion
+ *      pairing route, which mints an independent extension session.
  *
- * Why not a custom seed endpoint: Supabase SSR cookies are not just a
- * JWT — they're chunked, base64-encoded session objects with specific
- * format. Easier to do the real login flow once and let Supabase
- * handle the cookie shape.
+ * Why not copy the website access token into extension storage: production
+ * registers website and companion sessions separately. A website token is
+ * intentionally rejected by companion APIs when trusted sessions are
+ * enforced. The test therefore follows the same /api/companion/token flow a
+ * user gets after clicking Connect Account.
  *
  * Test account expectations (set up out-of-band by Pratik):
  *   - Account email + password stored as GitHub Actions secrets
@@ -166,8 +168,9 @@ export async function loginAndCacheStorageState(): Promise<string | null> {
 }
 
 /**
- * Launch a fresh persistent context with the extension loaded AND the
- * cached auth-state cookies pre-applied. Returns context + extension ID.
+ * Launch a fresh persistent context with the extension loaded, apply the
+ * cached website cookies, and complete the production companion pairing flow.
+ * Returns only after the extension has stored and validated its own session.
  */
 export async function launchAuthedExtensionContext(): Promise<{
   context: BrowserContext;
@@ -187,7 +190,9 @@ export async function launchAuthedExtensionContext(): Promise<{
       ...(isCI ? ['--headless=new'] : []),
     ],
   });
-  // Apply saved auth cookies if available
+  // Apply the signed-in website cookies so /api/companion/token can mint the
+  // independent companion session. Cookies alone do not authenticate
+  // companion APIs when trusted-session enforcement is enabled.
   if (existsSync(STORAGE_STATE_PATH)) {
     try {
       const fs = await import('node:fs/promises');
@@ -203,6 +208,30 @@ export async function launchAuthedExtensionContext(): Promise<{
     worker = await context.waitForEvent('serviceworker', { timeout: 10_000 });
   }
   const extensionId = worker.url().split('/')[2];
+
+  // Exercise the same nonce exchange and postMessage handoff as a real user.
+  // This catches regressions across the website route, callback page, content
+  // script, service worker, token validation, and Chrome storage in one flow.
+  const pairingPage = await context.newPage();
+  await pairingPage.goto(`${APP_ORIGIN}/api/companion/token`);
+  await pairingPage.waitForURL(/\/auth\/companion-callback\?nonce=/, { timeout: 20_000 });
+  await pairingPage.getByText(/you're connected/i).waitFor({ state: 'visible', timeout: 20_000 });
+
+  await expect.poll(
+    () => worker.evaluate(async () => {
+      const stored = await chrome.storage.local.get(['authToken', 'refreshToken']);
+      return Boolean(stored.authToken && stored.refreshToken);
+    }),
+    { message: 'Companion callback should store an independent token pair', timeout: 10_000 },
+  ).toBe(true);
+
+  const authStatus = await worker.evaluate(async () => {
+    const response = await chrome.runtime.sendMessage({ type: 'AUTH_STATUS' });
+    return response?.auth?.valid === true;
+  });
+  expect(authStatus, 'Companion session should validate before authenticated UI tests run').toBe(true);
+  await pairingPage.close();
+
   return { context, extensionId };
 }
 
