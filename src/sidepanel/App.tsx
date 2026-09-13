@@ -18,6 +18,7 @@ import { GrammarPanel } from '@/components/GrammarPanel';
 import { BriefingPanel } from '@/components/BriefingPanel';
 import { NudgesPanel } from '@/components/NudgesPanel';
 import { SnippetsPanel } from '@/components/SnippetsPanel';
+import { SessionsPanel } from '@/components/SessionsPanel';
 import { dismissNudge, draftFromNudge } from '@/lib/api-client';
 import type { ExtensionMessage, Platform, MeetingBriefing } from '@/types';
 import { APP_ORIGIN, appUrl } from '@/lib/config';
@@ -361,6 +362,16 @@ function AppInner() {
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b border-brand-border bg-brand-bg flex-shrink-0">
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setViewMode('sessions')}
+            className="w-6 h-6 flex items-center justify-center text-brand-text-3 hover:text-brand-text rounded-md hover:bg-brand-surface-2 transition-all"
+            title="Active Sessions"
+            aria-label="Active Sessions"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          </button>
           <div className="w-6 h-6 rounded-md bg-brand-accent/10 border border-brand-accent/15 flex items-center justify-center">
             <svg width="14" height="14" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
@@ -452,8 +463,12 @@ function AppInner() {
           />
         )}
 
+        {viewMode === 'sessions' && (
+          <SessionsPanel onBack={() => setViewMode('context')} onCurrentRevoked={() => { void logout(); }} />
+        )}
+
         {/* No compose detected -- contextual intelligence hub */}
-        {!composeContext && viewMode !== 'draft' && viewMode !== 'rewrite' && viewMode !== 'grammar' && viewMode !== 'briefing' && viewMode !== 'nudges' && viewMode !== 'snippets' && (
+        {!composeContext && viewMode !== 'draft' && viewMode !== 'rewrite' && viewMode !== 'grammar' && viewMode !== 'briefing' && viewMode !== 'nudges' && viewMode !== 'snippets' && viewMode !== 'sessions' && (
           <>
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
@@ -767,6 +782,5 @@ export default function App() {
     </ErrorBoundary>
   );
 }
-
 
 

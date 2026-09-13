@@ -15,6 +15,7 @@ import type {
   MeetingBriefing,
   FollowUpNudge,
   DecayAlert,
+  ActiveSession,
 } from '@/types';
 
 import { captureError } from '@/lib/observability';
@@ -777,4 +778,18 @@ export async function getSnippets(): Promise<Snippet[]> {
   }
 }
 
+export async function getActiveSessions(): Promise<ActiveSession[]> {
+  const response = await authedFetch(`${APP_ORIGIN}/api/companion/sessions`);
+  const data = await handleResponse<{ sessions?: ActiveSession[] }>(response);
+  return data.sessions ?? [];
+}
 
+export async function revokeActiveSession(action: 'current' | 'all' | 'revoke', id?: string): Promise<'ok' | 'reauth'> {
+  const response = await authedFetch(`${APP_ORIGIN}/api/companion/sessions`, {
+    method: 'POST',
+    body: JSON.stringify({ action, ...(id ? { id } : {}) }),
+  });
+  if (response.status === 428) return 'reauth';
+  await handleResponse<unknown>(response);
+  return 'ok';
+}

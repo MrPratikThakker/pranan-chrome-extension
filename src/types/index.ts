@@ -175,7 +175,20 @@ export interface ExtensionMessage<T = unknown> {
 
 // --- Store State ---
 
-export type ViewMode = 'context' | 'draft' | 'rewrite' | 'grammar' | 'briefing' | 'nudges' | 'snippets' | 'auth' | 'onboarding';
+export type ViewMode = 'context' | 'draft' | 'rewrite' | 'grammar' | 'briefing' | 'nudges' | 'snippets' | 'sessions' | 'auth' | 'onboarding';
+
+export interface ActiveSession {
+  id: string;
+  current: boolean;
+  kind: 'web' | 'companion';
+  remembered: boolean;
+  absoluteExpiresAt: string;
+  idleExpiresAt: string;
+  lastSeenAt: string;
+  reauthenticatedAt: string;
+  userAgent: string | null;
+  createdAt: string;
+}
 
 // --- Phase 5: Intelligence Types ---
 
@@ -283,5 +296,4 @@ export const RATE_LIMITS = {
   premium: { requestsPerMinute: 30, draftsPerDay: Infinity, rewritesPerDay: Infinity },
   team: { requestsPerMinute: 60, draftsPerDay: Infinity, rewritesPerDay: Infinity },
 } as const;
-
 
