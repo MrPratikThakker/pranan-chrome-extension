@@ -43,6 +43,11 @@ describe('Gmail revision context', () => {
     body.innerHTML = '<div><br></div><span hidden>Ignore</span><span aria-hidden="true">Ignore</span><script>Ignore</script>';
     expect(readGmailComposeText(body)).toBe('');
   });
+  it('does not treat Gmail signature separators as an authored draft', () => {
+    const body = document.createElement('div');
+    body.innerHTML = '<div><br clear="all"></div><span class="gmail_signature_prefix">-- </span><br><div class="gmail_signature" data-smartmail="gmail_signature">Pratik Thakker</div>';
+    expect(readGmailComposeText(body)).toBe('');
+  });
   it('does not silently truncate long content', () => {
     const body = document.createElement('div');
     body.textContent = 'a'.repeat(12_001);
@@ -60,7 +65,7 @@ describe('Gmail revision context', () => {
   it('passes the live draft through the nested quick-prompt panel too', () => {
     const gmail = readFileSync('src/content/gmail/index.ts', 'utf8');
     const quickPromptStart = gmail.indexOf('const submitFreeformPrompt = async () =>');
-    const quickPromptEnd = gmail.indexOf("freeformBtn.addEventListener('click'", quickPromptStart);
+    const quickPromptEnd = gmail.indexOf("generateBtn.addEventListener('click'", quickPromptStart);
     const quickPrompt = gmail.slice(quickPromptStart, quickPromptEnd);
 
     expect(quickPrompt).toContain('const currentDraft = readGmailComposeText(editableBody);');

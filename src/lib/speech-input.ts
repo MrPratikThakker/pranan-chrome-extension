@@ -32,7 +32,16 @@ export function createSpeechInput(callbacks: SpeechInputCallbacks): { start(): b
   recognition.interimResults = true;
   recognition.lang = document.documentElement.lang || navigator.language || 'en-US';
   let transcript = '';
-  recognition.onstart = callbacks.onStart;
+  let sessionOpen = false;
+  let startupTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearStartupTimer = () => {
+    if (startupTimer) clearTimeout(startupTimer);
+    startupTimer = null;
+  };
+  recognition.onstart = () => {
+    clearStartupTimer();
+    if (sessionOpen) callbacks.onStart();
+  };
   recognition.onresult = event => {
     let current = '';
     for (let index = 0; index < event.results.length; index++) {
@@ -42,16 +51,43 @@ export function createSpeechInput(callbacks: SpeechInputCallbacks): { start(): b
     }
     callbacks.onTranscript((transcript || current).trim());
   };
-  recognition.onerror = event => callbacks.onError(
-    event.error === 'not-allowed'
-      ? 'Microphone access was not allowed. You can keep typing your instructions.'
-      : 'Voice input stopped. Your transcript is preserved and ready to edit.',
-  );
-  recognition.onend = callbacks.onEnd;
+  recognition.onerror = event => {
+    clearStartupTimer();
+    if (!sessionOpen) return;
+    sessionOpen = false;
+    callbacks.onError(
+      event.error === 'not-allowed'
+        ? 'Microphone access was not allowed. You can keep typing your instructions.'
+        : 'Voice input stopped. Your transcript is preserved and ready to edit.',
+    );
+    callbacks.onEnd();
+  };
+  recognition.onend = () => {
+    clearStartupTimer();
+    if (!sessionOpen) return;
+    sessionOpen = false;
+    callbacks.onEnd();
+  };
   return {
     start: () => {
-      try { recognition.start(); return true; }
-      catch { callbacks.onError('Voice input is already active or unavailable.'); return false; }
+      try {
+        sessionOpen = true;
+        transcript = '';
+        startupTimer = setTimeout(() => {
+          if (!sessionOpen) return;
+          sessionOpen = false;
+          try { recognition.stop(); } catch { /* unavailable */ }
+          callbacks.onError('Microphone did not start. Check Chrome microphone access, then try again.');
+          callbacks.onEnd();
+        }, 4_000);
+        recognition.start();
+        return true;
+      } catch {
+        clearStartupTimer();
+        sessionOpen = false;
+        callbacks.onError('Voice input is already active or unavailable.');
+        return false;
+      }
     },
     stop: () => { try { recognition.stop(); } catch { /* already stopped */ } },
   };
