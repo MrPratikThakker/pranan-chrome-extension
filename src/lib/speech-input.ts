@@ -10,7 +10,10 @@ interface SpeechRecognitionLike {
   interimResults: boolean;
   lang: string;
   onstart: (() => void) | null;
-  onresult: ((event: { results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }> }) => void) | null;
+  onresult: ((event: {
+    resultIndex: number;
+    results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }>;
+  }) => void) | null;
   onerror: ((event: { error?: string }) => void) | null;
   onend: (() => void) | null;
   start(): void;
@@ -31,7 +34,10 @@ export function createSpeechInput(callbacks: SpeechInputCallbacks): { start(): b
   recognition.continuous = true;
   recognition.interimResults = true;
   recognition.lang = document.documentElement.lang || navigator.language || 'en-US';
-  let transcript = '';
+  // Chrome keeps prior final results in every later result event. Store each
+  // final segment by its result index so a later update replaces a segment
+  // instead of appending the same sentence again.
+  let finalSegments: string[] = [];
   let sessionOpen = false;
   let startupTimer: ReturnType<typeof setTimeout> | null = null;
   const clearStartupTimer = () => {
@@ -43,13 +49,18 @@ export function createSpeechInput(callbacks: SpeechInputCallbacks): { start(): b
     if (sessionOpen) callbacks.onStart();
   };
   recognition.onresult = event => {
-    let current = '';
-    for (let index = 0; index < event.results.length; index++) {
+    let interim = '';
+    for (let index = event.resultIndex; index < event.results.length; index++) {
       const result = event.results[index];
-      current += result[0]?.transcript || '';
-      if (result.isFinal) transcript = `${transcript} ${result[0]?.transcript || ''}`.trim();
+      const text = (result[0]?.transcript || '').trim();
+      if (result.isFinal) {
+        finalSegments[index] = text;
+      } else {
+        interim += text;
+      }
     }
-    callbacks.onTranscript((transcript || current).trim());
+    const completed = finalSegments.filter(Boolean).join(' ').trim();
+    callbacks.onTranscript([completed, interim.trim()].filter(Boolean).join(' ').trim());
   };
   recognition.onerror = event => {
     clearStartupTimer();
@@ -72,7 +83,7 @@ export function createSpeechInput(callbacks: SpeechInputCallbacks): { start(): b
     start: () => {
       try {
         sessionOpen = true;
-        transcript = '';
+        finalSegments = [];
         startupTimer = setTimeout(() => {
           if (!sessionOpen) return;
           sessionOpen = false;

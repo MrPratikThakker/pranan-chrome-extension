@@ -54,7 +54,7 @@ it('adds an editable voice transcript to the existing instruction', async () => 
   expect(voice.textContent).toBe('Stop voice');
 
   await act(async () => {
-    recognition.onresult?.({ results: [{ 0: { transcript: 'thank them and confirm Friday' }, isFinal: true }] });
+    recognition.onresult?.({ resultIndex: 0, results: [{ 0: { transcript: 'thank them and confirm Friday' }, isFinal: true }] });
   });
   expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Please thank them and confirm Friday');
 
