@@ -31,4 +31,21 @@ describe('draftErrorMessage', () => {
     expect(draftErrorMessage(new Error('boom'))).toBe('Draft failed to generate. Try again.');
     expect(draftErrorMessage(undefined)).toBe('Draft failed to generate. Try again.');
   });
+
+  it('offers the upgrade path when the plan quota is used up (402, XP-09)', () => {
+    expect(draftErrorMessage({ status: 402, upgradeUrl: 'https://app.pranan.ai/settings/billing' })).toMatch(/app\.pranan\.ai\/settings\/billing/);
+    expect(draftErrorMessage({ status: 402 })).toMatch(/upgrade/i);
+  });
+
+  it('tells a daily-budget 429 apart from a burst limit (XP-31)', () => {
+    expect(draftErrorMessage({ status: 429, code: 'DAILY_BUDGET' })).toMatch(/midnight UTC/);
+    expect(draftErrorMessage({ status: 429, code: 'AI_ERROR' })).toMatch(/busy/i);
+    expect(draftErrorMessage({ status: 429, code: 'RATE_LIMITED' })).toMatch(/couple of minutes/);
+  });
+
+  it('does not call a refresh blip a sign-out (EXT-08)', () => {
+    const msg = draftErrorMessage({ status: 503, code: 'AUTH_REFRESH_UNAVAILABLE' });
+    expect(msg).toMatch(/still signed in/i);
+  });
 });
+

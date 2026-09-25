@@ -2,6 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Fonts ship with the extension. Loading them from Google Fonts on every
+   panel open added latency, sent a request to Google, and broke the panel's
+   type offline (audit EXT-26). */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url('../assets/fonts/inter-300-900-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('../assets/fonts/jetbrains-mono-400-500-latin.woff2') format('woff2');
+}
+
 :root {
   /* v0.7.1 — Light theme as default. Dark via [data-theme="dark"]. */
 

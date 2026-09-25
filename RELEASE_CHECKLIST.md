@@ -26,7 +26,8 @@ Expected:
 - `typecheck`: zero errors
 - `test`: all vitest suites pass
 - `build`: `dist/` contains `manifest.json`, `popup.html`, `sidepanel.html`,
-  background.js, content/{gmail,slack,linkedin,universal,pranan-app}.js
+  background.js, content/{gmail,slack,linkedin,pranan-app}.js
+  (there is no universal any-site script; it was removed)
 - Built `manifest.json` version matches `package.json` version (the CI
   release workflow enforces this; doesn't hurt to eyeball)
 
@@ -55,19 +56,38 @@ Verify the extension loaded without errors:
 Run through every item. Each one is a real-world flow that has broken
 before. Mark pass/fail.
 
-### Auth boundary (the v0.4.0 architecture)
+### Auth boundary (bearer tokens, extension-started sign-in)
 
+- [ ] Signed out: popup shows "Continue to Pranan". Click it, sign in on
+      app.pranan.ai, and the popup and side panel become signed in
+      without any other step.
+- [ ] Open `app.pranan.ai/api/companion/token` directly in a tab WITHOUT
+      clicking Connect first. The callback page must NOT pair the
+      extension (the worker only accepts a sign-in it started).
+- [ ] Service worker DevTools: `chrome.storage.local.get(null)` shows no
+      `authToken` or `refreshToken`. `chrome.storage.session.get(null)`
+      holds them.
 - [ ] Open Pranan popup. Today snapshot loads. **No "Connect Account"
       prompt.**
 - [ ] Open Pranan side panel. Authed shell, no Connect prompt.
-- [ ] Sign out of `app.pranan.ai` in another tab. Reload Gmail.
-      Side panel correctly shows Connect prompt (auth boundary works).
-- [ ] Sign back in to `app.pranan.ai`. Reload Gmail. Side panel
-      auto-reauths, **no manual reconnect needed**. (This is the bug
-      class v0.4.0 closes.)
-- [ ] Open DevTools Network tab on app.pranan.ai. Confirm
-      `/api/companion/auth` request includes the Supabase auth cookie
-      (look for `Cookie: sb-...-auth-token=`).
+- [ ] Sign out of `app.pranan.ai` in another tab. The extension stays
+      signed in (by design; the Sessions panel says so).
+- [ ] Popup, Disconnect. Reopen the popup: it shows "Continue to Pranan",
+      and the side panel shows the Connect screen.
+- [ ] Restart Chrome. The extension is still signed in.
+
+### Privacy switches (both off by default)
+
+- [ ] Fresh install: popup, Privacy, both switches are off.
+- [ ] With the grammar switch off, type 60+ characters in a Gmail compose
+      and wait 5 seconds. The service worker Network tab shows no
+      `/api/companion/grammar` request.
+- [ ] Turn it on and repeat. One grammar request, and suggestions appear
+      in the side panel under "Writing suggestions".
+- [ ] With the LinkedIn switch off, post a comment: no
+      `/api/companion/voice-exemplar` request. Turn it on, press Enter to
+      add a line without posting: still no request. Post the comment: one
+      request.
 
 ### Gmail surface
 
@@ -145,7 +165,7 @@ git push origin --tags
 ```
 
 The Release workflow auto-builds, uploads to CWS, and creates a
-GitHub Release with the zip artifact. CI green ≠ shipped — confirm:
+GitHub Release with the zip artifact. CI green ≠ shipped. Confirm:
 
 - [ ] CI workflow run: success
 - [ ] Release workflow run: success including the
@@ -177,7 +197,7 @@ After approval:
 
 ---
 
-## When in doubt — DO NOT TAG
+## When in doubt, DO NOT TAG
 
 If a smoke test is ambiguous, if a console error is unexplained, if a
 network call looks weird: stop. Investigate. Fix. Re-run the gate.
@@ -198,7 +218,7 @@ release that breaks 1,000 users for 24 hours.
   a Vercel preview URL or future `staging.pranan.ai` for risk-free
   testing of schema/auth/model changes before they hit production.
 
-## Stage 7 — E2E smoke (automated, runs nightly + on push)
+## Stage 7 · E2E smoke (automated, runs nightly + on push)
 
 The `e2e-nightly.yml` workflow runs `npx playwright test` against a
 fresh build on every push to `main` and at 03:00 UTC daily. It loads
@@ -219,7 +239,7 @@ npm run test:e2e           # builds + runs the smoke specs
 Add new specs in `tests/e2e/`. Authenticated flows are deferred until
 we have a test account + cookie injection helper.
 
-## Stage 8 — E2E auth-flow tests (one-time setup)
+## Stage 8 · E2E auth-flow tests (one-time setup)
 
 The auth-flow specs in `tests/e2e/auth-flow.spec.ts` need a test
 account on Pranan + GitHub secrets configured. Steps:

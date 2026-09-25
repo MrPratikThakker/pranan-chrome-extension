@@ -1,3 +1,5 @@
+import { appUrl } from '@/lib/config';
+
 /** Shared production layout, also rendered by the screenshot regression fixture. */
 export function compactPromptBar(parts: {
   bar: HTMLElement; icon: HTMLElement; input: HTMLInputElement;
@@ -87,7 +89,7 @@ export function compactPromptBar(parts: {
   } catch { /* fixture or unavailable extension storage */ }
   tone.replaceChildren(toneLabel);
   const savedText = document.createElement('a'); savedText.textContent = 'Manage saved text';
-  savedText.href = 'https://app.pranan.ai/settings/snippets'; savedText.target = '_blank'; savedText.rel = 'noopener noreferrer';
+  savedText.href = appUrl('/settings/snippets'); savedText.target = '_blank'; savedText.rel = 'noopener noreferrer';
   savedText.style.cssText = 'color:var(--pranan-secondary,#475569);font-size:12px;';
   context.append(relationship, tone, sidePanel, savedText);
   const suggestions = document.createElement('div');

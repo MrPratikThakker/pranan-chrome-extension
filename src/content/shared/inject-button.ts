@@ -217,10 +217,14 @@ export function injectInlineButton(
       dropdown.classList.toggle('open');
     });
 
-    // Close dropdown on outside click
-    document.addEventListener('click', () => {
+    // Close dropdown on outside click. One document listener per button used
+    // to outlive the button forever (audit EXT-27); it now goes with it.
+    const closeDropdown = () => {
+      if (!host.isConnected) { document.removeEventListener('click', closeDropdown); return; }
       dropdown.classList.remove('open');
-    });
+    };
+    document.addEventListener('click', closeDropdown);
+    buttonCleanups.set(host, () => document.removeEventListener('click', closeDropdown));
 
     // Wire dropdown items
     const items = shadow.querySelectorAll('.pranan-dropdown-item');
@@ -266,8 +270,15 @@ export function setButtonLoading(host: HTMLElement, loading: boolean) {
  */
 export function removeInjectedButtons(container: Element) {
   const buttons = container.querySelectorAll(`[${PRANAN_BUTTON_ATTR}]`);
-  buttons.forEach(btn => btn.remove());
+  buttons.forEach(btn => {
+    buttonCleanups.get(btn)?.();
+    buttonCleanups.delete(btn);
+    btn.remove();
+  });
 }
+
+/** Document-level listeners owned by each injected button. */
+const buttonCleanups = new WeakMap<Element, () => void>();
 
 /**
  * Check if a Pranan button already exists near an anchor

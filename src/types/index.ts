@@ -68,6 +68,8 @@ export interface DraftResponse {
     tone: string;
     preview: string;
   }>;
+  /** Server note shown with the draft, e.g. an automated-sender warning (XP-25). */
+  notice?: string | null;
 }
 
 export interface RewriteResponse {
@@ -77,7 +79,8 @@ export interface RewriteResponse {
     replacement: string;
     reason: string;
   }>;
-  voiceMatchScore: number;
+  /** null when the server could not score the rewrite (XP-25). */
+  voiceMatchScore: number | null;
 }
 
 export interface GrammarCorrection {
@@ -95,18 +98,25 @@ export interface GrammarResponse {
     severity: 'info' | 'warning' | 'error';
     suggestion: string;
   }>;
-  overallScore: number;
+  /** null or negative when the server could not score the text (XP-25). */
+  overallScore: number | null;
   suggestions: string[];
+  parseWarning?: string | null;
 }
 
 export interface AuthResponse {
   valid: boolean;
   userId: string;
   tier: 'free' | 'premium' | 'team';
-  rateLimit: {
+  /**
+   * Display-only numbers from /api/companion/auth. They are not the limits the
+   * server enforces (monthly plan quota plus a daily AI budget), so the
+   * extension no longer shows them (audit XP-11).
+   */
+  rateLimit?: {
     requestsPerMinute: number;
-    draftsPerDay: number;
-    rewritesPerDay: number;
+    draftsPerDay: number | null;
+    rewritesPerDay: number | null;
     draftsUsedToday: number;
     rewritesUsedToday: number;
   };
@@ -163,11 +173,10 @@ export type MessageType =
   | 'GET_RELATIONSHIP_TIER'
   | 'GET_REPLY_INTENTS'
   | 'SET_TIER_OVERRIDE'
-  // v0.7 Compose pop-over (Surface B)
-  | 'GET_PROACTIVE_SUGGESTIONS'
-  | 'OPEN_THREAD'
-  // v0.8.x voice auto-capture
-  | 'CAPTURE_VOICE_EXEMPLAR';
+  // v0.8.x voice auto-capture (opt-in)
+  | 'CAPTURE_VOICE_EXEMPLAR'
+  // Recorded voice from a content script, transcribed by the worker
+  | 'TRANSCRIBE_AUDIO';
 
 export interface ExtensionMessage<T = unknown> {
   type: MessageType;
@@ -234,6 +243,16 @@ export interface DecayAlert {
   suggestedAction: string;
 }
 
+/** A background grammar or tone suggestion (opt-in, audit EXT-02). */
+export interface InlineGrammarSuggestion {
+  id: string;
+  range?: { start: number; end: number };
+  original: string;
+  suggestion: string;
+  type?: 'grammar' | 'tone' | 'voice' | string;
+  reason?: string;
+}
+
 export interface IntelligenceState {
   briefings: MeetingBriefing[];
   nudges: FollowUpNudge[];
@@ -288,16 +307,10 @@ export interface AppState {
   isBriefingLoading: boolean;
   isNudgesLoading: boolean;
 
+  // Opt-in background grammar suggestions for the active compose
+  inlineSuggestions: InlineGrammarSuggestion[];
+
   // Onboarding
   hasSeenOnboarding: boolean;
   interactionCount: number;
 }
-
-// --- Rate Limits ---
-
-export const RATE_LIMITS = {
-  free: { requestsPerMinute: 10, draftsPerDay: 15, rewritesPerDay: 25 },
-  premium: { requestsPerMinute: 30, draftsPerDay: Infinity, rewritesPerDay: Infinity },
-  team: { requestsPerMinute: 60, draftsPerDay: Infinity, rewritesPerDay: Infinity },
-} as const;
-

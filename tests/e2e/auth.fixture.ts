@@ -212,6 +212,11 @@ export async function launchAuthedExtensionContext(): Promise<{
   // Exercise the same nonce exchange and postMessage handoff as a real user.
   // This catches regressions across the website route, callback page, content
   // script, service worker, token validation, and Chrome storage in one flow.
+  // The worker only accepts a handoff for a sign-in the extension started
+  // (audit EXT-09). Record one, exactly as clicking Connect does.
+  await worker.evaluate(async () => {
+    await chrome.storage.session.set({ pendingCompanionLogin: { state: 'e2e', startedAt: Date.now() } });
+  });
   const pairingPage = await context.newPage();
   await pairingPage.goto(`${APP_ORIGIN}/api/companion/token`);
   await pairingPage.waitForURL(/\/auth\/companion-callback\?nonce=/, { timeout: 20_000 });
@@ -225,8 +230,11 @@ export async function launchAuthedExtensionContext(): Promise<{
 
   await expect.poll(
     () => worker.evaluate(async () => {
-      const stored = await chrome.storage.local.get(['authToken', 'refreshToken']);
-      return Boolean(stored.authToken && stored.refreshToken);
+      // Tokens live in trusted session storage, never in chrome.storage.local
+      // where content scripts could read them (audit EXT-10).
+      const stored = await chrome.storage.session.get(['authToken', 'refreshToken']);
+      const leaked = await chrome.storage.local.get(['authToken', 'refreshToken']);
+      return Boolean(stored.authToken && stored.refreshToken && !leaked.authToken && !leaked.refreshToken);
     }),
     { message: 'Companion callback should store an independent token pair', timeout: 10_000 },
   ).toBe(true);

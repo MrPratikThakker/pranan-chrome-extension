@@ -66,12 +66,16 @@ export function GrammarPanel({ result, isLoading, onBack, onApply, onApplyAll }:
           Back to context
         </button>
         <div className="flex items-center gap-2">
-          <span className={`text-xs font-mono font-medium ${
-            result.overallScore > 0.8 ? 'text-brand-green' :
-            result.overallScore > 0.6 ? 'text-brand-amber' : 'text-brand-red'
-          }`}>
-            Score: {Math.round(result.overallScore * 100)}
-          </span>
+          {/* The server sends null or -1 when it could not score the text.
+              That used to render as "Score: 0" or "Score: -100" (XP-25). */}
+          {typeof result.overallScore === 'number' && result.overallScore >= 0 && (
+            <span className={`text-xs font-mono font-medium ${
+              result.overallScore > 0.8 ? 'text-brand-green' :
+              result.overallScore > 0.6 ? 'text-brand-amber' : 'text-brand-red'
+            }`}>
+              Score: {Math.round(result.overallScore * 100)}
+            </span>
+          )}
         </div>
       </div>
 

@@ -3,9 +3,9 @@
  * Post-build manifest patcher.
  *
  * vite copies public/manifest.json into dist/ verbatim. For non-prod
- * builds we want to add the staging or preview origin to host_permissions
- * AND externally_connectable, so the extension can talk to that host
- * without a manifest-permission failure at runtime.
+ * builds we want to add the staging or preview origin to host_permissions,
+ * externally_connectable AND the sign-in handoff content script, so the
+ * extension can talk to that host and sign in there (see manifest-patch.mjs).
  *
  * Usage:
  *   VITE_API_HOST=https://staging.pranan.ai node scripts/build-manifest.mjs
@@ -18,8 +18,8 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import { PROD_ORIGIN, patchManifestForHost } from './manifest-patch.mjs';
 
-const PROD_ORIGIN = 'https://app.pranan.ai';
 const target = process.env.VITE_API_HOST || PROD_ORIGIN;
 
 if (target === PROD_ORIGIN) {
@@ -27,15 +27,12 @@ if (target === PROD_ORIGIN) {
   process.exit(0);
 }
 
-let parsed;
 try {
-  parsed = new URL(target);
+  new URL(target);
 } catch {
   console.error(`[build-manifest] VITE_API_HOST is not a valid URL: ${target}`);
   process.exit(1);
 }
-
-const matchPattern = `${parsed.protocol}//${parsed.host}/*`;
 
 const manifestPath = resolve('dist', 'manifest.json');
 if (!existsSync(manifestPath)) {
@@ -43,24 +40,11 @@ if (!existsSync(manifestPath)) {
   process.exit(1);
 }
 
-const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-
-manifest.host_permissions = Array.from(new Set([...(manifest.host_permissions || []), matchPattern]));
-
-if (manifest.externally_connectable?.matches) {
-  manifest.externally_connectable.matches = Array.from(
-    new Set([...manifest.externally_connectable.matches, matchPattern])
-  );
-}
-
-// Tag the manifest so it's obvious in chrome://extensions that this is a
-// non-prod build.
-const versionSuffix = parsed.host.replace(/\./g, '-');
-manifest.name = `${manifest.name} (${parsed.host})`;
-manifest.version_name = `${manifest.version} (${versionSuffix})`;
+const { manifest, matchPattern } = patchManifestForHost(JSON.parse(readFileSync(manifestPath, 'utf-8')), target);
 
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
 console.log(`[build-manifest] patched dist/manifest.json:`);
 console.log(`  added host_permission: ${matchPattern}`);
-console.log(`  name suffix: (${parsed.host})`);
+console.log(`  added content script match: ${matchPattern}`);
+console.log(`  name: ${manifest.name}`);
 console.log(`  version_name: ${manifest.version_name}`);

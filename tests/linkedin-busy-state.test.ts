@@ -16,18 +16,24 @@ const li = stripComments(raw);
  */
 describe('LinkedIn bars show that a draft is in flight', () => {
   it('enters a busy state on every draft request', () => {
-    const requests = (li.match(/type: 'INLINE_DRAFT_REQUEST'/g) || []).length;
+    // Comment drafts count too: they now share the same busy state and timeout.
+    const requests = (li.match(/type: '(INLINE_DRAFT_REQUEST|COMMENT_DRAFT_REQUEST)'/g) || []).length;
     const busy = (li.match(/setLinkedInBarsBusy\(true\)/g) || []).length;
     expect(requests).toBeGreaterThan(0);
     expect(busy).toBe(requests);
   });
 
   it('leaves the busy state on a draft, a comment draft, or a skip', () => {
-    for (const type of ['INSERT_DRAFT', 'DRAFT_SKIPPED', 'INSERT_COMMENT_DRAFT']) {
-      const at = li.indexOf(`if (message.type === '${type}') {`);
-      expect(at, `${type} handler missing`).toBeGreaterThan(-1);
-      expect(li.slice(at, at + 200)).toContain('setLinkedInBarsBusy(false)');
-    }
+    // Drafts and comment drafts share one handler; a skip goes through
+    // failLinkedInRequest, which must itself leave the busy state.
+    const insert = li.indexOf("if (message.type === 'INSERT_DRAFT' || message.type === 'INSERT_COMMENT_DRAFT') {");
+    expect(insert, 'insert handler missing').toBeGreaterThan(-1);
+    expect(li.slice(insert, insert + 900)).toContain('setLinkedInBarsBusy(false)');
+    const skip = li.indexOf("if (message.type === 'DRAFT_SKIPPED') {");
+    expect(skip, 'DRAFT_SKIPPED handler missing').toBeGreaterThan(-1);
+    expect(li.slice(skip, skip + 300)).toContain('failLinkedInRequest(');
+    const fail = li.slice(li.indexOf('function failLinkedInRequest'));
+    expect(fail.slice(0, fail.indexOf('\n}\n'))).toContain('setLinkedInBarsBusy(false)');
   });
 
   /**

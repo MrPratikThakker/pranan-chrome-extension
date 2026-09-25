@@ -1,38 +1,43 @@
 /**
- * Pranan Companion -- Content Script for app.pranan.ai
+ * Pranan Companion -- Content Script for the Pranan web app
  *
- * Runs on app.pranan.ai to facilitate auth token exchange.
- * Listens for:
- * 1. postMessage from the companion-callback page
- * 2. A hidden DOM element with the token (fallback)
+ * Runs on app.pranan.ai (and the staging or preview host in those builds) to
+ * receive the sign-in handoff from the companion-callback page, which posts
+ * PRANAN_COMPANION_AUTH with either:
  *
- * Forwards the token to the service worker which stores it in
- * chrome.storage.local and broadcasts to the side panel.
+ *  - { nonce }                   the one-time sign-in nonce; the service worker
+ *                                exchanges it, so tokens never touch page script
+ *  - { token, refreshToken }     today's app, which exchanges the nonce itself
+ *
+ * plus an optional { state } echoed from the login URL.
+ *
+ * This script only forwards. The service worker decides: it accepts a handoff
+ * only while a sign-in the extension started is pending (audit EXT-09), and
+ * stores tokens where content scripts cannot read them (audit EXT-10).
  */
 
 import { safeSendMessage } from '@/lib/runtime';
 
-console.log('[Pranan Content Script] Loaded on', window.location.href);
-
-// Listen for postMessage from the companion-callback page
 window.addEventListener('message', (event) => {
   if (event.origin !== window.location.origin) return;
+  if (event.source !== window) return;
   if (event.data?.type !== 'PRANAN_COMPANION_AUTH') return;
 
-  const token = event.data.token;
-  if (!token || typeof token !== 'string') return;
+  const nonce = typeof event.data.nonce === 'string' ? event.data.nonce : undefined;
+  const token = typeof event.data.token === 'string' ? event.data.token : undefined;
+  if (!nonce && !token) return;
   const refreshToken = typeof event.data.refreshToken === 'string' ? event.data.refreshToken : undefined;
+  const state = typeof event.data.state === 'string' ? event.data.state : undefined;
 
-  console.log('[Pranan Content Script] Received token via postMessage, forwarding to service worker...');
-
-  // Forward to service worker
   // safeSendMessage is promise-based, and it already swallows the dead-context
   // case that chrome.runtime.lastError was here to report.
   safeSendMessage<{ ok?: boolean }>(
-    { type: 'AUTH_TOKEN_FROM_WEB', token, refreshToken }
+    nonce
+      ? { type: 'AUTH_TOKEN_FROM_WEB', nonce, state }
+      : { type: 'AUTH_TOKEN_FROM_WEB', token, refreshToken, state }
   ).then(
     (response) => {
-      if (response?.ok) {
+      if (response?.ok && !document.getElementById('pranan-companion-ack')) {
         // Signal success back to the page
         const ack = document.createElement('div');
         ack.id = 'pranan-companion-ack';

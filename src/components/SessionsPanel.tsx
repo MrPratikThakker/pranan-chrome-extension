@@ -4,7 +4,7 @@ import { getActiveSessions, revokeActiveSession } from '@/lib/api-client';
 import type { ActiveSession } from '@/types';
 
 function label(session: ActiveSession): string {
-  if (session.kind === 'companion') return 'Chrome companion';
+  if (session.kind === 'companion') return 'Pranan for Chrome';
   if (/mobile|android|iphone|ipad/i.test(session.userAgent ?? '')) return 'Mobile browser';
   if (/chrome/i.test(session.userAgent ?? '')) return 'Chrome browser';
   if (/safari/i.test(session.userAgent ?? '')) return 'Safari browser';
@@ -61,6 +61,7 @@ export function SessionsPanel({ onBack, onCurrentRevoked }: { onBack: () => void
           <button onClick={onBack} className="text-[10px] text-brand-text-3 hover:text-brand-text mb-2">Back</button>
           <h2 id="sessions-heading" className="text-sm font-medium text-brand-text">Active Sessions</h2>
           <p className="text-[10px] leading-relaxed text-brand-text-3 mt-1">Revocation does not disconnect Gmail, Slack, or HubSpot.</p>
+          <p className="text-[10px] leading-relaxed text-brand-text-3 mt-1">Signing out of app.pranan.ai does not sign out this extension. Use Sign out here or Disconnect in the toolbar popup.</p>
         </div>
         <button onClick={all} disabled={busy !== null || sessions.length === 0} className="text-[10px] px-2.5 py-1.5 rounded border border-brand-red/30 text-brand-red hover:bg-brand-red/10 disabled:opacity-40">
           Sign out all

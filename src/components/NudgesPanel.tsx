@@ -14,7 +14,8 @@ interface NudgesPanelProps {
   decayAlerts: DecayAlert[];
   isLoading: boolean;
   onBack: () => void;
-  onDismiss: (nudgeId: string) => void;
+  /** Resolves false when the server did not record the dismissal. */
+  onDismiss: (nudgeId: string) => Promise<boolean> | void;
   onDraftFromNudge: (nudgeId: string) => void;
 }
 
@@ -30,7 +31,13 @@ export function NudgesPanel({ nudges, decayAlerts, isLoading, onBack, onDismiss,
 
   const handleDismiss = (id: string) => {
     setDismissedIds(prev => new Set(prev).add(id));
-    onDismiss(id);
+    // Hidden optimistically; brought back if the server did not save it, so a
+    // failed dismissal is visible now rather than reappearing later.
+    void Promise.resolve(onDismiss(id)).then((saved) => {
+      if (saved === false) {
+        setDismissedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+      }
+    });
   };
 
   const visibleNudges = nudges.filter(n => !dismissedIds.has(n.id));
