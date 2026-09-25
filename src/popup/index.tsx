@@ -20,9 +20,12 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Platform, AuthResponse } from '@/types';
-import { getTodaySnapshot, type TodaySnapshot } from '@/lib/api-client';
+import { getTodaySnapshot, revokeActiveSession, type TodaySnapshot } from '@/lib/api-client';
 import { bootstrapSentry } from '@/lib/observability';
 import { appUrl } from '@/lib/config';
+import { readAuthTokens, clearAuthTokens } from '@/lib/token-store';
+import { beginCompanionLogin } from '@/lib/login-handoff';
+import { getPrivacySettings, setPrivacySetting, DEFAULT_PRIVACY_SETTINGS, type PrivacySettings } from '@/lib/privacy-settings';
 
 
 bootstrapSentry('popup');
@@ -36,6 +39,7 @@ interface PopupState {
   snapshot: TodaySnapshot | null;
   snapshotLoading: boolean;
   snapshotError: string | null;
+  privacy: PrivacySettings;
 }
 
 function Popup() {
@@ -48,7 +52,9 @@ function Popup() {
     snapshot: null,
     snapshotLoading: true,
     snapshotError: null,
+    privacy: { ...DEFAULT_PRIVACY_SETTINGS },
   });
+  const [disconnecting, setDisconnecting] = useState(false);
 
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
@@ -57,7 +63,6 @@ function Popup() {
       if (url.includes('mail.google.com')) platform = 'gmail';
       else if (url.includes('app.slack.com')) platform = 'slack';
       else if (url.includes('linkedin.com')) platform = 'linkedin';
-      else platform = 'universal';
 
       // Auth resolution is split into two phases to eliminate the
       // 'Connect Account' flicker on cold popup open. The bug:
@@ -73,12 +78,14 @@ function Popup() {
       // Phase 2 (~1-2s): fetch today snapshot in the background, fill
       // it in. snapshotLoading stays true until this completes so the
       // numbers section can show its skeleton.
-      const [storage, authResp] = await Promise.all([
-        chrome.storage.local.get(['authToken', 'lastKnownAuthValid']).catch(() => ({} as Record<string, unknown>)),
+      const [storage, authResp, tokens, privacy] = await Promise.all([
+        chrome.storage.local.get(['lastKnownAuthValid']).catch(() => ({} as Record<string, unknown>)),
         chrome.runtime.sendMessage({ type: 'AUTH_STATUS' }).catch(() => null),
+        readAuthTokens().catch(() => ({ authToken: null, refreshToken: null })),
+        getPrivacySettings(),
       ]);
 
-      const hasStoredToken = !!(storage as { authToken?: string }).authToken;
+      const hasStoredToken = !!tokens.authToken;
       const hintValid = (storage as { lastKnownAuthValid?: boolean }).lastKnownAuthValid === true;
       const swValid = !!authResp?.auth?.valid;
       // Post-v0.4.0 cookie auth: hintValid alone is sufficient (no token
@@ -92,6 +99,7 @@ function Popup() {
         user: authResp?.auth || null,
         platform,
         hasActiveCompose: false,
+        privacy,
       }));
 
       // Phase 2: snapshot fetch in the background. Doesn't block render.
@@ -156,22 +164,42 @@ function Popup() {
     window.close();
   };
 
-  const openLogin = () => {
-    chrome.tabs.create({ url: appUrl('/login?source=companion') });
+  const openLogin = async () => {
+    // Records the pending sign-in the worker requires before it will accept
+    // tokens from the web app (audit EXT-09). Await before closing so the
+    // popup is not torn down mid-write.
+    try { await beginCompanionLogin(); } catch { /* tab creation failed; nothing to clean up */ }
     window.close();
   };
 
+  const togglePrivacy = async (key: keyof PrivacySettings, value: boolean) => {
+    setState((s) => ({ ...s, privacy: { ...s.privacy, [key]: value } }));
+    try {
+      const next = await setPrivacySetting(key, value);
+      setState((s) => ({ ...s, privacy: next }));
+    } catch {
+      setState((s) => ({ ...s, privacy: { ...s.privacy, [key]: !value } }));
+    }
+  };
+
   const disconnect = async () => {
-    // Clear the stored Bearer + refresh tokens DIRECTLY from the popup. Doing the
-    // removal here (not only via a DISCONNECT message to the service worker) fixes
-    // the MV3 race where window.close() tore down the popup's message port before
-    // the message reached the SW, so tokens were never cleared and "Disconnect"
-    // appeared to do nothing (Pratik 2026-07-22). Web sign-out does not revoke the
-    // extension's own session, so this explicit control must be reliable.
-    try { await chrome.storage.local.remove(['authToken', 'refreshToken']); } catch { /* pass */ }
+    if (disconnecting) return;
+    setDisconnecting(true);
+    // End the server-side session first, while we still hold the token, so a
+    // copied refresh token stops working too. This is what the side panel's
+    // Sign out already did; the popup only deleted local tokens (audit EXT-23).
+    // Best effort: a network failure must not stop the local sign-out.
+    try { await revokeActiveSession('current'); } catch { /* local deletion below is the safety net */ }
+    // Clear the tokens DIRECTLY from the popup. Doing the removal here (not only
+    // via a DISCONNECT message to the service worker) fixes the MV3 race where
+    // window.close() tore down the popup's message port before the message
+    // reached the SW (Pratik 2026-07-22).
+    try { await clearAuthTokens(); } catch { /* pass */ }
+    // Drop the "last known signed in" hint too, or the next popup open would
+    // still show the account as connected.
+    try { await chrome.storage.local.set({ lastKnownAuthValid: false }); } catch { /* pass */ }
     // Then notify the SW to drop its cached auth + update the side panel; await so
-    // it is actually delivered before we close. SW asleep is fine -- storage (the
-    // source of truth) is already cleared.
+    // it is actually delivered before we close.
     try { await chrome.runtime.sendMessage({ type: 'DISCONNECT' }); } catch { /* pass */ }
     window.close();
   };
@@ -197,7 +225,6 @@ function Popup() {
   };
 
   const platformLabel = state.platform === 'unknown' ? 'Any page' :
-    state.platform === 'universal' ? document.title?.slice(0, 20) || 'Web page' :
     state.platform.charAt(0).toUpperCase() + state.platform.slice(1);
 
   const snap = state.snapshot;
@@ -301,7 +328,7 @@ function Popup() {
           <p style={{ fontSize: 11, color: 'rgba(10,10,11,0.4)', marginBottom: 12 }}>
             Already have an account? Click below to reconnect.
           </p>
-          <button onClick={openLogin} style={{
+          <button onClick={() => { void openLogin(); }} style={{
             width: '100%', padding: '8px 16px',
             fontSize: 12, fontWeight: 600,
             color: '#fafafa',
@@ -339,7 +366,7 @@ function Popup() {
               {state.snapshotLoading && !snap ? (
                 <div style={skeletonNumber} />
               ) : (
-                <div style={tileValue}>{snap?.draftsReady ?? '—'}</div>
+                <div style={tileValue}>{snap?.draftsReady ?? '-'}</div>
               )}
               <div style={tileSub}>Tap to triage</div>
             </button>
@@ -348,7 +375,7 @@ function Popup() {
               {state.snapshotLoading && !snap ? (
                 <div style={skeletonNumber} />
               ) : (
-                <div style={tileValue}>{snap?.threadsAwaiting ?? '—'}</div>
+                <div style={tileValue}>{snap?.threadsAwaiting ?? '-'}</div>
               )}
               <div style={tileSub}>To Respond</div>
             </button>
@@ -367,7 +394,7 @@ function Popup() {
                 <div style={skeletonNumber} />
               ) : (
                 <div style={{ ...tileValue, display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                  {snap?.voiceScore ?? '—'}
+                  {snap?.voiceScore ?? '-'}
                   {snap?.voiceScore != null && snap?.voiceDelta !== 0 && (
                     <span style={{ fontSize: 11, color: voiceColor }}>{voiceArrow} {Math.abs(snap.voiceDelta)}</span>
                   )}
@@ -379,7 +406,7 @@ function Popup() {
               {state.snapshotLoading && !snap ? (
                 <div style={skeletonText} />
               ) : (
-                <div style={tileValue}>{snap?.lastSyncAgo ?? '—'}</div>
+                <div style={tileValue}>{snap?.lastSyncAgo ?? '-'}</div>
               )}
             </div>
           </button>
@@ -426,13 +453,6 @@ function Popup() {
           {/* Divider */}
           <div style={{ height: 1, background: 'rgba(10,10,11,0.06)', margin: '8px 0' }} />
 
-          {/* Usage */}
-          {state.user?.tier === 'free' && state.user.rateLimit && (
-            <div style={{ fontSize: 10, color: 'rgba(10,10,11,0.35)', marginBottom: 8 }}>
-              {state.user.rateLimit.draftsUsedToday}/{state.user.rateLimit.draftsPerDay} drafts today
-            </div>
-          )}
-
           {/* Open full panel */}
           <button onClick={openSidePanel} style={{
             width: '100%', padding: '6px 12px',
@@ -449,14 +469,41 @@ function Popup() {
             </svg>
           </button>
 
-          {/* Disconnect — clears the extension's stored tokens (F-13). */}
-          <button onClick={() => { void disconnect(); }} style={{
+          {/* Privacy: both off by default (audit EXT-02, EXT-03). */}
+          <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 6, background: 'rgba(10,10,11,0.03)', border: '1px solid rgba(10,10,11,0.08)' }}>
+            <div style={tileLabel}>Privacy</div>
+            <label style={toggleRow}>
+              <input
+                type="checkbox"
+                checked={state.privacy.passiveGrammarChecks}
+                onChange={(e) => { void togglePrivacy('passiveGrammarChecks', e.target.checked); }}
+              />
+              <span>
+                Check grammar while I type
+                <span style={toggleHint}>Sends what you type in Gmail, Slack and LinkedIn to Pranan after a short pause. Off unless you turn it on.</span>
+              </span>
+            </label>
+            <label style={toggleRow}>
+              <input
+                type="checkbox"
+                checked={state.privacy.linkedinVoiceCapture}
+                onChange={(e) => { void togglePrivacy('linkedinVoiceCapture', e.target.checked); }}
+              />
+              <span>
+                Learn my voice from LinkedIn comments
+                <span style={toggleHint}>Saves comments you post on LinkedIn to your voice profile. Off unless you turn it on.</span>
+              </span>
+            </label>
+          </div>
+
+          {/* Disconnect: ends this extension's session (F-13, EXT-23). */}
+          <button onClick={() => { void disconnect(); }} disabled={disconnecting} style={{
             width: '100%', padding: '6px 12px', marginTop: 6,
             fontSize: 11, fontWeight: 500,
             color: 'rgba(248,113,113,0.85)',
             background: 'transparent', border: 'none', cursor: 'pointer',
           }}>
-            Disconnect
+            {disconnecting ? 'Disconnecting...' : 'Disconnect'}
           </button>
         </>
       )}
@@ -522,6 +569,18 @@ const skeletonText: React.CSSProperties = {
   borderRadius: 4,
   background: 'rgba(10,10,11,0.06)',
   animation: 'pranan-pulse 1.4s ease-in-out infinite',
+};
+
+const toggleRow: React.CSSProperties = {
+  display: 'flex', alignItems: 'flex-start', gap: 8,
+  marginTop: 8, fontSize: 11, fontWeight: 500,
+  color: 'rgba(10,10,11,0.8)', cursor: 'pointer',
+};
+
+const toggleHint: React.CSSProperties = {
+  display: 'block', marginTop: 2,
+  fontSize: 10, fontWeight: 400,
+  color: 'rgba(10,10,11,0.45)',
 };
 
 const actionBtnStyle: React.CSSProperties = {

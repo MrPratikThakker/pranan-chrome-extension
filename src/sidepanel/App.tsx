@@ -21,8 +21,10 @@ import { SnippetsPanel } from '@/components/SnippetsPanel';
 import { SessionsPanel } from '@/components/SessionsPanel';
 import { VoicePromptField } from '@/components/VoicePromptField';
 import { dismissNudge, draftFromNudge } from '@/lib/api-client';
+import { draftErrorMessage } from '@/lib/draft-error-message';
+import { beginCompanionLogin } from '@/lib/login-handoff';
 import type { ExtensionMessage, Platform, MeetingBriefing } from '@/types';
-import { APP_ORIGIN, appUrl } from '@/lib/config';
+import { appUrl } from '@/lib/config';
 
 // ---------------------------------------------------------------------------
 // Error Boundary
@@ -68,8 +70,6 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
   }
 }
 
-const API_BASE = APP_ORIGIN;
-
 function AppInner() {
   const {
     isAuthenticated,
@@ -112,6 +112,7 @@ function AppInner() {
     loadBriefings,
     loadNudges,
     loadDecayAlerts,
+    inlineSuggestions,
   } = useStore();
 
   const [quickPrompt, setQuickPrompt] = useState('');
@@ -190,9 +191,10 @@ function AppInner() {
 
   const handleConnect = useCallback(() => {
     if (import.meta.env.DEV) console.log('[Pranan] Connect clicked, opening login...');
-    chrome.tabs.create({ url: `${API_BASE}/login?source=companion` })
-      .then((tab) => { if (import.meta.env.DEV) console.log('[Pranan] Tab created:', tab?.id); })
-      .catch((err) => console.error('[Pranan] Failed to create tab:', err));
+    // Records the pending sign-in the worker requires before it accepts
+    // tokens from the web app (audit EXT-09).
+    beginCompanionLogin()
+      .catch((err) => console.error('[Pranan] Failed to start sign-in:', err));
   }, []);
 
   const handleGenerateDraft = useCallback(() => {
@@ -263,20 +265,31 @@ function AppInner() {
     setViewMode('context');
   }, [handleInsertDraft, clearRewrite, setViewMode]);
 
-  const handleDismissNudge = useCallback(async (nudgeId: string) => {
+  const handleDismissNudge = useCallback(async (nudgeId: string): Promise<boolean> => {
     try {
       await dismissNudge(nudgeId);
+      return true;
     } catch {
-      // Silent -- optimistic UI already removed it
+      // The panel hid it optimistically and puts it back on false, so a failed
+      // dismissal is visible now instead of quietly returning on the next load.
+      setError('Could not dismiss that follow-up. Try again.');
+      return false;
     }
-  }, []);
+  }, [setError]);
 
   const handleDraftFromNudge = useCallback(async (nudgeId: string) => {
+    useStore.setState({ isDraftLoading: true, error: null, viewMode: 'draft' });
     try {
       const draft = await draftFromNudge(nudgeId);
-      useStore.setState({ currentDraft: draft, viewMode: 'draft' });
+      useStore.setState({
+        currentDraft: { ...draft, draft: draft.draft || '', alternativeTones: draft.alternativeTones || [] },
+        isDraftLoading: false,
+        viewMode: 'draft',
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate draft');
+      const status = err && typeof err === 'object' && 'status' in err ? (err as { status?: unknown }).status : undefined;
+      useStore.setState({ isDraftLoading: false });
+      setError(status === 402 || status === 429 ? draftErrorMessage(err) : (err instanceof Error ? err.message : 'Failed to generate draft'));
     }
   }, [setError]);
 
@@ -395,13 +408,6 @@ function AppInner() {
             </span>
           )}
 
-          {/* Usage indicator for free tier */}
-          {user?.tier === 'free' && user.rateLimit && (
-            <span className="text-[10px] text-brand-text-3 font-mono tabular-nums">
-              {user.rateLimit.draftsUsedToday}/{user.rateLimit.draftsPerDay}
-            </span>
-          )}
-
           <button
             onClick={() => setViewMode('sessions')}
             className="w-6 h-6 flex items-center justify-center text-brand-text-3 hover:text-brand-text rounded-md hover:bg-brand-surface-2 transition-all"
@@ -490,7 +496,7 @@ function AppInner() {
                 {/* Contextual greeting */}
                 <div className="py-3">
                   <p className="text-sm font-light text-brand-text tracking-[-0.04em]">
-                    {currentPlatform === 'gmail' ? 'Your inbox, augmented.' : currentPlatform !== 'unknown' ? `Pranan on ${currentPlatform}` : 'Pranan Companion'}
+                    {currentPlatform === 'gmail' ? 'Your inbox, augmented.' : currentPlatform !== 'unknown' ? `Pranan on ${currentPlatform}` : 'Pranan for Chrome'}
                   </p>
                   <p className="text-[11px] text-brand-text-3 mt-0.5">
                     {currentPlatform === 'gmail'
@@ -687,6 +693,22 @@ function AppInner() {
                     : 'Add a recipient to personalize tone and relationship context.'}
                 </p>
               </div>
+            )}
+
+            {inlineSuggestions.length > 0 && (
+              <section className="rounded-lg border border-brand-border bg-brand-surface p-3 space-y-1.5" aria-labelledby="writing-suggestions">
+                <p id="writing-suggestions" className="text-[10px] font-medium text-brand-text-3">Writing suggestions</p>
+                <ul className="space-y-1.5">
+                  {inlineSuggestions.map((item) => (
+                    <li key={item.id} className="text-[11px] leading-relaxed text-brand-text-2">
+                      <span className="line-through text-brand-text-3">{item.original}</span>
+                      {' '}
+                      <span className="text-brand-text">{item.suggestion}</span>
+                      {item.reason && <span className="block text-[10px] text-brand-text-3">{item.reason}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </section>
             )}
 
             <section className="space-y-1.5" aria-labelledby="reply-starting-points">

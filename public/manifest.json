@@ -3,11 +3,10 @@
   "name": "Pranan: AI Email Assistant in Your Voice",
   "version": "0.8.68",
   "description": "Your AI email twin. One-tap replies in your voice in Gmail, with relationship context, tone control, and smart nudges.",
+  "minimum_chrome_version": "116",
   "permissions": [
-    "activeTab",
     "storage",
     "sidePanel",
-    "tabs",
     "alarms",
     "webNavigation",
     "scripting"

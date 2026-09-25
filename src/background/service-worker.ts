@@ -9,14 +9,34 @@
  * - Keyboard shortcut commands
  * - Phase 1-5: Inline requests, contact popups, grammar checks,
  *   side panel opening, intelligence alerts
+ * - API calls on behalf of content scripts (they never call the API or read
+ *   tokens themselves; audit EXT-07, EXT-10)
  */
 
-import { validateAuth, getContactContext, generateDraft, rewriteText, checkGrammar, getProactiveSuggestions, getReplyIntents, setTierOverride, refreshAccessToken, postVoiceExemplar } from '@/lib/api-client';
+import {
+  validateAuth,
+  getContactContext,
+  generateDraft,
+  checkGrammar,
+  getReplyIntents,
+  setTierOverride,
+  refreshAccessTokenWithOutcome,
+  postVoiceExemplar,
+  transcribeAudio,
+  exchangeLoginNonce,
+  setAuthExpiredHandler,
+  type DraftRequest,
+} from '@/lib/api-client';
 import { draftErrorMessage } from '@/lib/draft-error-message';
 import type { ExtensionMessage, Platform, AuthResponse, ContactContext } from '@/types';
 import { bootstrapSentry } from '@/lib/observability';
 import { APP_ORIGIN } from '@/lib/config';
 import { usesDirectWorkerPath } from './inline-draft-routing';
+import { clearAuthTokens, writeAuthTokens, restrictTokenStorageToTrustedContexts } from '@/lib/token-store';
+import { getPrivacySettings } from '@/lib/privacy-settings';
+import { beginCompanionLogin, consumePendingLogin, restorePendingLogin } from '@/lib/login-handoff';
+import { base64ToBlob, safeAudioMimeType, MAX_AUDIO_BASE64_LENGTH } from '@/lib/audio-transfer';
+import { isOwnContentScript, isTrustedPrivilegedSender, isValidTier } from './sender-trust';
 
 // ---------------------------------------------------------------------------
 // State (persisted via chrome.storage, rebuilt on service worker restart)
@@ -24,6 +44,7 @@ import { usesDirectWorkerPath } from './inline-draft-routing';
 
 
 bootstrapSentry('service-worker');
+void restrictTokenStorageToTrustedContexts();
 
 let cachedAuth: AuthResponse | null = null;
 const inlineRequests = new Map<string, AbortController>();
@@ -42,21 +63,64 @@ let pendingValidation: Promise<AuthResponse> | null = null;
 // ---------------------------------------------------------------------------
 
 /**
+ * The worker wakes for every message, alarm and tab event. Validating on
+ * every wake hit /api/companion/auth (which runs database counts) far more
+ * often than needed (audit EXT-22). A confirmed-valid result is reused for a
+ * few minutes across wakes; anything else is re-checked.
+ */
+const AUTH_CACHE_KEY = 'authCache';
+const AUTH_CACHE_TTL_MS = 10 * 60 * 1000;
+
+async function readAuthCache(): Promise<AuthResponse | null> {
+  try {
+    const stored = await chrome.storage.session.get(AUTH_CACHE_KEY);
+    const entry = stored?.[AUTH_CACHE_KEY] as { auth?: AuthResponse; ts?: number } | undefined;
+    if (!entry?.auth?.valid || typeof entry.ts !== 'number') return null;
+    if ((entry.auth as { transient?: boolean }).transient) return null;
+    if (Date.now() - entry.ts > AUTH_CACHE_TTL_MS) return null;
+    return entry.auth;
+  } catch {
+    return null;
+  }
+}
+
+async function writeAuthCache(auth: AuthResponse | null): Promise<void> {
+  try {
+    if (auth?.valid && !(auth as { transient?: boolean }).transient) {
+      await chrome.storage.session.set({ [AUTH_CACHE_KEY]: { auth, ts: Date.now() } });
+    } else {
+      await chrome.storage.session.remove(AUTH_CACHE_KEY);
+    }
+  } catch { /* cache is an optimisation only */ }
+}
+
+async function invalidateAuthCache(): Promise<void> {
+  try { await chrome.storage.session.remove(AUTH_CACHE_KEY); } catch { /* pass */ }
+}
+
+/**
  * Deduplicated validateAuth: if a validation is already in-flight,
  * return that promise instead of firing a parallel one.
  */
 async function deduplicatedValidateAuth(): Promise<AuthResponse> {
   if (pendingValidation) return pendingValidation;
-  pendingValidation = validateAuth().finally(() => {
-    pendingValidation = null;
-  });
+  pendingValidation = validateAuth()
+    .then(async (auth) => { await writeAuthCache(auth); return auth; })
+    .finally(() => {
+      pendingValidation = null;
+    });
   return pendingValidation;
 }
 
-async function initAuth(): Promise<boolean> {
-  // v0.4.0+: cookie-based auth means we must always call validateAuth.
-  // The legacy stored Bearer token is no longer the gate; the user may be
-  // signed into app.pranan.ai (cookie present) without any stored token.
+async function initAuth(options: { allowCached?: boolean } = {}): Promise<boolean> {
+  if (options.allowCached) {
+    const cached = await readAuthCache();
+    if (cached) {
+      cachedAuth = cached;
+      ensureRefreshAlarm();
+      return true;
+    }
+  }
   try {
     cachedAuth = await deduplicatedValidateAuth();
     if (cachedAuth.valid) scheduleTokenRefresh();
@@ -65,6 +129,24 @@ async function initAuth(): Promise<boolean> {
     cachedAuth = null;
     return false;
   }
+}
+
+/** Reset every piece of worker auth state and tell the side panel. */
+async function markSignedOut(): Promise<void> {
+  cachedAuth = null;
+  await invalidateAuthCache();
+  broadcastToSidePanel({ type: 'AUTH_STATUS', payload: { valid: false } });
+}
+
+// A 401 seen by the worker's own API calls lands here (audit EXT-24).
+setAuthExpiredHandler(() => { void markSignedOut(); });
+
+function ensureRefreshAlarm() {
+  try {
+    chrome.alarms.get(REFRESH_ALARM_NAME, (alarm) => {
+      if (!alarm) scheduleTokenRefresh();
+    });
+  } catch { /* alarms unavailable */ }
 }
 
 function scheduleTokenRefresh() {
@@ -84,8 +166,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (cachedAuth.valid) {
       scheduleTokenRefresh();
     } else {
-      await chrome.storage.local.remove(['authToken', 'refreshToken']);
-      broadcastToSidePanel({ type: 'AUTH_STATUS', payload: { valid: false } });
+      await clearAuthTokens();
+      await markSignedOut();
     }
   } catch {
     // Transient failure (network blip, server waking, laptop resuming). Do NOT
@@ -190,25 +272,6 @@ chrome.runtime.onMessage.addListener(
   }
 );
 
-/**
- * SECURITY (sweep 2026-06-09): privileged message types (auth token storage,
- * tier override) must only be honored from the extension's own UI pages or a
- * content script running on the Pranan web-app origin. Content scripts on
- * Gmail/Slack/LinkedIn share the same runtime id, so id alone is not enough;
- * the discriminator is sender.url / sender.origin. This blocks a malicious or
- * compromised page on a third-party origin from force-setting a session token
- * (account swap / session fixation) or corrupting relationship classifications.
- */
-function isTrustedPrivilegedSender(sender: chrome.runtime.MessageSender): boolean {
-  // Extension's own pages (sidepanel/popup/options) report a chrome-extension:// URL.
-  const fromExtensionUi = typeof sender.url === 'string'
-    && sender.url.startsWith(`chrome-extension://${chrome.runtime.id}/`);
-  // Content script injected into the Pranan web app.
-  const fromAppOrigin = sender.origin === APP_ORIGIN
-    || (typeof sender.url === 'string' && sender.url.startsWith(APP_ORIGIN));
-  return fromExtensionUi || fromAppOrigin;
-}
-
 async function handleMessage(
   message: ExtensionMessage,
   sender: chrome.runtime.MessageSender
@@ -227,8 +290,10 @@ async function handleMessage(
     // contexts send REFRESH_TOKEN; refreshAccessToken() dedups via refreshInFlight
     // and persists the new token to storage for the caller to re-read.
     case 'REFRESH_TOKEN': {
-      await refreshAccessToken();
-      return { ok: true };
+      // The outcome lets the caller tell a dead refresh token (sign in again)
+      // from a rate limit or server blip (keep the session, retry later).
+      const { outcome } = await refreshAccessTokenWithOutcome();
+      return { ok: outcome === 'refreshed', outcome };
     }
 
     case 'AUTH_STATUS':
@@ -258,14 +323,9 @@ async function handleMessage(
       // API client detected expired token. Clear it, reset cached auth, and
       // broadcast AUTH_STATUS to the side panel so it switches back to the
       // AuthPanel (otherwise the user sits in a stale context view forever).
-      try {
-        await chrome.storage.local.remove(['authToken', 'refreshToken']);
-      } catch { /* pass */ }
-      cachedAuth = null;
-      broadcastToSidePanel({
-        type: 'AUTH_STATUS',
-        payload: { valid: false },
-      });
+      if (!isTrustedPrivilegedSender(sender)) return { ok: false };
+      await clearAuthTokens();
+      await markSignedOut();
       try {
         if (chrome.action && 'openPopup' in chrome.action) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -276,7 +336,8 @@ async function handleMessage(
     }
 
     case 'SIDE_PANEL_READY': {
-      const isAuthed = await initAuth();
+      // The panel runs its own checkAuth; a recent confirmed result is enough here.
+      const isAuthed = await initAuth({ allowCached: true });
       const tab = sender.tab;
       const platform = tab?.url ? detectPlatform(tab.url) : 'unknown';
 
@@ -337,10 +398,11 @@ async function handleMessage(
         channelName?: string;
         messageToReplyTo?: string;
         currentDraft?: string;
+        currentText?: string;
         userPrompt?: string;
         prompt?: string;
         isDM?: boolean;
-        originSurface?: 'inline-bar' | 'sidepanel' | 'popover';
+        originSurface?: 'inline-bar' | 'compose-toolbar' | 'sidepanel' | 'popover';
         composeType?: 'comment' | 'reply' | 'new';
         editorId?: string;
       };
@@ -375,80 +437,29 @@ async function handleMessage(
       // The list lives in inline-draft-routing.ts with a test that pins all
       // three surfaces.
       if (usesDirectWorkerPath(inlinePayload) && tab?.id) {
-        const tabId = tab.id;
-        const insertType = inlinePayload.composeType === 'comment'
-          ? 'INSERT_COMMENT_DRAFT'
-          : 'INSERT_DRAFT';
-        const requestKey = `${tabId}:${inlinePayload.requestId || crypto.randomUUID()}`;
-        const controller = new AbortController();
-        inlineRequests.set(requestKey, controller);
-        const deadline = setTimeout(() => controller.abort(new DOMException('Draft timed out', 'TimeoutError')), 25_000);
-        const correlation = { originUrl: tab.url, editorId: inlinePayload.editorId, requestId: inlinePayload.requestId };
-        (async () => {
-          try {
-            // Bounded, and bounded BELOW the inline bar's own 30s reset.
-            //
-            // Nothing else in this path has a deadline: generateDraft awaits
-            // ensureValidToken (which can await a token refresh) and then
-            // fetchWithRetry (which retries a stalled request). If any of that
-            // hangs, this async IIFE never reaches a sendMessage, so the content
-            // script hears nothing at all and falls through to its 30s timeout —
-            // whose copy tells the user to check they are signed in. Observed on
-            // Pratik's inbox 29 Jul with a valid session and a healthy API.
-            // 25s leaves the bar time to render a real reason instead.
-            const resp = await generateDraft({
-              recipientEmail: inlinePayload.recipientEmail || undefined,
-              recipientName: inlinePayload.recipientName || undefined,
-              messageToReplyTo: inlinePayload.messageToReplyTo || undefined,
-              currentDraft: inlinePayload.currentDraft || undefined,
-              mailboxEmail: inlinePayload.mailboxEmail,
-              tone: inlinePayload.tone,
-              platform: inlinePayload.platform,
-              channelName: inlinePayload.channelName || undefined,
-              prompt: inlinePayload.userPrompt || inlinePayload.prompt || undefined,
-            }, controller.signal);
-            if (controller.signal.aborted) return;
-            if (resp?.skipped) {
-              chrome.tabs.sendMessage(tabId, {
-                type: 'DRAFT_SKIPPED',
-                payload: {
-                  ...correlation,
-                  reason: resp.skipReason || 'skipped',
-                  message: resp.skipMessage || 'Draft skipped.',
-                },
-              }).catch(() => { /* tab gone */ });
-              return;
-            }
-            if (resp?.draft) {
-              chrome.tabs.sendMessage(tabId, {
-                type: insertType,
-                payload: { text: resp.draft, ...correlation },
-              }).catch(() => { /* tab gone */ });
-              return;
-            }
-            // Response came back OK but carried neither a draft nor a skip flag
-            // (empty draft or unexpected shape). Do NOT leave the inline bar
-            // hanging to a silent 30s reset — surface it so Generate fails loudly.
-            console.warn('[SW] inline gmail/slack: empty draft response', resp);
-            chrome.tabs.sendMessage(tabId, {
-              type: 'DRAFT_SKIPPED',
-              payload: {
-                ...correlation,
-                reason: 'empty',
-                message: "Pranan couldn't draft a reply for this one. Try again, or type a prompt and press Generate.",
-              },
-            }).catch(() => { /* tab gone */ });
-          } catch (err) {
-            console.warn('[SW] inline gmail/slack generateDraft failed:', err);
-            chrome.tabs.sendMessage(tabId, {
-              type: 'DRAFT_SKIPPED',
-              payload: { ...correlation, reason: 'error', message: draftErrorMessage(err) },
-            }).catch(() => { /* tab gone */ });
-          } finally {
-            clearTimeout(deadline);
-            inlineRequests.delete(requestKey);
-          }
-        })();
+        runDirectDraft({
+          tabId: tab.id,
+          originUrl: tab.url,
+          requestId: inlinePayload.requestId,
+          editorId: inlinePayload.editorId,
+          insertType: inlinePayload.composeType === 'comment' ? 'INSERT_COMMENT_DRAFT' : 'INSERT_DRAFT',
+          emptyMessage: "Pranan couldn't draft a reply for this one. Try again, or type a prompt and press Generate.",
+          label: 'inline',
+          request: {
+            recipientEmail: inlinePayload.recipientEmail || undefined,
+            recipientName: inlinePayload.recipientName || undefined,
+            messageToReplyTo: inlinePayload.messageToReplyTo || undefined,
+            // Slack's Send-adjacent button sends what the user already typed
+            // as currentText. It was dropped here, so the draft never saw it
+            // (audit EXT-12).
+            currentDraft: inlinePayload.currentDraft || inlinePayload.currentText || undefined,
+            mailboxEmail: inlinePayload.mailboxEmail,
+            tone: inlinePayload.tone,
+            platform: inlinePayload.platform,
+            channelName: inlinePayload.channelName || undefined,
+            prompt: inlinePayload.userPrompt || inlinePayload.prompt || undefined,
+          },
+        });
         return { ok: true };
       }
 
@@ -531,6 +542,7 @@ async function handleMessage(
         composeType?: 'comment' | 'reply' | 'new';
         originSurface?: string;
         editorId?: string;
+        requestId?: string;
       };
 
       // v0.8.17 (QA 2026-06-12) — generate the comment HERE in the service
@@ -543,51 +555,27 @@ async function handleMessage(
       // With the panel closed, clicking Draft produced NOTHING (no output,
       // no error). Generating in the worker removes both dependencies.
       if (commentPayload.originSurface === 'inline-bar' && tab?.id) {
-        const tabId = tab.id;
-        (async () => {
-          try {
-            const resp = await generateDraft({
-              recipientName: commentPayload.postAuthor || undefined,
-              messageToReplyTo: commentPayload.postText || undefined,
-              platform: commentPayload.platform || 'linkedin',
-              prompt: commentPayload.prompt || undefined,
-              composeType: 'comment',
-              postUrl: commentPayload.postUrl || undefined,
-            });
-            if (resp?.skipped) {
-              chrome.tabs.sendMessage(tabId, {
-                type: 'DRAFT_SKIPPED',
-                payload: {
-                  reason: resp.skipReason || 'skipped',
-                  message: resp.skipMessage || 'Draft skipped.',
-                },
-              }).catch(() => { /* tab gone */ });
-              return;
-            }
-            if (resp?.draft) {
-              chrome.tabs.sendMessage(tabId, {
-                type: 'INSERT_COMMENT_DRAFT',
-                payload: { text: resp.draft, editorId: commentPayload.editorId },
-              }).catch(() => { /* tab gone */ });
-              return;
-            }
-            // OK response with neither draft nor skip -> fail loudly, don't hang.
-            console.warn('[SW] inline linkedin comment: empty draft response', resp);
-            chrome.tabs.sendMessage(tabId, {
-              type: 'DRAFT_SKIPPED',
-              payload: {
-                reason: 'empty',
-                message: "Pranan couldn't draft a comment for this one. Try again, or type a prompt and press Generate.",
-              },
-            }).catch(() => { /* tab gone */ });
-          } catch (err) {
-            console.warn('[SW] inline linkedin comment generateDraft failed:', err);
-            chrome.tabs.sendMessage(tabId, {
-              type: 'DRAFT_SKIPPED',
-              payload: { reason: 'error', message: draftErrorMessage(err) },
-            }).catch(() => { /* tab gone */ });
-          }
-        })();
+        // Same bounded, correlated path as inline drafts. This one used to
+        // have no deadline, so a stalled request could land a stale comment
+        // in an editor the user had since typed in (audit EXT-16).
+        runDirectDraft({
+          tabId: tab.id,
+          originUrl: tab.url,
+          requestId: commentPayload.requestId,
+          editorId: commentPayload.editorId,
+          insertType: 'INSERT_COMMENT_DRAFT',
+          emptyMessage: "Pranan couldn't draft a comment for this one. Try again, or type a prompt and press Generate.",
+          label: 'linkedin comment',
+          request: {
+            recipientName: commentPayload.postAuthor || undefined,
+            messageToReplyTo: commentPayload.postText || undefined,
+            platform: commentPayload.platform || 'linkedin',
+            prompt: commentPayload.prompt || undefined,
+            composeType: 'comment',
+            postUrl: commentPayload.postUrl || undefined,
+            postAuthorUrl: commentPayload.postAuthorUrl || undefined,
+          },
+        });
         return { ok: true };
       }
 
@@ -621,13 +609,22 @@ async function handleMessage(
     }
 
     // --- Phase 3: Inline grammar check (from suggestion monitor) ---
+    // Opt-in only (audit EXT-02 / XP-05). The content script checks the same
+    // switch, but the worker is the one that talks to the API, so it enforces
+    // it: with the switch off, nothing the user typed leaves the browser.
     case 'INLINE_GRAMMAR_CHECK': {
-      const { text, platform } = (message.payload as { text: string; platform: string }) || {};
-      if (!text) return { suggestions: [] };
+      const { text, platform, recipientEmail } = (message.payload as { text?: string; platform?: string; recipientEmail?: string | null }) || {};
+      if (!text || typeof text !== 'string') return { suggestions: [] };
+      const { passiveGrammarChecks } = await getPrivacySettings();
+      if (!passiveGrammarChecks) return { suggestions: [], disabled: true };
       try {
-        const result = await checkGrammar({ text, platform });
+        const result = await checkGrammar({
+          text,
+          platform,
+          recipientEmail: typeof recipientEmail === 'string' && recipientEmail ? recipientEmail : undefined,
+        });
         // Convert grammar corrections to InlineSuggestion format
-        const suggestions = result.corrections.map((c, i) => ({
+        const suggestions = (result.corrections || []).map((c, i) => ({
           id: `gs-${Date.now()}-${i}`,
           range: c.range,
           original: c.original,
@@ -642,56 +639,56 @@ async function handleMessage(
     }
 
     // --- Phase 3: Grammar suggestions from content script ---
+    // Rendered by the side panel's "Writing suggestions" card.
     case 'GRAMMAR_SUGGESTIONS': {
-      broadcastToSidePanel(message);
+      broadcastToSidePanel({
+        ...message,
+        payload: { ...(message.payload && typeof message.payload === 'object' ? message.payload : {}), sourceTabId: sender.tab?.id },
+      });
       return { ok: true };
     }
 
-    // --- Phase 4: Open side panel ---
-    // --- v0.7 Compose pop-over (Surface B) ---
-    case 'GET_PROACTIVE_SUGGESTIONS': {
+    // --- Voice input on behalf of content scripts (audit EXT-07) ---
+    case 'TRANSCRIBE_AUDIO': {
+      if (!sender.tab) return { error: 'Voice transcription is only available from a compose window.' };
+      const { audio, mimeType } = (message.payload as { audio?: unknown; mimeType?: unknown }) || {};
+      if (typeof audio !== 'string' || !audio || audio.length > MAX_AUDIO_BASE64_LENGTH) {
+        return { error: 'No speech was recorded. Try again or keep typing.' };
+      }
       try {
-        const suggestions = await getProactiveSuggestions();
-        return { suggestions };
+        const text = await transcribeAudio(base64ToBlob(audio, safeAudioMimeType(mimeType)));
+        return { text };
       } catch (err) {
-        console.warn('[Pranan SW] GET_PROACTIVE_SUGGESTIONS failed:', err);
-        return { suggestions: [], error: (err as Error).message };
+        return { error: err instanceof Error ? err.message : 'Voice transcription failed. Try again.' };
       }
     }
 
-    case 'OPEN_THREAD': {
-      const { threadId } = (message.payload as { threadId?: string }) || {};
-      if (!threadId) return { ok: false };
-      // Navigate the active tab to the thread URL hash. Gmail interprets
-      // #inbox/<threadId> as "open this thread in current view."
-      if (sender.tab?.id) {
-        try {
-          await chrome.tabs.update(sender.tab.id, { url: `https://mail.google.com/mail/u/0/#inbox/${threadId}` });
-        } catch (err) {
-          console.warn('[Pranan SW] OPEN_THREAD failed:', err);
-        }
-      }
-      return { ok: true };
-    }
-
-    // --- v0.6 Inline composer: relationship chip + tone hints ---
+    // --- LinkedIn voice samples ---
     case 'CAPTURE_VOICE_EXEMPLAR': {
-      // From the LinkedIn content script when the user posts their own comment.
-      // Non-privileged + fire-and-forget: append to voice exemplars, swallow errors.
+      // From the LinkedIn content script after the user's own comment has
+      // actually been posted. Off unless the user opted in (audit EXT-03), and
+      // only accepted from our own LinkedIn content script.
+      if (!isOwnContentScript(sender, 'https://www.linkedin.com')) return { added: false };
+      const { linkedinVoiceCapture } = await getPrivacySettings();
+      if (!linkedinVoiceCapture) return { added: false, disabled: true };
       const captured = (message.payload as { comment?: string } | undefined)?.comment;
-      if (!captured || typeof captured !== 'string') return { added: false };
-      const res = await postVoiceExemplar(captured);
-      return res;
+      if (!captured || typeof captured !== 'string' || captured.length > 600) return { added: false };
+      return postVoiceExemplar(captured);
     }
     case 'SET_TIER_OVERRIDE': {
-      if (!isTrustedPrivilegedSender(sender)) {
+      // The tier pill in Gmail's compose bar is the only sender. It used to be
+      // rejected here as "untrusted", so the correction always failed silently
+      // (audit EXT-17 / XP-12). Allow this extension's own Gmail content script
+      // and the extension pages, and validate both fields.
+      const fromGmail = isOwnContentScript(sender, 'https://mail.google.com');
+      if (!fromGmail && !isTrustedPrivilegedSender(sender)) {
         console.warn('[SW] SET_TIER_OVERRIDE rejected: untrusted sender', sender.origin || sender.url);
         return { ok: false };
       }
-      const { email: overrideEmail, tier: overrideTier } = (message.payload as { email?: string; tier?: string }) || {};
-      if (!overrideEmail || !overrideTier) return { ok: false };
-      const result = await setTierOverride(overrideEmail, overrideTier);
-      return result;
+      const { email: overrideEmail, tier: overrideTier } = (message.payload as { email?: unknown; tier?: unknown }) || {};
+      if (typeof overrideEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(overrideEmail) || overrideEmail.length > 320) return { ok: false };
+      if (!isValidTier(overrideTier)) return { ok: false };
+      return setTierOverride(overrideEmail, overrideTier);
     }
 
     case 'GET_RELATIONSHIP_TIER': {
@@ -739,57 +736,8 @@ async function handleMessage(
         console.warn('[SW] AUTH_TOKEN_FROM_WEB rejected: untrusted sender', sender.origin || sender.url);
         return { error: 'Untrusted sender' };
       }
-      const token = message.token;
-      if (!token) {
-        console.warn('[SW] AUTH_TOKEN_FROM_WEB: no token provided');
-        return { error: 'No token provided' };
-      }
-
-      console.log('[SW] AUTH_TOKEN_FROM_WEB: storing token and validating...');
-      const refreshTokenFromWeb = (message as { refreshToken?: string }).refreshToken;
-      // Audit (LOW): on every auth write, set the refresh token explicitly when
-      // provided and REMOVE any stale one when this fresh auth carries none.
-      // Otherwise a re-auth could leave a dead refresh token behind that the
-      // refresh path keeps trying to use.
-      await chrome.storage.local.set({ authToken: token });
-      if (refreshTokenFromWeb) {
-        await chrome.storage.local.set({ refreshToken: refreshTokenFromWeb });
-      } else {
-        await chrome.storage.local.remove('refreshToken');
-      }
-
-      try {
-        cachedAuth = await deduplicatedValidateAuth();
-        console.log('[SW] validateAuth result:', cachedAuth?.valid, cachedAuth?.userId);
-      } catch (err) {
-        console.error('[SW] validateAuth failed:', err);
-        // Validation failed: clear BOTH tokens so we never keep a half-valid pair.
-        await chrome.storage.local.remove(['authToken', 'refreshToken']);
-        cachedAuth = null;
-        broadcastToSidePanel({
-          type: 'AUTH_STATUS',
-          payload: { valid: false },
-        });
-        return { error: 'Token validation failed' };
-      }
-
-      if (cachedAuth?.valid) {
-        scheduleTokenRefresh();
-        broadcastToSidePanel({
-          type: 'AUTH_STATUS',
-          payload: { valid: true, user: cachedAuth },
-        });
-        console.log('[SW] Auth successful, broadcast sent to side panel');
-        return { ok: true };
-      } else {
-        console.warn('[SW] Token stored but validation returned invalid');
-        await chrome.storage.local.remove(['authToken', 'refreshToken']);
-        broadcastToSidePanel({
-          type: 'AUTH_STATUS',
-          payload: { valid: false },
-        });
-        return { error: 'Token invalid' };
-      }
+      const handoff = message as { token?: unknown; refreshToken?: unknown; nonce?: unknown; state?: unknown };
+      return acceptWebAuthHandoff(handoff);
     }
 
     case 'GET_REPLY_INTENTS': {
@@ -804,15 +752,86 @@ async function handleMessage(
     case 'DISCONNECT': {
       // Clear the extension's own session (Bearer + refresh tokens). Web
       // sign-out does not revoke this, so the user needs an explicit control.
-      try { await chrome.storage.local.remove(['authToken', 'refreshToken']); } catch { /* pass */ }
-      cachedAuth = null;
-      broadcastToSidePanel({ type: 'AUTH_STATUS', payload: { valid: false } });
+      // The caller revokes the server session first (audit EXT-23).
+      if (!isTrustedPrivilegedSender(sender)) return { ok: false };
+      await clearAuthTokens();
+      await markSignedOut();
       return { ok: true };
     }
 
     default:
       return { error: `Unknown message type: ${message.type}` };
   }
+}
+
+/**
+ * Generate a draft in the worker and send it straight to the requesting tab.
+ *
+ * Bounded, and bounded BELOW the content scripts' own 30s reset. Nothing else
+ * in this path has a deadline: generateDraft awaits ensureValidToken (which
+ * can await a token refresh) and then the fetch. If any of that hangs, the
+ * content script hears nothing at all and falls through to its own timeout,
+ * whose copy tells the user to check they are signed in. Observed on Pratik's
+ * inbox 29 Jul with a valid session and a healthy API. 25s leaves the bar
+ * time to render a real reason instead.
+ *
+ * Every reply carries the request's originUrl, editorId and requestId so the
+ * content script inserts only into the editor that asked, and only while that
+ * request is still the live one.
+ */
+function runDirectDraft(args: {
+  tabId: number;
+  originUrl?: string;
+  requestId?: string;
+  editorId?: string;
+  insertType: 'INSERT_DRAFT' | 'INSERT_COMMENT_DRAFT';
+  emptyMessage: string;
+  label: string;
+  request: DraftRequest;
+}): void {
+  const { tabId, insertType } = args;
+  const requestKey = `${tabId}:${args.requestId || crypto.randomUUID()}`;
+  inlineRequests.get(requestKey)?.abort();
+  const controller = new AbortController();
+  inlineRequests.set(requestKey, controller);
+  const deadline = setTimeout(() => controller.abort(new DOMException('Draft timed out', 'TimeoutError')), 25_000);
+  const correlation = { originUrl: args.originUrl, editorId: args.editorId, requestId: args.requestId };
+  const reply = (message: { type: string; payload: Record<string, unknown> }) => {
+    chrome.tabs.sendMessage(tabId, message).catch(() => { /* tab gone */ });
+  };
+  (async () => {
+    try {
+      const resp = await generateDraft(args.request, controller.signal);
+      if (controller.signal.aborted) return;
+      if (resp?.skipped) {
+        reply({
+          type: 'DRAFT_SKIPPED',
+          payload: { ...correlation, reason: resp.skipReason || 'skipped', message: resp.skipMessage || 'Draft skipped.' },
+        });
+        return;
+      }
+      if (resp?.draft) {
+        reply({ type: insertType, payload: { text: resp.draft, ...correlation } });
+        return;
+      }
+      // Response came back OK but carried neither a draft nor a skip flag
+      // (empty draft or unexpected shape). Do NOT leave the bar hanging to a
+      // silent 30s reset; surface it so Generate fails loudly.
+      console.warn(`[SW] ${args.label}: empty draft response`, resp);
+      reply({ type: 'DRAFT_SKIPPED', payload: { ...correlation, reason: 'empty', message: args.emptyMessage } });
+    } catch (err) {
+      console.warn(`[SW] ${args.label} generateDraft failed:`, err);
+      // A user cancel is not an error worth showing; a timeout is.
+      const cancelled = controller.signal.aborted
+        && !(controller.signal.reason instanceof DOMException && controller.signal.reason.name === 'TimeoutError');
+      if (cancelled) return;
+      const reason = controller.signal.aborted ? controller.signal.reason : err;
+      reply({ type: 'DRAFT_SKIPPED', payload: { ...correlation, reason: 'error', message: draftErrorMessage(reason) } });
+    } finally {
+      clearTimeout(deadline);
+      if (inlineRequests.get(requestKey) === controller) inlineRequests.delete(requestKey);
+    }
+  })();
 }
 
 function broadcastToSidePanel(message: ExtensionMessage) {
@@ -832,13 +851,14 @@ function broadcastToSidePanel(message: ExtensionMessage) {
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
-    if (tab.url) {
-      const platform = detectPlatform(tab.url);
-      broadcastToSidePanel({
-        type: 'PLATFORM_DETECTED',
-        payload: { platform, tabId: activeInfo.tabId },
-      });
-    }
+    // Without the "tabs" permission (audit EXT-14) tab.url is only visible on
+    // the sites we have host access to, which are exactly the supported ones.
+    // Anything else reads as 'unknown', which is the right answer.
+    const platform = detectPlatform(tab.url || '');
+    broadcastToSidePanel({
+      type: 'PLATFORM_DETECTED',
+      payload: { platform, tabId: activeInfo.tabId },
+    });
   } catch {
     // Tab might have been closed
   }
@@ -868,75 +888,106 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 // ---------------------------------------------------------------------------
-// External Messages (from app.pranan.ai for auth token exchange)
+// Sign-in handoff from app.pranan.ai
+// ---------------------------------------------------------------------------
+
+/**
+ * Store tokens handed over by the web app, but only for a sign-in the
+ * extension itself started (audit EXT-09, see login-handoff.ts). Accepts
+ * either the tokens (today's app) or the one-time nonce, which the worker
+ * exchanges itself so the tokens never pass through page script.
+ */
+async function acceptWebAuthHandoff(input: {
+  token?: unknown;
+  refreshToken?: unknown;
+  nonce?: unknown;
+  state?: unknown;
+}, options: { requireRefreshToken?: boolean } = {}): Promise<{ ok: true } | { error: string }> {
+  const nonce = typeof input.nonce === 'string' && /^[a-f0-9]{64}$/i.test(input.nonce) ? input.nonce : null;
+  const suppliedToken = typeof input.token === 'string' && input.token ? input.token : null;
+  const suppliedRefresh = typeof input.refreshToken === 'string' && input.refreshToken ? input.refreshToken : null;
+  if (!nonce && !suppliedToken) return { error: 'No token provided' };
+  if (!nonce && options.requireRefreshToken && !suppliedRefresh) return { error: 'Refresh token required' };
+
+  const check = await consumePendingLogin(input.state);
+  if (!check.ok) {
+    console.warn('[SW] sign-in handoff rejected:', check.reason);
+    return { error: 'No sign-in was started from the extension. Click Connect in Pranan and try again.' };
+  }
+
+  let tokens: { authToken: string; refreshToken: string | null };
+  if (nonce) {
+    const exchanged = await exchangeLoginNonce(nonce);
+    if (!exchanged) {
+      await restorePendingLogin(check.pending);
+      return { error: 'Sign-in link expired. Click Connect in Pranan and try again.' };
+    }
+    tokens = { authToken: exchanged.token, refreshToken: exchanged.refreshToken };
+  } else {
+    tokens = { authToken: suppliedToken as string, refreshToken: suppliedRefresh };
+  }
+
+  // Audit (LOW): every auth write replaces BOTH tokens, so a re-auth never
+  // leaves a refresh token from an earlier session behind.
+  await writeAuthTokens(tokens);
+  await invalidateAuthCache();
+
+  try {
+    cachedAuth = await deduplicatedValidateAuth();
+  } catch (err) {
+    console.error('[SW] validateAuth failed:', err);
+    // Validation failed: clear BOTH tokens so we never keep a half-valid pair.
+    await clearAuthTokens();
+    await markSignedOut();
+    await restorePendingLogin(check.pending);
+    return { error: 'Token validation failed' };
+  }
+
+  if (cachedAuth?.valid) {
+    scheduleTokenRefresh();
+    broadcastToSidePanel({ type: 'AUTH_STATUS', payload: { valid: true, user: cachedAuth } });
+    return { ok: true };
+  }
+  await clearAuthTokens();
+  await markSignedOut();
+  await restorePendingLogin(check.pending);
+  return { error: 'Token invalid' };
+}
+
+// ---------------------------------------------------------------------------
+// External Messages (from app.pranan.ai)
 // ---------------------------------------------------------------------------
 
 chrome.runtime.onMessageExternal.addListener(
   (message, sender, sendResponse) => {
     if (sender.origin !== APP_ORIGIN) {
       sendResponse({ error: 'Unauthorized origin' });
-      return;
+      return false;
     }
+    const type = message && typeof message === 'object' ? (message as { type?: unknown }).type : undefined;
 
-    if (message.type === 'PING') {
+    if (type === 'PING') {
       // Lets app.pranan.ai detect the extension (onboarding extension slide
-      // and the /home pairing card, audit 2026-07-17). Synchronous response,
-      // so return without keeping the channel open.
-      sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
-      return;
+      // and the /home pairing card, audit 2026-07-17). `authenticated` lets
+      // the app offer "Connect" when the extension is installed but not
+      // signed in (XP-15). Synchronous response.
+      sendResponse({ ok: true, version: chrome.runtime.getManifest().version, authenticated: !!cachedAuth?.valid });
+      return false;
     }
 
-    if (message.type === 'AUTH_TOKEN') {
-      // Handle async work inside a then-chain so we can return true synchronously
-      // to keep the sendResponse channel open (Chrome closes it if the listener returns)
-      (async () => {
-        console.log('[SW] AUTH_TOKEN (external): storing token...');
-        // Audit (LOW): the external path previously wrote ONLY authToken and
-        // never touched refreshToken, so a re-auth left a stale refresh token.
-        // Write it explicitly when supplied and clear it when this fresh auth
-        // provides none.
-        const externalRefresh = (message as { refreshToken?: string }).refreshToken;
-        await chrome.storage.local.set({ authToken: message.token });
-        if (externalRefresh) {
-          await chrome.storage.local.set({ refreshToken: externalRefresh });
-        } else {
-          await chrome.storage.local.remove('refreshToken');
-        }
-
-        try {
-          cachedAuth = await deduplicatedValidateAuth();
-          console.log('[SW] External validateAuth result:', cachedAuth?.valid);
-        } catch (err) {
-          console.error('[SW] External validateAuth failed:', err);
-          // Clear BOTH tokens on validation failure.
-          await chrome.storage.local.remove(['authToken', 'refreshToken']);
-          broadcastToSidePanel({
-            type: 'AUTH_STATUS',
-            payload: { valid: false },
-          });
-          sendResponse({ error: 'Validation failed' });
-          return;
-        }
-
-        if (cachedAuth?.valid) {
-          scheduleTokenRefresh();
-          broadcastToSidePanel({
-            type: 'AUTH_STATUS',
-            payload: { valid: true, user: cachedAuth },
-          });
-          sendResponse({ ok: true });
-        } else {
-          await chrome.storage.local.remove(['authToken', 'refreshToken']);
-          broadcastToSidePanel({
-            type: 'AUTH_STATUS',
-            payload: { valid: false },
-          });
-          sendResponse({ error: 'Token invalid' });
-        }
-      })();
+    if (type === 'AUTH_TOKEN') {
+      // Same rules as the content-script handoff, plus: a refresh token is
+      // required. Accepting an access token alone used to clear the stored
+      // refresh token and cut the session to about an hour (audit EXT-19).
+      acceptWebAuthHandoff(message as Record<string, unknown>, { requireRefreshToken: true })
+        .then(sendResponse)
+        .catch(() => sendResponse({ error: 'Sign-in failed' }));
+      return true; // async response
     }
 
-    return true; // Keep sendResponse channel open for async work
+    // Every message gets an answer, so the app's callback never hangs.
+    sendResponse({ error: 'Unknown message type' });
+    return false;
   }
 );
 
@@ -976,7 +1027,7 @@ chrome.webNavigation?.onHistoryStateUpdated.addListener(
 // user action pokes it, which looks like a silent logout (token-refresh
 // hardening 2026-06-09).
 chrome.runtime.onStartup.addListener(() => {
-  initAuth();
+  void initAuth();
 });
 
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -985,11 +1036,14 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
     // First-run was previously silent: a Chrome Web Store install produced
     // nothing visible until the user happened to find the toolbar icon
-    // (audit 2026-07-17 P1-3). Open the app so every install lands somewhere:
-    // signed-out users get login/signup, signed-in users bounce to /home and
-    // the existing auth handoff pairs the extension automatically.
+    // (audit 2026-07-17 P1-3). Open the app's companion sign-in so every
+    // install lands somewhere. It used to open /login?source=extension_install,
+    // which the app does not treat as a companion sign-in, so signed-in users
+    // landed on /home with the extension still unpaired (XP-15). The companion
+    // source runs the normal handoff, and beginCompanionLogin records the
+    // pending login the worker requires (EXT-09).
     try {
-      await chrome.tabs.create({ url: `${APP_ORIGIN}/login?source=extension_install` });
+      await beginCompanionLogin();
     } catch {
       // Tab creation can fail during browser startup/session restore; the
       // extension still works, the user just gets the old silent behavior.
@@ -1002,11 +1056,10 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   });
 });
 
-// Re-init auth eagerly on service worker startup. The token refresh
-// alarm is now scheduled inside scheduleTokenRefresh() (called by initAuth)
-// using chrome.alarms.create with delayInMinutes: 25, then re-armed after
-// each successful refresh. The previous duplicate 6-hour periodic alarm
-// + listener block was removed because it ran the same logic with worse
-// timing.
-initAuth();
+// Re-init auth on service worker startup. The worker wakes for every message
+// and event, so a recent confirmed result is reused instead of hitting
+// /api/companion/auth each time (audit EXT-22). The token refresh alarm is
+// scheduled inside scheduleTokenRefresh() (called by initAuth) and re-armed
+// after each successful refresh.
+void initAuth({ allowCached: true });
 

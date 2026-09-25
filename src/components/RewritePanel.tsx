@@ -28,7 +28,8 @@ export function RewritePanel({ selectedText, result, isLoading, onAccept, onBack
         >
           Back to context
         </button>
-        {result && (
+        {/* No score from the server is not a 0% match (XP-25). */}
+        {result && typeof result.voiceMatchScore === 'number' && result.voiceMatchScore >= 0 && (
           <span className="text-xs text-brand-text-3 font-mono">
             Voice match: {Math.round(result.voiceMatchScore * 100)}%
           </span>

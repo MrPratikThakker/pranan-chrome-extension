@@ -2,7 +2,8 @@ import { beforeEach, it, expect, vi } from 'vitest';
 import { useStore } from '../src/hooks/useStore';
 import * as api from '../src/lib/api-client';
 import type { ComposeContext } from '../src/types';
-vi.mock('../src/lib/api-client', () => ({ getContactContext: vi.fn(), streamDraft: vi.fn(), generateDraft: vi.fn(), rewriteText: vi.fn(), checkGrammar: vi.fn() }));
+vi.mock('../src/lib/api-client', () => ({ getContactContext: vi.fn(), generateDraft: vi.fn(), rewriteText: vi.fn(), checkGrammar: vi.fn() }));
+vi.mock('../src/lib/token-store', () => ({ clearAuthTokens: vi.fn(async () => {}) }));
 const ctx = (email: string): ComposeContext => ({ platform: 'gmail', recipientEmail: email, recipientName: null, threadId: email, messageToReplyTo: null, channelName: null, isDM: false, selectedText: null, sourceTabId: 10 });
 const deferred = <T>() => { let resolve!: (x: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; };
 beforeEach(() => {
@@ -22,9 +23,9 @@ it('late contact A cannot replace contact B or navigate away from a draft', asyn
   expect(useStore.getState().contactContext?.tier).toBe('B');
   expect(useStore.getState().viewMode).toBe('draft');
 });
-it('discarded streaming responses cannot resurrect a draft after context changes', async () => {
+it('discarded responses cannot resurrect a draft after context changes', async () => {
   const release = deferred<void>();
-  vi.mocked(api.streamDraft).mockImplementation(async function* () { await release.promise; yield { type: 'chunk', text: 'For old recipient' }; });
+  vi.mocked(api.generateDraft).mockImplementation(async () => { await release.promise; return { draft: 'For old recipient', confidence: 1, voiceMatch: 1, alternativeTones: [] }; });
   const request = useStore.getState().requestDraft({ platform: 'gmail' });
   useStore.getState().setComposeContext(ctx('new@example.com'));
   release.resolve(); await request;
@@ -49,18 +50,44 @@ it('closing or changing a different compose does not reset the active draft', ()
 });
 it('keeps the last draft and does not start another generation after a network failure', async () => {
   useStore.setState({ currentDraft: { draft: 'Keep my work', confidence: 0, voiceMatch: 0, alternativeTones: [] } });
-  vi.mocked(api.streamDraft).mockImplementation(async function* () { throw new TypeError('Network unavailable'); });
+  vi.mocked(api.generateDraft).mockRejectedValue(new TypeError('Network unavailable'));
   await useStore.getState().requestDraft({ platform: 'gmail' });
-  expect(api.generateDraft).not.toHaveBeenCalled();
+  // Exactly one charged generation: no silent second attempt after an uncertain failure.
+  expect(api.generateDraft).toHaveBeenCalledTimes(1);
   expect(useStore.getState().currentDraft?.draft).toBe('Keep my work');
   expect(useStore.getState().isDraftLoading).toBe(false);
 });
 it('stopping a delayed request preserves the last draft and rejects late chunks', async () => {
   const release = deferred<void>();
   useStore.setState({ currentDraft: { draft: 'Keep my work', confidence: 0, voiceMatch: 0, alternativeTones: [] } });
-  vi.mocked(api.streamDraft).mockImplementation(async function* () { await release.promise; yield { type: 'chunk', text: 'Too late' }; });
+  vi.mocked(api.generateDraft).mockImplementation(async () => { await release.promise; return { draft: 'Too late', confidence: 1, voiceMatch: 1, alternativeTones: [] }; });
   const pending = useStore.getState().requestDraft({ platform: 'gmail' });
   useStore.getState().cancelDraft(); release.resolve(); await pending;
   expect(useStore.getState().currentDraft?.draft).toBe('Keep my work');
   expect(useStore.getState().isDraftLoading).toBe(false);
+});
+
+it('shows the upgrade path when the plan quota is used up (XP-09)', async () => {
+  const quota = Object.assign(new Error('Draft quota exceeded for this billing period'), { status: 402, code: 'QUOTA_EXCEEDED', upgradeUrl: 'https://app.pranan.ai/settings/billing' });
+  vi.mocked(api.generateDraft).mockRejectedValue(quota);
+  await useStore.getState().requestDraft({ platform: 'gmail' });
+  expect(useStore.getState().error).toMatch(/app\.pranan\.ai\/settings\/billing/);
+  expect(useStore.getState().isDraftLoading).toBe(false);
+});
+it('lists opt-in grammar suggestions for the active compose only (EXT-02)', () => {
+  useStore.getState().setComposeContext(ctx('a@example.com'));
+  const suggestion = { id: 's1', original: 'teh', suggestion: 'the', type: 'grammar', reason: 'Spelling' };
+  useStore.getState().handleMessage({ type: 'GRAMMAR_SUGGESTIONS', payload: { suggestions: [suggestion, { bad: true }], sourceTabId: 10 } } as never);
+  expect(useStore.getState().inlineSuggestions).toEqual([suggestion]);
+  useStore.getState().handleMessage({ type: 'GRAMMAR_SUGGESTIONS', payload: { suggestions: [], sourceTabId: 99 } } as never);
+  expect(useStore.getState().inlineSuggestions).toEqual([suggestion]);
+  useStore.getState().setComposeContext(ctx('b@example.com'));
+  expect(useStore.getState().inlineSuggestions).toEqual([]);
+});
+it('keeps the instruction, tone and typed text on the side-panel draft path (EXT-01)', async () => {
+  vi.mocked(api.generateDraft).mockResolvedValue({ draft: 'ok', confidence: 1, voiceMatch: 1, alternativeTones: [] });
+  (globalThis as any).chrome.tabs = { query: vi.fn(), sendMessage: vi.fn() };
+  useStore.getState().handleMessage({ type: 'INLINE_DRAFT_REQUEST', payload: { platform: 'linkedin', recipientName: 'Sam', userPrompt: 'decline politely', tone: 'warm', currentText: 'Hi Sam,' } } as never);
+  await Promise.resolve(); await Promise.resolve();
+  expect(api.generateDraft).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'decline politely', tone: 'warm', currentDraft: 'Hi Sam,' }), expect.anything());
 });

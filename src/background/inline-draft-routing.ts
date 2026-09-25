@@ -26,6 +26,13 @@
 /** Surfaces whose content script implements the INSERT_DRAFT handler. */
 const DIRECT_PATH_PLATFORMS = new Set(['gmail', 'slack', 'linkedin']);
 
+/**
+ * Content-script surfaces that wait for INSERT_DRAFT / DRAFT_SKIPPED from the
+ * worker. The Gmail compose popover ('compose-toolbar', since #93) must be
+ * here: on the side-panel path it lost its prompt and timed out after 30s.
+ */
+const DIRECT_PATH_SURFACES = new Set(['inline-bar', 'compose-toolbar']);
+
 export interface InlineDraftRouting {
   originSurface?: string
   platform?: string
@@ -35,6 +42,6 @@ export function usesDirectWorkerPath(
   payload: InlineDraftRouting | null | undefined,
 ): boolean {
   if (!payload || typeof payload !== 'object') return false;
-  if (payload.originSurface !== 'inline-bar') return false;
+  if (typeof payload.originSurface !== 'string' || !DIRECT_PATH_SURFACES.has(payload.originSurface)) return false;
   return typeof payload.platform === 'string' && DIRECT_PATH_PLATFORMS.has(payload.platform);
 }

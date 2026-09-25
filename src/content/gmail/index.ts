@@ -37,7 +37,14 @@ function composeIdentity(compose: Element): string {
 import { readGmailComposeText, MAX_COMPOSE_DRAFT_CHARS } from '@/lib/gmail-compose-text';
 import { createSpeechInput } from '@/lib/speech-input';
 import { createRecordedSpeechInput } from '@/lib/recorded-speech-input';
-import { transcribeAudio } from '@/lib/api-client';
+// Recorded audio goes to the worker, which transcribes it. A content script
+// must not call the API itself (audit EXT-07, EXT-10).
+import { transcribeViaWorker } from '@/lib/audio-transfer';
+import { claimContentScriptInstance } from '../shared/instance-guard';
+
+// Audit EXT-21: stand down if a live copy of this script already runs here.
+// Every top-level listener below is gated on this.
+const IS_PRIMARY_INSTANCE = claimContentScriptInstance('gmail');
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -48,7 +55,7 @@ try { document.documentElement.setAttribute('data-pranan-injected', chrome.runti
 // Constants
 // ---------------------------------------------------------------------------
 
-bootstrapSentry('content-gmail');
+if (IS_PRIMARY_INSTANCE) bootstrapSentry('content-gmail');
 
 // Reference to the active inline bar's Generate trigger, so the popup's
 // "Quick Draft" action (TRIGGER_INLINE_DRAFT) can fire the same flow.
@@ -859,7 +866,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     onAudio: async audio => {
       setVoiceActive('transcribing');
       showInlineNotice('Transcribing your voice. Your draft is unchanged until you choose Generate.');
-      applyVoiceTranscript(await transcribeAudio(audio));
+      applyVoiceTranscript(await transcribeViaWorker(audio));
     },
     onError: message => showInlineNotice(message),
     onEnd: setVoiceIdle,
@@ -1127,7 +1134,8 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
         inner_circle: 'inner circle',
         team: 'team',
         client: 'client',
-        partner: 'partner',
+        prospect: 'prospect',
+        vendor: 'vendor',
         network: 'network',
         unknown: 'cold sender',
       };
@@ -1847,7 +1855,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
       activeVoice = 'transcribing';
       voiceBtn.disabled = true;
       showStatus('Transcribing your instructions...');
-      applyVoiceTranscript(await transcribeAudio(audio));
+      applyVoiceTranscript(await transcribeViaWorker(audio));
     },
     onError: message => showStatus(message, true),
     onEnd: setVoiceIdle,
@@ -2020,7 +2028,10 @@ function showComposeRelationshipPopup(composeWindow: Element, recipientEmail: st
     type: 'REQUEST_CONTACT_POPUP',
     payload: { email: recipientEmail },
   }).then((response: unknown) => {
-    const data = response as RelationshipPopupData | null;
+    // The worker answers { data }, exactly as it does for Slack and LinkedIn.
+    // Reading the reply itself as the popup data meant contactName was always
+    // undefined, so the popup never rendered (audit EXT-05).
+    const data = (response as { data?: RelationshipPopupData | null } | null)?.data ?? null;
     if (data && data.contactName) {
       contactContextCache.set(recipientEmail, data);
       renderRelationshipPopup(composeWindow, data);
@@ -2249,13 +2260,25 @@ function injectThreadPromptBar(threadContainer: Element) {
     const prompt = input.value.trim();
     const originUrl = location.href;
     if (!openGmailReply(threadContainer)) { openingReply = false; input.placeholder = 'Open Reply to draft with Pranan'; return; }
-    for (let attempt = 0; attempt < 20; attempt++) {
+    // Hand the typed instruction to the reply that just opened. The default
+    // compose surface is the rail and popover; the prompt used to be handed
+    // only to the legacy bar, which exists behind a diagnostic flag, so on the
+    // default configuration it was silently dropped (audit EXT-04).
+    for (let attempt = 0; attempt < 30; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 100));
       if (location.href !== originUrl || !threadContainer.isConnected) break;
+      const anchor = threadContainer.querySelector<HTMLElement>(`[${PRANAN_FLOAT_ATTR}]`);
+      const replyCompose = anchor ? findComposeWindows().find(win => win.contains(anchor)) : undefined;
+      if (anchor && replyCompose) {
+        input.value = '';
+        openComposePopover(anchor, replyCompose, { initialPrompt: prompt, autoSubmit: !!prompt });
+        openingReply = false;
+        return;
+      }
       const composeBar = threadContainer.querySelector<HTMLElement>('[data-pranan-v6]');
       const composeInput = composeBar?.querySelector('input');
       const generate = composeBar?.querySelector<HTMLButtonElement>('[data-pranan-primary]');
-      if (composeInput && generate) { composeInput.value = prompt; generate.click(); openingReply = false; return; }
+      if (composeInput && generate) { composeInput.value = prompt; generate.click(); input.value = ''; openingReply = false; return; }
     }
     openingReply = false;
     input.placeholder = 'Use Pranan in the open reply';
@@ -2496,7 +2519,7 @@ function onComposeClosed(composeWindow: Element) {
 // Selection listener
 // ---------------------------------------------------------------------------
 
-document.addEventListener('mouseup', () => {
+if (IS_PRIMARY_INSTANCE) document.addEventListener('mouseup', () => {
   const selectedText = getSelectedText();
   if (selectedText && selectedText.length > 5) {
     safeSendMessage({
@@ -2555,11 +2578,11 @@ function openGmailReply(scope: ParentNode = document): boolean {
 
 // ---------------------------------------------------------------------------
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+if (IS_PRIMARY_INSTANCE) chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // Liveness check from service worker (for SPA re-injection)
   if (message.type === 'PING') {
     sendResponse({ alive: true });
-    return true;
+    return false;
   }
   // Popup "Quick Draft" — fire the active inline bar's Generate flow.
   if (message.type === 'TRIGGER_INLINE_DRAFT') {
@@ -2662,6 +2685,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'DISMISS_POPUP') {
     dismissRelationshipPopup();
     sendResponse({ ok: true });
+    return false;
   }
   // Side panel asks for the currently open thread (read mode) so it
   // can show relationship context even when no compose window is open.
@@ -2698,8 +2722,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       console.log('[Pranan] No compose window detected. If you have a Reply open, Gmail may have updated DOM selectors. File an issue with the page URL.');
       sendResponse({ hasCompose: false });
     }
+    return false;
   }
-  return true;
+  // Not ours to answer (or answered synchronously above). Returning true here
+  // told Chrome a reply was coming and left the sender waiting forever
+  // (audit EXT-28). Only the async INSERT_DRAFT branch returns true.
+  return false;
 });
 
 // ---------------------------------------------------------------------------
@@ -2831,7 +2859,9 @@ async function init() {
   window.addEventListener('popstate', onSpaNav);
 }
 
-if (document.readyState === 'loading') {
+if (!IS_PRIMARY_INSTANCE) {
+  // Another live copy owns this page.
+} else if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => { init(); });
 } else {
   init();

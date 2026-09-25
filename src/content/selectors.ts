@@ -39,6 +39,13 @@ function shouldReport(key: string): boolean {
   return true;
 }
 
+// Chains already escalated on this page. Many chains are legitimately empty
+// most of the time (no compose open, no thread pane), so escalating every
+// minute per tab was noise, not signal (audit EXT-20). One event per chain per
+// page load is enough to spot a real selector break; later misses stay
+// breadcrumbs.
+const escalatedChains = new Set<string>();
+
 function report(kind: 'fallback_used' | 'chain_broken', name: string, detail: Record<string, unknown>) {
   const key = `${kind}:${name}`;
   if (!shouldReport(key)) return;
@@ -48,7 +55,8 @@ function report(kind: 'fallback_used' | 'chain_broken', name: string, detail: Re
   // Only escalate chain_broken to a captureMessage. Fallback_used is
   // useful telemetry but not yet broken — we don't want the inbox flooded
   // every time a primary selector is slow to land.
-  if (kind === 'chain_broken') {
+  if (kind === 'chain_broken' && !escalatedChains.has(name)) {
+    escalatedChains.add(name);
     captureMessage(`selector_chain_broken: ${name}`, {
       component: 'content-script',
       metadata: detail,

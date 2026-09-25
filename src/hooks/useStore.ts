@@ -22,7 +22,6 @@ import {
   validateAuth,
   getContactContext,
   generateDraft,
-  streamDraft,
   rewriteText,
   checkGrammar,
   getBriefings,
@@ -32,7 +31,16 @@ import {
   type RewriteRequest,
   type GrammarRequest,
 } from '@/lib/api-client';
-import type { MeetingBriefing, FollowUpNudge, DecayAlert } from '@/types';
+import { clearAuthTokens } from '@/lib/token-store';
+import { draftErrorMessage } from '@/lib/draft-error-message';
+import type { MeetingBriefing, FollowUpNudge, DecayAlert, InlineGrammarSuggestion } from '@/types';
+
+/** Plan-limit and rate-limit errors get the specific, actionable copy (XP-09). */
+function draftFailureMessage(err: unknown): string {
+  const status = err && typeof err === 'object' && 'status' in err ? (err as { status?: unknown }).status : undefined;
+  if (status === 402 || status === 429) return draftErrorMessage(err);
+  return err instanceof Error ? err.message : 'Failed to generate draft';
+}
 
 // Active AbortControllers for cancellable requests
 let draftAbortController: AbortController | null = null;
@@ -115,6 +123,7 @@ const initialState: AppState = {
   decayAlerts: [],
   isBriefingLoading: false,
   isNudgesLoading: false,
+  inlineSuggestions: [],
   hasSeenOnboarding: false,
   interactionCount: 0,
 };
@@ -186,7 +195,9 @@ export const useStore = create<AppState & Actions>((set, get) => ({
       const { revokeActiveSession } = await import('@/lib/api-client');
       await revokeActiveSession('current');
     } catch { /* local token deletion is the final safety boundary */ }
-    await chrome.storage.local.remove(['authToken', 'refreshToken', 'lastKnownAuthValid']);
+    await clearAuthTokens();
+    try { await chrome.storage.local.remove('lastKnownAuthValid'); } catch { /* pass */ }
+    try { await chrome.runtime.sendMessage({ type: 'DISCONNECT' }); } catch { /* worker asleep; storage is already clear */ }
     set({
       isAuthenticated: false,
       isAuthChecked: true,
@@ -210,7 +221,7 @@ export const useStore = create<AppState & Actions>((set, get) => ({
       set({ currentDraft: null, rewriteResult: null, grammarResult: null,
         contactContext: null, contactContextLookup: null, isLoading: false,
         isDraftLoading: false, isDraftStreaming: false, streamingDraftText: '',
-        isRewriteLoading: false, isGrammarLoading: false, error: null,
+        isRewriteLoading: false, isGrammarLoading: false, error: null, inlineSuggestions: [],
         viewMode: get().isAuthenticated ? 'context' : get().viewMode });
     }
     set({ composeContext: ctx });
@@ -271,49 +282,28 @@ export const useStore = create<AppState & Actions>((set, get) => ({
     // handles both paths; if neither works, the API returns 401 and
     // handleResponse in api-client clears state cleanly. No pre-flight needed.
 
-    set({ isDraftLoading: true, isDraftStreaming: true, streamingDraftText: '', error: null, viewMode: 'draft' });
+    set({ isDraftLoading: true, isDraftStreaming: false, streamingDraftText: '', error: null, viewMode: 'draft' });
     try {
-      // Try streaming first; fall back to non-streaming
-      let fullText = '';
-      let meta: Partial<DraftResponse> = {};
-      try {
-        console.log('[Store] requestDraft: attempting SSE stream...');
-        for await (const chunk of streamDraft(request, signal)) {
-          if (signal.aborted) return;
-          if (chunk.type === 'chunk') {
-            fullText += chunk.text;
-            set({ streamingDraftText: fullText });
-          } else if (chunk.type === 'done') {
-            fullText = chunk.text || fullText;
-            meta = chunk.meta || {};
-          }
-        }
-        if (signal.aborted) return;
-        console.log('[Store] requestDraft: stream complete, text length:', fullText.length);
-        const draft: DraftResponse = {
-          // v0.8.2 — spread meta FIRST so skip metadata flows through, then
-          // overwrite with explicit defaults so undefined meta fields don't
-          // clobber required arrays/numbers and crash the renderer with
-          // 'Cannot read properties of undefined (reading length)'.
-          ...meta,
-          draft: fullText,
-          confidence: meta.confidence ?? 0,
-          voiceMatch: meta.voiceMatch ?? 0,
-          alternativeTones: meta.alternativeTones || [],
-          skipped: (meta as { skipped?: boolean }).skipped,
-          skipReason: (meta as { skipReason?: string }).skipReason,
-          skipMessage: (meta as { skipMessage?: string }).skipMessage,
-        };
-        set({ currentDraft: draft, isDraftLoading: false, isDraftStreaming: false, streamingDraftText: '' });
-      } catch (streamErr) {
-        // The JSON fallback is handled by streamDraft itself. Never start a
-        // second charged generation after an uncertain network/stream failure.
-        throw streamErr;
-      }
+      // The server answers with JSON only; the SSE branch that used to sit
+      // here never ran (audit EXT-27). One request, never a second charged
+      // generation after an uncertain network failure.
+      const resp = await generateDraft(request, signal);
+      if (signal.aborted) return;
+      const draft: DraftResponse = {
+        // Spread first so skip metadata flows through, then overwrite with
+        // explicit defaults so undefined fields don't clobber required
+        // arrays/numbers and crash the renderer.
+        ...resp,
+        draft: resp?.draft || '',
+        confidence: resp?.confidence ?? 0,
+        voiceMatch: resp?.voiceMatch ?? 0,
+        alternativeTones: resp?.alternativeTones || [],
+      };
+      set({ currentDraft: draft, isDraftLoading: false, isDraftStreaming: false, streamingDraftText: '' });
       get().incrementInteraction();
     } catch (err) {
       if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return; // Cancelled by user/new request
-      const errorMsg = err instanceof Error ? err.message : 'Failed to generate draft';
+      const errorMsg = draftFailureMessage(err);
       console.error('[Store] requestDraft: FINAL ERROR', errorMsg, err);
       set({
         isDraftLoading: false,
@@ -425,7 +415,11 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           isDM?: boolean;
           messageToReplyTo?: string;
           currentText?: string;
-          originSurface?: 'inline-bar' | 'sidepanel' | 'popover';
+          currentDraft?: string;
+          userPrompt?: string;
+          prompt?: string;
+          tone?: string;
+          originSurface?: 'inline-bar' | 'compose-toolbar' | 'sidepanel' | 'popover';
           composeType?: 'comment' | 'reply' | 'new';
         };
         // Set compose context and trigger draft
@@ -454,6 +448,11 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           platform: payload.platform,
           channelName: payload.channelName,
           messageToReplyTo: payload.messageToReplyTo,
+          // The instruction, tone and existing text used to be dropped on this
+          // path, so a panel draft ignored what the user asked for (EXT-01).
+          prompt: payload.userPrompt || payload.prompt || undefined,
+          tone: payload.tone || undefined,
+          currentDraft: payload.currentDraft || payload.currentText || undefined,
         }).then(() => {
           if (!autoInsert) return;
           const cur = get().currentDraft;
@@ -547,6 +546,7 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           prompt: payload.prompt,
           composeType: 'comment',
           postUrl: payload.postUrl,
+          postAuthorUrl: payload.postAuthorUrl,
         }).then(() => {
           if (!autoInsert) return;
           const cur = get().currentDraft;
@@ -577,10 +577,20 @@ export const useStore = create<AppState & Actions>((set, get) => ({
         }).catch(() => { /* requestDraft already logs + sets error state */ });
         break;
       }
-      // Phase 3: Grammar suggestions from inline monitor
+      // Phase 3: Grammar suggestions from the opt-in background monitor.
+      // These used to be dropped here, so the checks cost money and showed
+      // nothing (audit EXT-02). The side panel now lists them.
       case 'GRAMMAR_SUGGESTIONS': {
-        const payload = message.payload as { suggestions: unknown[] };
-        // Could update a dedicated suggestions state here if needed
+        const payload = message.payload as { suggestions?: unknown[]; sourceTabId?: number } | undefined;
+        const current = get().composeContext;
+        if (current?.sourceTabId !== undefined && payload?.sourceTabId !== undefined && payload.sourceTabId !== current.sourceTabId) break;
+        const suggestions = (Array.isArray(payload?.suggestions) ? payload.suggestions : [])
+          .filter((item): item is InlineGrammarSuggestion => {
+            const s = item as Partial<InlineGrammarSuggestion> | null;
+            return !!s && typeof s.original === 'string' && typeof s.suggestion === 'string';
+          })
+          .slice(0, 10);
+        set({ inlineSuggestions: suggestions });
         break;
       }
       // Auto-context: user opened a thread (not composing, just reading)
@@ -635,7 +645,8 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           get().checkAuth();
         } else {
           console.log('[Store] AUTH_STATUS invalid, clearing auth');
-          set({ isAuthenticated: false, user: null, viewMode: 'auth' });
+          set({ isAuthenticated: false, user: null, viewMode: 'auth', lastKnownAuthValid: false });
+          chrome.storage.local.set({ lastKnownAuthValid: false }).catch(() => {});
         }
         break;
       }

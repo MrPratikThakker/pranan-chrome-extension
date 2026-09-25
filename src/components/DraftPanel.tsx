@@ -158,6 +158,14 @@ export function DraftPanel({
         </div>
       )}
 
+      {/* Server note, e.g. an automated-sender warning. It was returned but
+          never shown (XP-25). */}
+      {!isLoading && typeof draft.notice === 'string' && draft.notice && (
+        <p role="note" className="mb-3 px-3 py-2 rounded-lg border border-brand-amber/25 bg-brand-amber/8 text-[11px] leading-relaxed text-brand-text-2">
+          {draft.notice}
+        </p>
+      )}
+
       {/* Tone chips */}
       <div className="flex items-center gap-1.5 mb-3 overflow-x-auto pb-0.5">
         <span className="section-label text-[9px] mr-0.5 flex-shrink-0" style={{ letterSpacing: '1.5px' }}>Tone</span>

@@ -28,6 +28,7 @@ import { attributeSlackThread, readSelfName, findSenderFor, SLACK_SELF_NAME_SELE
 import { conversationKindFromUrl } from '@/lib/slack-conversation';
 import { slackContextLabel } from '@/lib/slack-context-label';
 import { generateButtonState } from '../shared/generate-affordance';
+import { keepNewestChars } from '@/lib/thread-context';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -215,7 +216,8 @@ function getRecentChannelMessages(): string | null {
     }
   }
 
-  return messages.length > 0 ? messages.join('\n').slice(0, 2000) : null;
+  // Keep the newest text: the last message is the one being replied to (EXT-13).
+  return messages.length > 0 ? keepNewestChars(messages.join('\n'), 2000) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -374,9 +376,13 @@ function injectSlackPromptBar() {
     generateBtn.textContent = 'Drafting...';
     generateBtn.style.opacity = '0.7';
     generateBtn.style.pointerEvents = 'none';
+    const requestId = newSlackRequestId();
+    pendingSlackDraft.requestId = requestId;
+    armSlackDraftTimeout(requestId);
     safeSendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
+        requestId,
         platform: 'slack',
         recipientName: liveRecipientName,
         channelName: liveChannelName,
@@ -386,10 +392,18 @@ function injectSlackPromptBar() {
         // convention); keep prompt for any legacy side-panel fallback.
         userPrompt: prompt,
         prompt,
+        currentDraft: getMessageInputContent() || undefined,
         originSurface: 'inline-bar',
         composeType: 'reply',
         editorId,
       },
+    }).then((ack) => {
+      // safeSendMessage resolves null (it never rejects) when the extension
+      // context is gone, so the .catch below never ran and the bar sat on
+      // "Drafting..." forever (audit EXT-29). Gmail already handled this.
+      if (ack === null || (ack && typeof ack === 'object' && 'error' in ack)) {
+        restoreSlackPromptBar('Could not reach Pranan. Reload Slack and try again.');
+      }
     }).catch(() => {
       // Message send itself failed: restore the bar so the user can retry.
       restoreSlackPromptBar('Could not reach Pranan. Try again.');
@@ -426,7 +440,57 @@ function injectSlackPromptBar() {
 
 // v0.8.22 (audit P1): track the active prompt bar so we can show a loading
 // state and restore it on error instead of optimistically clearing it.
-let pendingSlackDraft: { input: HTMLInputElement; generateBtn: HTMLButtonElement; bar: HTMLElement } | null = null;
+let pendingSlackDraft: { input: HTMLInputElement; generateBtn: HTMLButtonElement; bar: HTMLElement; requestId?: string } | null = null;
+
+/** Longer than the worker's own 25s deadline, so a real reply always wins. */
+const SLACK_DRAFT_TIMEOUT_MS = 30_000;
+let slackDraftTimer: ReturnType<typeof setTimeout> | null = null;
+
+function newSlackRequestId(): string {
+  try { return crypto.randomUUID(); } catch { return `slack-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+}
+
+/** Never claim to be drafting forever (audit EXT-29). */
+function armSlackDraftTimeout(requestId: string): void {
+  if (slackDraftTimer) clearTimeout(slackDraftTimer);
+  slackDraftTimer = setTimeout(() => {
+    slackDraftTimer = null;
+    if (pendingSlackDraft?.requestId !== requestId) return;
+    safeSendMessage({ type: 'CANCEL_INLINE_DRAFT', payload: { requestId } }).catch(() => {});
+    restoreSlackPromptBar('Pranan did not hear back. Your instructions are kept. Try again.');
+  }, SLACK_DRAFT_TIMEOUT_MS);
+}
+
+/**
+ * Offer a one-step undo when a draft replaced text the user had typed, the
+ * way Gmail's ComposeTransactions does (audit EXT-12).
+ */
+function offerSlackUndo(input: HTMLElement, previousText: string): void {
+  if (!previousText.trim()) return;
+  document.querySelectorAll('[data-pranan-slack-undo]').forEach(el => el.remove());
+  const notice = document.createElement('div');
+  notice.setAttribute('data-pranan-slack-undo', 'true');
+  notice.setAttribute('role', 'status');
+  notice.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 8px;padding:4px 10px;font:12px/1.4 -apple-system,system-ui,sans-serif;color:#334155;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;';
+  const label = document.createElement('span');
+  label.textContent = 'Pranan replaced your text with a draft.';
+  const undo = document.createElement('button');
+  undo.type = 'button';
+  undo.textContent = 'Undo';
+  undo.style.cssText = 'border:0;background:transparent;color:#6d28d9;font:inherit;font-weight:600;cursor:pointer;padding:0;';
+  undo.addEventListener('click', () => {
+    if (document.contains(input)) {
+      injectMultilineText(input, previousText, 'p');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+    }
+    notice.remove();
+  });
+  notice.append(label, undo);
+  const container = findOne('slack.composeContainer', REGISTRY.slack.composeContainer);
+  (container?.parentElement || document.body).insertBefore(notice, container?.nextSibling ?? null);
+  setTimeout(() => notice.remove(), 15_000);
+}
 
 function removeSlackPromptBar() {
   document.querySelectorAll(`[${PRANAN_SLACK_BAR_ATTR}]`).forEach(el => el.remove());
@@ -435,6 +499,7 @@ function removeSlackPromptBar() {
 // Restore the active prompt bar from its loading state (e.g. after a skip or
 // error) so the user can edit and retry, surfacing a short reason.
 function restoreSlackPromptBar(message?: string): void {
+  if (slackDraftTimer) { clearTimeout(slackDraftTimer); slackDraftTimer = null; }
   if (!pendingSlackDraft) return;
   const { input, generateBtn } = pendingSlackDraft;
   input.disabled = false;
@@ -708,6 +773,20 @@ document.addEventListener('mouseup', () => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'INSERT_DRAFT') {
     const draftText = message.payload.text || message.payload.draft;
+    // Slack reuses the composer across conversations, so the editor binding
+    // alone cannot tell channel A from channel B. The worker sends the URL the
+    // request came from; refuse if the user has moved on (audit EXT-12).
+    const originUrl = message.payload.originUrl as string | undefined;
+    if (originUrl && originUrl !== location.href) {
+      restoreSlackPromptBar('You switched conversations, so Pranan did not insert here. Try again in this one.');
+      sendResponse({ success: false, reason: 'conversation_changed' });
+      return false;
+    }
+    const requestId = message.payload.requestId as string | undefined;
+    if (requestId && pendingSlackDraft?.requestId && pendingSlackDraft.requestId !== requestId) {
+      sendResponse({ success: false, reason: 'request_expired' });
+      return false;
+    }
     // Editor binding (audit HIGH): if this draft was bound to a specific
     // message input, only insert there. Do NOT fall back to the currently
     // active input, which may belong to a different channel.
@@ -717,20 +796,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!boundEl || !document.contains(boundEl)) {
         restoreSlackPromptBar('You switched channels, so Pranan did not insert here. Copy the draft instead.');
         sendResponse({ success: false, reason: 'editor_changed' });
-        return true;
+        return false;
       }
+      const previousText = getMessageInputContent();
       const ok = injectDraft(draftText, boundEl);
+      if (ok) offerSlackUndo(boundEl, previousText);
       if (ok && pendingSlackDraft) {
+        if (slackDraftTimer) { clearTimeout(slackDraftTimer); slackDraftTimer = null; }
         pendingSlackDraft.bar.remove();
         pendingSlackDraft = null;
       } else if (!ok) {
         restoreSlackPromptBar('Could not insert draft. Try again.');
       }
       sendResponse({ success: ok, reason: ok ? undefined : 'inject_failed' });
-      return true;
+      return false;
     }
+    const previousText = getMessageInputContent();
+    const unboundInput = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput);
     const success = injectDraft(draftText);
+    if (success && unboundInput) offerSlackUndo(unboundInput, previousText);
     if (success && pendingSlackDraft) {
+      if (slackDraftTimer) { clearTimeout(slackDraftTimer); slackDraftTimer = null; }
       pendingSlackDraft.bar.remove();
       pendingSlackDraft = null;
     } else if (!success) {
@@ -741,8 +827,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   // Draft was skipped or errored upstream: restore the prompt with the reason.
   if (message.type === 'DRAFT_SKIPPED') {
-    restoreSlackPromptBar(message.payload?.message || 'Draft skipped.');
+    const skippedId = message.payload?.requestId as string | undefined;
+    if (!skippedId || !pendingSlackDraft?.requestId || skippedId === pendingSlackDraft.requestId) {
+      restoreSlackPromptBar(message.payload?.message || 'Draft skipped.');
+    }
     sendResponse({ ok: true });
+    return false;
   }
 
   // Service worker asks for current compose state when side panel opens
@@ -791,7 +881,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
   }
 
-  return true;
+  // Every branch above answers synchronously (or not at all). Returning true
+  // told Chrome a reply was coming and left senders waiting (audit EXT-28).
+  return false;
 });
 
 // ---------------------------------------------------------------------------

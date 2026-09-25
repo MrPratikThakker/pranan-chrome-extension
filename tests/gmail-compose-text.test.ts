@@ -59,7 +59,7 @@ describe('Gmail revision context', () => {
     expect(gmail).toContain('const currentDraft = readGmailComposeText(editableBody)');
     expect(gmail).toContain('currentDraft.length > MAX_COMPOSE_DRAFT_CHARS');
     expect(gmail).toContain('currentDraft: currentDraft || undefined');
-    expect(worker).toContain('currentDraft: inlinePayload.currentDraft || undefined');
+    expect(worker).toContain('currentDraft: inlinePayload.currentDraft || inlinePayload.currentText || undefined');
   });
 
   it('passes the live draft through the nested quick-prompt panel too', () => {

@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 type Store = Record<string, unknown>;
 let store: Store = {};
 
+
 function makeJwt(expEpochSec: number): string {
   const payload = Buffer.from(JSON.stringify({ exp: expEpochSec })).toString('base64');
   return `h.${payload}.s`;
@@ -31,22 +32,25 @@ let originalFetch: typeof globalThis.fetch;
 
 beforeEach(() => {
   originalFetch = globalThis.fetch;
+  // Tokens live in chrome.storage.session now (audit EXT-10).
+  const area = {
+    get: vi.fn(async (keys: string | string[]) => {
+      const list = Array.isArray(keys) ? keys : [keys];
+      const out: Store = {};
+      for (const k of list) if (store[k] !== undefined) out[k] = store[k];
+      return out;
+    }),
+    set: vi.fn(async (obj: Store) => { Object.assign(store, obj); }),
+    remove: vi.fn(async (keys: string | string[]) => {
+      const list = Array.isArray(keys) ? keys : [keys];
+      for (const k of list) delete store[k];
+    }),
+  };
   store = {};
   (globalThis as unknown as { chrome: unknown }).chrome = {
     storage: {
-      local: {
-        get: vi.fn(async (keys: string | string[]) => {
-          const list = Array.isArray(keys) ? keys : [keys];
-          const out: Store = {};
-          for (const k of list) if (store[k] !== undefined) out[k] = store[k];
-          return out;
-        }),
-        set: vi.fn(async (obj: Store) => { Object.assign(store, obj); }),
-        remove: vi.fn(async (keys: string | string[]) => {
-          const list = Array.isArray(keys) ? keys : [keys];
-          for (const k of list) delete store[k];
-        }),
-      },
+      session: area,
+      local: { get: vi.fn(async () => ({})), set: vi.fn(async () => {}), remove: vi.fn(async () => {}) },
     },
     runtime: { sendMessage: vi.fn(async () => ({ ok: true })) },
   };
@@ -69,7 +73,7 @@ describe('token refresh centralization', () => {
 
     const sendMessage = vi.fn(async () => {
       store.authToken = makeJwt(nowSec() + 3600);
-      return { ok: true };
+      return { ok: true, outcome: 'refreshed' };
     });
     (globalThis as unknown as { chrome: { runtime: { sendMessage: unknown } } }).chrome.runtime.sendMessage = sendMessage;
 

@@ -33,6 +33,12 @@ describe('usesDirectWorkerPath', () => {
     },
   );
 
+  it('routes the Gmail compose popover straight through the worker', () => {
+    // The popover sends originSurface 'compose-toolbar'. On the side-panel
+    // path it dropped the prompt and ended in "Drafting timed out".
+    expect(usesDirectWorkerPath({ originSurface: 'compose-toolbar', platform: 'gmail' })).toBe(true);
+  });
+
   it('leaves non-inline surfaces on the side-panel path', () => {
     expect(usesDirectWorkerPath({ originSurface: 'sidepanel', platform: 'gmail' })).toBe(false);
     expect(usesDirectWorkerPath({ originSurface: 'popover', platform: 'linkedin' })).toBe(false);

@@ -1,10 +1,15 @@
 import { safeSendMessage } from '../../lib/runtime';
+import { watchPrivacySettings } from '../../lib/privacy-settings';
 
 /**
  * Grammarly-Style Inline Suggestions
  *
  * Monitors text input in compose fields, debounces grammar/tone checks,
  * and sends suggestions to the side panel for rendering.
+ *
+ * OFF BY DEFAULT (audit EXT-02 / XP-05). Nothing the user types is sent until
+ * they turn on "Check grammar while I type" in the popup. The service worker
+ * enforces the same switch, so this check only avoids a wasted message.
  *
  * Underlines are intentionally NOT rendered in contentEditable elements
  * because they are fragile and break Gmail/Slack compose behavior.
@@ -28,6 +33,14 @@ export interface SuggestionConfig {
   minLength?: number;
   /** Debounce interval in ms */
   debounceMs?: number;
+  /** Whether background checks are allowed right now. Defaults to the user's opt-in setting. */
+  isEnabled?: () => boolean;
+}
+
+let sharedSettings: ReturnType<typeof watchPrivacySettings> | null = null;
+function passiveChecksEnabled(): boolean {
+  sharedSettings ??= watchPrivacySettings();
+  return sharedSettings.current().passiveGrammarChecks;
 }
 
 // Active suggestion tooltip (Shadow DOM isolated)
@@ -51,6 +64,7 @@ export function createSuggestionMonitor(config: SuggestionConfig): () => void {
     onCheckRequested,
     minLength = 30,
     debounceMs = 2000,
+    isEnabled = passiveChecksEnabled,
   } = config;
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -60,7 +74,7 @@ export function createSuggestionMonitor(config: SuggestionConfig): () => void {
   let isDestroyed = false;
 
   async function runCheck() {
-    if (isDestroyed) return;
+    if (isDestroyed || !isEnabled()) return;
     const text = element.textContent?.trim() || '';
     if (text.length < minLength || text === lastCheckedText) return;
 
@@ -84,6 +98,7 @@ export function createSuggestionMonitor(config: SuggestionConfig): () => void {
 
   function onInput() {
     if (debounceTimer) clearTimeout(debounceTimer);
+    if (!isEnabled()) return;
     debounceTimer = setTimeout(runCheck, debounceMs);
   }
 

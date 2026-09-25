@@ -1,6 +1,6 @@
-# Chrome Web Store listing: Pranan 0.8.67
+# Chrome Web Store listing: Pranan 0.8.68
 
-Use this file as the source of truth for the Chrome Web Store dashboard. The copy and assets describe the current extension behavior and match manifest version `0.8.67`.
+Use this file as the source of truth for the Chrome Web Store dashboard. The copy describes the current extension behavior and matches manifest version `0.8.68`. Update the version here in the same release commit as `package.json` and `public/manifest.json`. The screenshots and promo art in `store-assets/v0.8.67/` still match the shipped interface.
 
 ## Product details
 
@@ -35,7 +35,9 @@ Use this file as the source of truth for the Chrome Web Store dashboard. The cop
 > • Insert the generated draft into the open compose window
 > • Access saved snippets, follow-ups, and briefings from one place
 >
-> Pranan also supports contextual drafting in Slack and LinkedIn.
+> Pranan also supports contextual drafting in Slack (channels, DMs and threads) and LinkedIn (messages and post comments).
+>
+> Privacy: Pranan sends a conversation to Pranan only when you use a Pranan action, plus, when you open a compose, the recipient's address (and for replies, the thread) to show relationship context and reply suggestions. Background grammar checks while you type, and learning your voice from LinkedIn comments you post, are off by default and run only if you turn them on. Voice input uses Chrome's built-in speech recognition (processed by Google) where available; otherwise the clip is transcribed by OpenAI for Pranan and not stored.
 >
 > Pranan is built for founders, executives, account managers, and teams that handle important relationships across many conversations.
 >
@@ -56,7 +58,7 @@ Upload these five localized screenshots in this order. Each file is 1280×800 PN
 5. `store-assets/v0.8.67/05-improve-draft.png`
    Caption: **Improve an existing draft without losing your voice**
 
-The screenshots are high-fidelity product illustrations based on the shipped 0.8.67 interface. They use fictional recipient information and demonstrate supported product states.
+The screenshots are high-fidelity product illustrations based on the 0.8.67 interface. Recheck them against the build before each upload. They use fictional recipient information and demonstrate supported product states.
 
 ## Promotional images
 
@@ -82,63 +84,59 @@ The existing icon is 128×128 PNG. Its visible artwork is contained inside the r
 
 ## Permission justifications
 
-**activeTab**
-
-> Lets Pranan act on the current supported communication tab after the user invokes the extension.
-
 **storage**
 
-> Stores authentication state and user preferences in the browser so the extension can maintain the signed-in experience and chosen settings.
+> Keeps the user's Pranan sign-in in extension-only storage that web pages and content scripts cannot read, plus the user's settings (tone preference, privacy switches).
 
 **sidePanel**
 
 > Displays relationship context and drafting controls beside the current page.
 
-**tabs**
-
-> Identifies the active supported tab so Pranan can route a user-requested draft to the correct compose window.
-
 **alarms**
 
-> Schedules background refresh and maintenance work required by the extension.
+> Refreshes the user's Pranan sign-in about every 25 minutes so a long-open tab does not get signed out.
 
 **webNavigation**
 
-> Detects navigation within supported single-page applications so Pranan can refresh the active conversation context.
+> Gmail changes views without reloading the page. Pranan listens for these in-page navigations on mail.google.com only, to check that its Gmail script is still running.
 
 **scripting**
 
-> Supports the extension's user interface and drafting actions on supported pages.
+> Used for one purpose: re-injecting Pranan's own bundled Gmail script into a mail.google.com tab when an in-page navigation left it unloaded. It never injects remote code or runs on other sites.
 
-**Host permissions: mail.google.com, app.slack.com, linkedin.com**
+**Host permissions: mail.google.com, app.slack.com, www.linkedin.com**
 
-> Lets Pranan read the active conversation and recipient context when the user drafts a message, and lets it place the generated result into the active compose field.
+> Lets Pranan read the active conversation and recipient when the user asks for a draft, rewrite or grammar check, look up the recipient's relationship context when a compose opens, and place the generated result into the compose field the user drafted from.
 
 **Host permission: app.pranan.ai**
 
-> Connects the extension to the user's Pranan account and Pranan's authenticated product services.
+> Connects the extension to the user's Pranan account: sign-in handoff after the user clicks Connect, and Pranan's authenticated product services.
+
+The extension does not request the `tabs` or `activeTab` permissions. It reads a tab's address only on the four sites above, which the host permissions already cover.
 
 ## Limited Use disclosure
 
 > Pranan's use and transfer of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements.
 >
-> Pranan uses message, thread, and recipient context to provide user-requested drafting and relationship features. Pranan does not sell Google user data, use it for advertising, or use it to train general-purpose AI models.
+> Pranan uses message, thread, and recipient context to provide user-requested drafting and relationship features. Features that send what the user is typing in the background are off by default and require the user to turn them on. Pranan does not sell Google user data, use it for advertising, or use it to train general-purpose AI models.
 
 ## URLs
 
-- Privacy policy: `https://pranan.ai/privacy`
+- Privacy policy: `https://pranan.ai/privacy` (section 7 covers the extension, including third-party voice processing)
 - Product website: `https://pranan.ai`
 - Support email: `privacy@pranan.ai`
 
 ## Publishing checklist
 
-- [x] Manifest and package version are 0.8.67
+- [x] Manifest and package version are 0.8.68
+- [x] Minimum Chrome version is 116 (side panel open support)
 - [x] Store icon is present at 128×128
 - [x] Five current screenshots are prepared at 1280×800
 - [x] Small promo tile is prepared at 440×280
 - [x] Marquee promo image is prepared at 1400×560
 - [x] Product copy matches the current feature set
-- [x] Permission justifications match the current manifest
+- [x] Permission justifications match the current manifest (no `tabs`, no `activeTab`)
+- [ ] Privacy practices tab: declare "Personally identifiable information", "Personal communications" and "Website content"; the privacy policy discloses OpenAI and Google speech processing
 - [x] Privacy policy URL is specified
 - [ ] Upload the package when the current review lock clears
 - [ ] Replace the listing copy and graphic assets in the dashboard

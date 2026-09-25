@@ -81,3 +81,19 @@ export function extractSelfEmail(title: string | null | undefined): string | nul
   if (!matches || matches.length === 0) return null;
   return matches[matches.length - 1].toLowerCase();
 }
+
+/**
+ * Cap a transcript at `max` characters by dropping the OLDEST text.
+ *
+ * Slack and LinkedIn used to cap with slice(0, max), which kept the oldest
+ * messages and cut off the newest one, the message actually being replied to,
+ * so long threads got replies to the wrong message (audit EXT-13). When the cut
+ * lands mid-line, the partial first line is dropped so the transcript starts
+ * on a clean boundary.
+ */
+export function keepNewestChars(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const tail = text.slice(text.length - max);
+  const firstBreak = tail.indexOf('\n');
+  return firstBreak >= 0 && firstBreak < tail.length - 1 ? tail.slice(firstBreak + 1) : tail;
+}

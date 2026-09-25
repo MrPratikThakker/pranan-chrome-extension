@@ -23,7 +23,7 @@
  * model the same shape.
  */
 
-import { formatThreadContext } from '@/lib/thread-context';
+import { formatThreadContext, keepNewestChars } from '@/lib/thread-context';
 import { findAll, findOne, SELECTORS } from '../selectors';
 
 /** How many trailing messages to carry, matching the previous behaviour. */
@@ -98,18 +98,51 @@ export const LINKEDIN_SELF_NAME_SELECTORS = [
  * anonymous.
  *
  * Climbing one level at a time and stopping at the first ancestor that actually
- * contains a sender is immune to the ordering of the chain. Bounded so a miss
- * cannot walk out to the whole pane and attribute every message to whoever
- * happens to be first in it.
+ * contains a sender is immune to the ordering of the chain. The climb stops at
+ * the message's own list item, so a miss cannot walk out to the whole pane and
+ * attribute every message to whoever happens to be first in it.
  */
 export function findSenderFor(body: Element): string | null {
+  const boundary = body.closest(SLACK_LIST_ITEM) || body.closest(SLACK_MESSAGE_ITEM);
+  if (!boundary) {
+    // No recognisable message wrapper: fall back to a short bounded climb.
+    let node: Element | null = body.parentElement;
+    for (let depth = 0; node && depth < 6; depth++, node = node.parentElement) {
+      const name = senderIn(node);
+      if (name) return name;
+    }
+    return null;
+  }
+
+  // Climb only as far as this message's own wrapper. Going further reached the
+  // list container and returned whoever happened to be first in the whole pane
+  // (audit EXT-31).
   let node: Element | null = body.parentElement;
-  for (let depth = 0; node && depth < 6; depth++, node = node.parentElement) {
-    const senderEl = findOne('slack.messageSenderName', SELECTORS.slack.messageSenderName, node);
-    const name = senderEl?.textContent?.trim();
+  while (node) {
+    const name = senderIn(node);
+    if (name) return name;
+    if (node === boundary) break;
+    node = node.parentElement;
+  }
+
+  // Slack collapses consecutive messages from one person under the first
+  // message's header, so a follow-up has no sender of its own. It belongs to
+  // the nearest EARLIER message in the list that shows one.
+  let previous = boundary.previousElementSibling;
+  for (let steps = 0; previous && steps < 30; steps++, previous = previous.previousElementSibling) {
+    const name = senderIn(previous);
     if (name) return name;
   }
   return null;
+}
+
+const SLACK_LIST_ITEM = '.c-virtual_list__item, [data-qa="virtual-list-item"]';
+const SLACK_MESSAGE_ITEM = '.c-message_kit__message, [data-qa="message_container"]';
+
+function senderIn(root: Element): string | null {
+  const senderEl = findOne('slack.messageSenderName', SELECTORS.slack.messageSenderName, root);
+  const name = senderEl?.textContent?.trim();
+  return name || null;
 }
 
 /**
@@ -132,7 +165,7 @@ export function attributeSlackThread(selfName: string | null): string | null {
   }));
 
   const formatted = formatThreadContext(messages, selfName);
-  return formatted ? formatted.slice(0, MAX_CHARS) : null;
+  return formatted ? keepNewestChars(formatted, MAX_CHARS) : null;
 }
 
 /**
@@ -165,5 +198,5 @@ export function attributeLinkedInHistory(
   });
 
   const formatted = formatThreadContext(messages, selfName);
-  return formatted ? formatted.slice(0, MAX_CHARS) : null;
+  return formatted ? keepNewestChars(formatted, MAX_CHARS) : null;
 }

@@ -2,8 +2,10 @@
  * Pranan Companion API Client
  *
  * Typed client for all /api/companion/* endpoints.
- * Runs in both service worker and side panel contexts.
- * Supports SSE streaming for draft generation.
+ * Runs in trusted extension contexts only: the service worker, the popup and
+ * the side panel. Content scripts never call it directly; they message the
+ * service worker (audit EXT-07, EXT-10), because a content-script fetch runs
+ * with the page's origin and the tokens are not readable there.
  */
 
 import type {
@@ -19,9 +21,21 @@ import type {
 } from '@/types';
 
 import { captureError } from '@/lib/observability';
+import { readAuthTokens, writeAuthTokens, clearAuthTokens } from '@/lib/token-store';
 
 // Module-level flag to dedup parallel 401 cleanup. See handleResponse 401 branch.
 let authExpiryInFlight = false;
+
+/**
+ * In the service worker, chrome.runtime.sendMessage never reaches the worker's
+ * own onMessage listener, so a 401 seen there used to leave the worker's
+ * cached auth stale and never told the side panel (audit EXT-24). The worker
+ * registers a handler here instead.
+ */
+let authExpiredHandler: (() => void) | null = null;
+export function setAuthExpiredHandler(handler: (() => void) | null): void {
+  authExpiredHandler = handler;
+}
 
 /**
  * Broadcast that auth has expired so the popup + side panel flip to the
@@ -30,25 +44,30 @@ let authExpiryInFlight = false;
  * a 401 can never be silently swallowed into a dead, dashed-out UI
  * (Pranan live-debug 2026-06-09: popup showed "connected" + all "\u2014" because
  * getTodaySnapshot ate the 401 instead of prompting reconnect).
+ *
+ * Only reached once the session is really over: authedFetch has already tried
+ * one refresh (EXT-08), and a refresh that failed for a transient reason
+ * (429, 5xx, timeout) throws before this point instead of logging out.
  */
 async function notifyAuthExpired(): Promise<void> {
   if (authExpiryInFlight) return;
   authExpiryInFlight = true;
   // Audit (LOW): clear BOTH tokens on auth-expiry. Clearing only authToken left
   // a stale refreshToken behind, which the refresh path would keep trying.
-  try { await chrome.storage.local.remove(['authToken', 'refreshToken']); } catch { /* pass */ }
-  // The try/catch below only covers a SYNCHRONOUS throw (dead extension
-  // context). It does not cover the promise, and this broadcast rejects
-  // whenever nothing is listening -- which is the normal case, because the
-  // popup and side panel are closed almost all the time. That unhandled
-  // rejection is the recurring "Uncaught (in promise) Error: Could not
-  // establish connection. Receiving end does not exist." on background.js,
-  // with a useless `background.js:0` stack. Nothing is broken when it fires;
-  // the broadcast simply has no audience.
-  try {
-    chrome.runtime.sendMessage({ type: 'AUTH_EXPIRED' })
-      .catch(() => { /* no popup or side panel open to hear it */ });
-  } catch { /* extension context gone */ }
+  try { await clearAuthTokens(); } catch { /* pass */ }
+  if (IS_SERVICE_WORKER && authExpiredHandler) {
+    try { authExpiredHandler(); } catch { /* pass */ }
+  } else {
+    // The try/catch below only covers a SYNCHRONOUS throw (dead extension
+    // context). It does not cover the promise, and this broadcast rejects
+    // whenever nothing is listening -- which is the normal case, because the
+    // popup and side panel are closed almost all the time. Nothing is broken
+    // when it fires; the broadcast simply has no audience.
+    try {
+      chrome.runtime.sendMessage({ type: 'AUTH_EXPIRED' })
+        .catch(() => { /* no popup or side panel open to hear it */ });
+    } catch { /* extension context gone */ }
+  }
   setTimeout(() => { authExpiryInFlight = false; }, 5000);
 }
 
@@ -56,29 +75,21 @@ async function notifyAuthExpired(): Promise<void> {
 // Config
 // ---------------------------------------------------------------------------
 
-import { API_BASE, APP_ORIGIN } from './config';
+import { API_BASE, APP_ORIGIN, appUrl } from './config';
 
 // ---------------------------------------------------------------------------
-// Auth passthrough — v0.4.0+
+// Auth
 //
-// The server accepts EITHER:
-//   1. Cookie-based session (Supabase auth-token cookie, set on app.pranan.ai
-//      when the user signs in). This is the primary path. As long as the user
-//      is signed into app.pranan.ai in their browser, the extension is
-//      authenticated. No "Connect Account" loop on token expiry.
-//   2. Authorization: Bearer <token> (legacy clients with a stored access
-//      token from pre-v0.4.0 versions). Retained for backwards compat until
-//      those tokens expire and the user falls through to the cookie path.
-//
-// `credentials: 'include'` tells the browser to attach cookies on the
-// outbound fetch. Because app.pranan.ai is in our manifest host_permissions,
-// the cookies flow even from the service worker and even with SameSite=Lax.
+// Companion requests are cross-site (extension -> app.pranan.ai), so the
+// SameSite=Lax session cookie is not the path the extension relies on. Every
+// request carries `Authorization: Bearer <access token>` from the trusted
+// token store (token-store.ts). `credentials: 'include'` is kept so the
+// server's cookie fallback still works where the browser sends the cookie.
 // ---------------------------------------------------------------------------
 
 async function getLegacyAuthToken(): Promise<string | null> {
   try {
-    const result = await chrome.storage.local.get('authToken');
-    return result.authToken || null;
+    return (await readAuthTokens()).authToken;
   } catch {
     return null;
   }
@@ -87,17 +98,14 @@ async function getLegacyAuthToken(): Promise<string | null> {
 // ---------------------------------------------------------------------------
 // Bearer refresh (Option A) — keep the access token fresh without cookies.
 //
-// Companion requests are cross-site (extension -> app.pranan.ai), so the
-// SameSite=Lax session cookie is never sent. The extension therefore relies
-// on the Bearer access token, which expires (~1h). When it nears expiry we
-// mint a fresh one server-side via POST /api/companion/refresh using the
-// stored refresh token. Supabase credentials stay on the server.
+// The access token expires (~1h). When it nears expiry we mint a fresh one
+// server-side via POST /api/companion/refresh using the stored refresh token.
+// Supabase credentials stay on the server.
 // ---------------------------------------------------------------------------
 
 async function getRefreshToken(): Promise<string | null> {
   try {
-    const r = await chrome.storage.local.get('refreshToken');
-    return r.refreshToken || null;
+    return (await readAuthTokens()).refreshToken;
   } catch {
     return null;
   }
@@ -114,14 +122,31 @@ function jwtExpMs(token: string): number | null {
   }
 }
 
-// Dedup concurrent refreshes so a burst of requests triggers exactly one.
-let refreshInFlight: Promise<string | null> | null = null;
+/**
+ * What happened on the last refresh attempt.
+ *
+ *  refreshed         a new access token is stored
+ *  rejected          /refresh answered 401: the refresh token is dead, both
+ *                    tokens were cleared and the user must reconnect
+ *  unavailable       429, 5xx, timeout or network failure: the refresh token
+ *                    may be perfectly valid, so it is KEPT (audit EXT-08)
+ *  no_refresh_token  nothing to refresh with
+ */
+export type RefreshOutcome = 'refreshed' | 'rejected' | 'unavailable' | 'no_refresh_token';
 
-export async function refreshAccessToken(): Promise<string | null> {
+export interface RefreshResult {
+  token: string | null;
+  outcome: RefreshOutcome;
+}
+
+// Dedup concurrent refreshes so a burst of requests triggers exactly one.
+let refreshInFlight: Promise<RefreshResult> | null = null;
+
+export async function refreshAccessTokenWithOutcome(): Promise<RefreshResult> {
   if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = (async () => {
-    const refreshToken = await getRefreshToken();
-    if (!refreshToken) return null;
+  refreshInFlight = (async (): Promise<RefreshResult> => {
+    const { refreshToken } = await readAuthTokens().catch(() => ({ authToken: null, refreshToken: null }));
+    if (!refreshToken) return { token: null, outcome: 'no_refresh_token' };
     try {
       const res = await fetch(`${APP_ORIGIN}/api/companion/refresh`, {
         method: 'POST',
@@ -130,54 +155,79 @@ export async function refreshAccessToken(): Promise<string | null> {
         signal: AbortSignal.timeout(8_000),
       });
       if (!res.ok) {
-        // 401 => refresh token itself is dead; clear so the UI prompts reconnect.
+        // Only a 401 from /refresh itself means the refresh token is dead.
+        // A rate limit or server error must not delete a token that still
+        // works (audit EXT-08 / XP-13).
         if (res.status === 401) {
-          try { await chrome.storage.local.remove(['authToken', 'refreshToken']); } catch { /* pass */ }
+          try { await clearAuthTokens(); } catch { /* pass */ }
+          return { token: null, outcome: 'rejected' };
         }
-        return null;
+        return { token: null, outcome: 'unavailable' };
       }
       const data = await res.json();
       if (data?.token) {
-        await chrome.storage.local.set({
+        await writeAuthTokens({
           authToken: data.token,
           refreshToken: data.refreshToken || refreshToken,
         });
-        return data.token as string;
+        return { token: data.token as string, outcome: 'refreshed' };
       }
-      return null;
+      return { token: null, outcome: 'unavailable' };
     } catch {
-      return null;
+      return { token: null, outcome: 'unavailable' };
     }
   })().finally(() => { refreshInFlight = null; });
   return refreshInFlight;
 }
 
-/**
- * Return a valid access token, refreshing first if the stored one is missing
- * an exp, expired, or within 2 minutes of expiry. Falls back to the existing
- * token (or null) when no refresh token is available (legacy/cookie clients),
- * so behaviour never regresses for them.
- */
-// Refresh tokens are single-use and rotate server-side, so only ONE context may
-// ever call POST /api/companion/refresh at a time. The popup, side panel, and
-// content scripts each bundle their own copy of this module with their own
-// refreshInFlight, so without coordination two contexts could refresh in
-// parallel, consume the same rotating token, and force a logout. We therefore
-// make the service worker the single owner of refresh: every non-SW context
-// asks the SW to refresh (which persists the new token to storage) and then
-// re-reads the fresh token. (token-refresh centralization 2026-06-09)
-const IS_SERVICE_WORKER = typeof window === 'undefined';
-
-async function refreshViaServiceWorker(): Promise<string | null> {
-  try {
-    await chrome.runtime.sendMessage({ type: 'REFRESH_TOKEN' });
-  } catch {
-    // SW unreachable (rare) -> fall back to a local refresh so auth still works.
-    return refreshAccessToken();
-  }
-  return getLegacyAuthToken();
+export async function refreshAccessToken(): Promise<string | null> {
+  return (await refreshAccessTokenWithOutcome()).token;
 }
 
+// Refresh tokens are single-use and rotate server-side, so only ONE context may
+// ever call POST /api/companion/refresh at a time. The popup and side panel
+// each bundle their own copy of this module with their own refreshInFlight, so
+// without coordination two contexts could refresh in parallel, consume the
+// same rotating token, and force a logout. We therefore make the service
+// worker the single owner of refresh: every non-SW context asks the SW to
+// refresh (which persists the new token) and then re-reads the fresh token.
+// (token-refresh centralization 2026-06-09)
+const IS_SERVICE_WORKER = typeof window === 'undefined';
+
+async function refreshViaServiceWorker(): Promise<RefreshResult> {
+  let reply: { outcome?: RefreshOutcome } | null | undefined;
+  try {
+    reply = await chrome.runtime.sendMessage({ type: 'REFRESH_TOKEN' });
+  } catch {
+    // SW unreachable (rare) -> fall back to a local refresh so auth still works.
+    return refreshAccessTokenWithOutcome();
+  }
+  const token = await getLegacyAuthToken();
+  const outcome = reply?.outcome ?? (token ? 'refreshed' : 'unavailable');
+  return { token: outcome === 'refreshed' ? token : null, outcome };
+}
+
+function refreshNow(): Promise<RefreshResult> {
+  return IS_SERVICE_WORKER ? refreshAccessTokenWithOutcome() : refreshViaServiceWorker();
+}
+
+function refreshUnavailableError(): ApiError {
+  return new ApiError(
+    'Pranan could not refresh your session right now. Try again in a moment.',
+    503,
+    'AUTH_REFRESH_UNAVAILABLE',
+  );
+}
+
+/**
+ * Return a valid access token, refreshing first if the stored one is missing
+ * an exp, expired, or within 2 minutes of expiry.
+ *
+ * If the refresh fails for a transient reason and the stored token has
+ * already expired, this throws a 503 instead of returning the expired token.
+ * Sending it would only earn a 401, and the 401 path used to delete a refresh
+ * token that was still valid (audit EXT-08 / XP-13).
+ */
 async function ensureValidToken(): Promise<string | null> {
   const token = await getLegacyAuthToken();
   if (!token) return null;
@@ -185,49 +235,66 @@ async function ensureValidToken(): Promise<string | null> {
   if (expMs && expMs - Date.now() > 120_000) return token;
   // Needs refresh. The SW owns refresh; everyone else delegates to it so the
   // single-use rotating refresh token is never consumed by two racers.
-  const refreshed = IS_SERVICE_WORKER
-    ? await refreshAccessToken()
-    : await refreshViaServiceWorker();
-  return refreshed || token;
+  const { token: refreshed, outcome } = await refreshNow();
+  if (refreshed) return refreshed;
+  if (outcome === 'rejected') return null;
+  if (outcome === 'unavailable' && expMs && expMs <= Date.now()) throw refreshUnavailableError();
+  return token;
 }
 
-async function authedFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const legacyToken = await ensureValidToken();
-  init.signal?.throwIfAborted();
+function withAuth(init: RequestInit, token: string | null): RequestInit {
   const headers = new Headers(init.headers || {});
   if (!headers.has('Content-Type') && init.body && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
-  if (legacyToken && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${legacyToken}`);
-  }
-  return fetch(url, {
-    ...init,
-    headers,
-    credentials: 'include',
-  });
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return { ...init, headers, credentials: 'include' };
+}
+
+/**
+ * A 401 with a token in hand may only mean the access token was revoked or
+ * rotated a moment ago. Try one refresh and one retry before treating the
+ * session as over (audit EXT-08). Returns null when there is nothing better
+ * to retry with, and throws when the refresh failed for a transient reason so
+ * the caller never logs the user out over a rate limit or a server blip.
+ */
+async function retryAfter401(token: string | null): Promise<string | null> {
+  if (!token) return null;
+  const { token: fresh, outcome } = await refreshNow();
+  if (fresh && fresh !== token) return fresh;
+  if (outcome === 'unavailable') throw refreshUnavailableError();
+  return null;
+}
+
+async function authedFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = await ensureValidToken();
+  init.signal?.throwIfAborted();
+  const response = await fetch(url, withAuth(init, token));
+  if (response.status !== 401) return response;
+  const fresh = await retryAfter401(token);
+  if (!fresh) return response;
+  init.signal?.throwIfAborted();
+  return fetch(url, withAuth(init, fresh));
 }
 
 /**
  * Variant of authedFetch that auto-retries on transient failures (5xx,
- * network drop). Backoff lives inside fetchWithRetry; this wrapper just
- * threads cookies + legacy Bearer through every retry.
+ * network drop). Backoff lives inside fetchWithRetry; this wrapper threads
+ * the Bearer token through every retry.
  */
 async function authedFetchWithRetry(
   url: string,
   init: RequestInit = {},
   opts: { retries?: number } = {}
 ): Promise<Response> {
-  const legacyToken = await ensureValidToken();
+  const token = await ensureValidToken();
   init.signal?.throwIfAborted();
-  const headers = new Headers(init.headers || {});
-  if (!headers.has('Content-Type') && init.body && !(init.body instanceof FormData)) {
-    headers.set('Content-Type', 'application/json');
-  }
-  if (legacyToken && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${legacyToken}`);
-  }
-  return fetchWithRetry(url, { ...init, headers, credentials: 'include' }, opts);
+  const response = await fetchWithRetry(url, withAuth(init, token), opts);
+  if (response.status !== 401) return response;
+  const fresh = await retryAfter401(token);
+  if (!fresh) return response;
+  init.signal?.throwIfAborted();
+  return fetchWithRetry(url, withAuth(init, fresh), opts);
 }
 
 // ---------------------------------------------------------------------------
@@ -242,10 +309,6 @@ async function authedFetchWithRetry(
  *   - 4xx responses (auth errors, bad requests, rate limits — those are
  *     deterministic and retrying just makes things worse)
  *   - AbortError (the caller cancelled — never retry a cancellation)
- *
- * Streaming requests (SSE) cannot be retried mid-stream and should not call
- * this helper for the streaming fetch itself; they can fall back to the
- * non-streaming path which DOES retry.
  */
 async function fetchWithRetry(
   url: string,
@@ -294,6 +357,9 @@ function sleep(ms: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export class ApiError extends Error {
+  /** For a 402: where the user can upgrade (absolute app URL). */
+  upgradeUrl?: string;
+
   constructor(
     message: string,
     public status: number,
@@ -302,6 +368,25 @@ export class ApiError extends Error {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+/**
+ * Error reports never carry query strings (the /context lookup puts email
+ * addresses and names there) or response bodies (audit EXT-20).
+ */
+function reportableUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return '';
+  }
+}
+
+/** Only same-app relative paths are accepted as an upgrade link. */
+function upgradeLink(path: unknown): string {
+  const safe = typeof path === 'string' && /^\/(?!\/)[\w\-/?=&.]*$/.test(path) ? path : '/settings/billing';
+  return appUrl(safe);
 }
 
 async function handleResponse<T>(response: Response): Promise<T> {
@@ -325,32 +410,47 @@ async function handleResponse<T>(response: Response): Promise<T> {
 
   if (!response.ok) {
     const body = await response.text();
-    let message = `API error: ${response.status}`;
+    let serverMessage: string | undefined;
     let code: string | undefined;
+    let parsed: Record<string, unknown> | null = null;
 
     try {
-      const parsed = JSON.parse(body);
-      message = parsed.error || parsed.message || message;
-      code = parsed.code;
+      parsed = JSON.parse(body);
+      const candidate = parsed?.error || parsed?.message;
+      serverMessage = typeof candidate === 'string' && candidate ? candidate : undefined;
+      code = typeof parsed?.code === 'string' ? parsed.code : undefined;
     } catch {
       // Use default message
     }
+    const message = serverMessage || `API error: ${response.status}`;
+    const url = reportableUrl(response.url);
 
     if (response.status === 429) {
-      const err = new ApiError('Rate limit exceeded. Please wait a moment.', 429, 'RATE_LIMITED');
-      captureError(err, { component: 'api-client', metadata: { status: 429, url: response.url } });
+      // Keep the server's reason. A daily budget that resets at midnight UTC
+      // and a two-minute burst limit need different advice (XP-09, XP-31).
+      const limitCode = code
+        || (serverMessage && /daily budget/i.test(serverMessage) ? 'DAILY_BUDGET' : 'RATE_LIMITED');
+      const err = new ApiError(serverMessage || 'Rate limit exceeded. Please wait a moment.', 429, limitCode);
+      captureError(err, { component: 'api-client', metadata: { status: 429, url, code: limitCode } });
+      throw err;
+    }
+    if (response.status === 402) {
+      // Plan quota used up. Previously unhandled, so the user saw "try again"
+      // and never an upgrade path (XP-09).
+      const err = new ApiError(serverMessage || 'Monthly draft limit reached.', 402, code || 'QUOTA_EXCEEDED');
+      err.upgradeUrl = upgradeLink(parsed?.upgrade_url);
       throw err;
     }
     if (response.status === 401) {
       // Auth expired -> broadcast so the UI prompts reconnect (deduped).
       await notifyAuthExpired();
       const err = new ApiError('Session expired. Please reconnect.', 401, 'UNAUTHORIZED');
-      captureError(err, { component: 'api-client', metadata: { url: response.url } });
+      captureError(err, { component: 'api-client', metadata: { url } });
       throw err;
     }
     if (response.status >= 500) {
       const err = new ApiError(message, response.status, code);
-      captureError(err, { component: 'api-client', metadata: { status: response.status, url: response.url, body: body.slice(0, 500) } });
+      captureError(err, { component: 'api-client', metadata: { status: response.status, url } });
       throw err;
     }
 
@@ -369,17 +469,51 @@ export async function validateAuth(): Promise<AuthResponse> {
   try {
     response = await authedFetch(`${API_BASE}/auth`);
   } catch (e) {
-    // Network error: don't sign the user out; treat as transient.
+    // Network error or a refresh that could not complete. Don't sign the user
+    // out, but only report a signed-in session when there is one to keep
+    // (audit EXT-22: offline users who never signed in saw the signed-in UI).
     console.warn('[API] validateAuth: network error, treating as transient', e);
-    return { valid: true, transient: true } as unknown as AuthResponse;
+    return transientAuth();
   }
   // Server signaling transient failure (503 with transient flag, e.g. Supabase
   // blip). Don't clear the token; let the next call retry.
   if (response.status === 503) {
     console.warn('[API] validateAuth: 503 from server, treating as transient');
-    return { valid: true, transient: true } as unknown as AuthResponse;
+    return transientAuth();
   }
   return handleResponse<AuthResponse>(response);
+}
+
+async function transientAuth(): Promise<AuthResponse> {
+  const tokens = await readAuthTokens().catch(() => ({ authToken: null, refreshToken: null }));
+  const hadSession = !!(tokens.authToken || tokens.refreshToken);
+  return { valid: hadSession, transient: true } as unknown as AuthResponse;
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/companion/exchange -- one-time sign-in nonce -> tokens
+// ---------------------------------------------------------------------------
+
+/**
+ * Service worker only. Lets the app hand the extension its one-time sign-in
+ * nonce instead of the tokens, so the tokens never pass through page script
+ * on app.pranan.ai (audit EXT-09). The nonce is single-use server-side.
+ */
+export async function exchangeLoginNonce(nonce: string): Promise<{ token: string; refreshToken: string | null } | null> {
+  try {
+    const response = await fetch(`${API_BASE}/exchange`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nonce }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { token?: unknown; refreshToken?: unknown };
+    if (typeof data?.token !== 'string' || !data.token) return null;
+    return { token: data.token, refreshToken: typeof data.refreshToken === 'string' && data.refreshToken ? data.refreshToken : null };
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -400,31 +534,7 @@ export async function getContactContext(
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/companion/proactive/suggestions -- Surface B's data feed
-// ---------------------------------------------------------------------------
-
-export interface ProactiveSuggestion {
-  thread_id: string;
-  email_id: string;
-  sender_name: string;
-  sender_email: string;
-  subject: string;
-  classification: string;
-  received_at: string;
-  received_ago: string;
-  tier: string;
-  suggested_tone: string;
-  priority: number;
-}
-
-export async function getProactiveSuggestions(): Promise<ProactiveSuggestion[]> {
-  const response = await authedFetchWithRetry(`${API_BASE}/proactive/suggestions`);
-  const data = await handleResponse<{ suggestions: ProactiveSuggestion[] }>(response);
-  return data.suggestions || [];
-}
-
-// ---------------------------------------------------------------------------
-// POST /api/companion/draft -- generate a draft (supports SSE streaming)
+// POST /api/companion/draft -- generate a draft (JSON; the server does not stream)
 // ---------------------------------------------------------------------------
 
 export interface DraftRequest {
@@ -445,20 +555,20 @@ export interface DraftRequest {
   composeType?: 'message' | 'post' | 'comment';
   /** LinkedIn post permalink, used for relationship lookup + telemetry. */
   postUrl?: string;
+  /**
+   * LinkedIn post author's profile URL. The server resolves the author's
+   * relationship from it; the worker used to drop it (XP-25).
+   */
+  postAuthorUrl?: string;
 }
 
-export async function generateDraft(request: DraftRequest, signal?: AbortSignal): Promise<DraftResponse> {
-  console.log('[API] generateDraft: POST', `${API_BASE}/draft`);
-  const response = await authedFetchWithRetry(`${API_BASE}/draft`, { method: 'POST', body: JSON.stringify(request), signal }, { retries: 0 });
-  console.log('[API] generateDraft: response status', response.status);
-  const data = await handleResponse<DraftResponse & { reason?: string; message?: string }>(response);
-  // Normalize skip fields. The server returns a skip as { skipped, reason,
-  // message }, but the SW INLINE_DRAFT_REQUEST handler and the Gmail content
-  // script read skipReason/skipMessage. The streaming path already maps these;
-  // this non-streaming path (used by the one-tap inline bar) did not, so the
-  // specific reason ("This email is addressed to Jigar, you are only copied")
-  // was dropped and the UI fell back to a generic "Draft skipped." Map here so
-  // the real, useful message reaches the user.
+/**
+ * The server returns an intentional skip as { skipped, reason, message }, but
+ * the worker and the content scripts read skipReason/skipMessage. Map here so
+ * the specific reason ("This email is addressed to Jigar, you are only
+ * copied") reaches the user instead of a generic "Draft skipped."
+ */
+function normalizeDraftResponse(data: DraftResponse & { reason?: string; message?: string }): DraftResponse {
   if (data?.skipped) {
     return {
       ...data,
@@ -469,15 +579,12 @@ export async function generateDraft(request: DraftRequest, signal?: AbortSignal)
   return data;
 }
 
-/**
- * Stream a draft via SSE for progressive rendering.
- * Yields partial text chunks as they arrive.
- *
- * If the server responds with plain JSON (no SSE), we detect it via
- * Content-Type and yield a single 'done' event with the full response.
- * This makes streaming a transparent upgrade -- works whether or not
- * the server supports it.
- */
+export async function generateDraft(request: DraftRequest, signal?: AbortSignal): Promise<DraftResponse> {
+  const response = await authedFetchWithRetry(`${API_BASE}/draft`, { method: 'POST', body: JSON.stringify(request), signal }, { retries: 0 });
+  const data = await handleResponse<DraftResponse & { reason?: string; message?: string }>(response);
+  return normalizeDraftResponse(data);
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/companion/intents -- one-tap reply intents for a thread
 // ---------------------------------------------------------------------------
@@ -491,6 +598,12 @@ export interface IntentsRequest {
   messageToReplyTo?: string | null;
 }
 
+/**
+ * POST /api/companion/transcribe. Called from the side panel and from the
+ * service worker (TRANSCRIBE_AUDIO) on behalf of content scripts, never from a
+ * content script directly: there the fetch runs with the page's origin and the
+ * server's CORS policy rejects it (audit EXT-07).
+ */
 export async function transcribeAudio(audio: Blob): Promise<string> {
   const form = new FormData();
   const extension = audio.type.includes('ogg') ? 'ogg'
@@ -529,9 +642,10 @@ export async function setTierOverride(contactEmail: string, tier: string): Promi
 }
 
 /**
- * POST /api/companion/voice-exemplar -- auto-capture a posted LinkedIn comment
- * as a voice sample. Fire-and-forget; failures are swallowed so capture never
- * interferes with the user posting their comment.
+ * POST /api/companion/voice-exemplar -- save a LinkedIn comment the user has
+ * posted as a voice sample. Only called when the user has turned on "Learn my
+ * voice from LinkedIn comments" (off by default, audit EXT-03). Fire-and-
+ * forget; failures are swallowed so capture never interferes with posting.
  */
 export async function postVoiceExemplar(comment: string): Promise<{ added: boolean }> {
   try {
@@ -558,92 +672,6 @@ export async function getReplyIntents(request: IntentsRequest): Promise<string[]
     return Array.isArray(data.intents) ? data.intents.slice(0, 3) : [];
   } catch {
     return [];
-  }
-}
-
-export async function* streamDraft(
-  request: DraftRequest,
-  signal?: AbortSignal
-): AsyncGenerator<{ type: 'chunk' | 'done'; text: string; meta?: Partial<DraftResponse> }> {
-  console.log('[API] streamDraft: POST', `${API_BASE}/draft`, { stream: true });
-  const response = await authedFetch(`${API_BASE}/draft`, {
-    method: 'POST',
-    headers: { 'Accept': 'text/event-stream' },
-    body: JSON.stringify({ ...request, stream: true }),
-    signal,
-  });
-
-  const contentType = response.headers.get('content-type') || '';
-  console.log('[API] streamDraft: response status', response.status, 'content-type', contentType);
-
-  if (!response.ok) await handleResponse(response);
-
-  // ---- Server returned plain JSON (no SSE support) ----
-  // Detect via Content-Type: if it's application/json, parse as a single DraftResponse
-  if (contentType.includes('application/json')) {
-    console.log('[API] streamDraft: server returned JSON (not SSE), yielding as single done event');
-    const json = await response.json() as DraftResponse & { skipped?: boolean; reason?: string; message?: string };
-    yield {
-      type: 'done',
-      text: json.draft || '',
-      meta: {
-        confidence: json.confidence,
-        voiceMatch: json.voiceMatch,
-        alternativeTones: json.alternativeTones,
-        skipped: json.skipped,
-        skipReason: json.reason,
-        skipMessage: json.message,
-      },
-    };
-    return;
-  }
-
-  // ---- Server returned SSE stream ----
-  const reader = response.body?.getReader();
-  if (!reader) throw new ApiError('No response body', 500);
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  // Wrap in try/finally so the reader is always released even if the consumer
-  // aborts mid-stream or the connection drops. Without this, the underlying
-  // body stays locked and subsequent fetches can hang.
-  try {
-    while (true) {
-      // Bug fix v0.5.3: respect abort signal so we don't leave the
-      // SSE connection draining server-side after the user clicks stop.
-      // Without reader.cancel() the fetch abort propagates but the
-      // body stream keeps reading until server timeout, wasting LLM
-      // tokens that the user already opted out of.
-      if (signal?.aborted) {
-        try { await reader.cancel(); } catch { /* already closed */ }
-        break;
-      }
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') {
-            return;
-          }
-          try {
-            const parsed = JSON.parse(data);
-            yield parsed;
-          } catch {
-            // Skip malformed lines
-          }
-        }
-      }
-    }
-  } finally {
-    try { await reader.cancel(); } catch { /* already canceled */ }
-    try { reader.releaseLock(); } catch { /* already released */ }
   }
 }
 
@@ -682,8 +710,8 @@ export async function checkGrammar(request: GrammarRequest, signal?: AbortSignal
 
 // ---------------------------------------------------------------------------
 // Phase 5: Intelligence Layer
-// These endpoints are planned but not yet built on the server.
-// Each function returns an empty array gracefully if the server 404s.
+// Read-only panels. Each function returns an empty array on any failure so a
+// briefing or nudge outage never breaks the side panel.
 // ---------------------------------------------------------------------------
 
 async function safeJsonResponse<T>(response: Response, fallback: T): Promise<T> {
@@ -728,13 +756,15 @@ export async function getDecayAlerts(): Promise<DecayAlert[]> {
 
 // POST /api/companion/nudges/:id/dismiss -- dismiss a nudge
 export async function dismissNudge(nudgeId: string): Promise<void> {
-  await authedFetch(`${API_BASE}/nudges/${nudgeId}/dismiss`, { method: 'POST' });
+  const response = await authedFetch(`${API_BASE}/nudges/${encodeURIComponent(nudgeId)}/dismiss`, { method: 'POST' });
+  await handleResponse<{ dismissed?: boolean }>(response);
 }
 
 // POST /api/companion/nudges/:id/draft -- generate draft from nudge
-export async function draftFromNudge(nudgeId: string): Promise<DraftResponse> {
-  const response = await authedFetch(`${API_BASE}/nudges/${nudgeId}/draft`, { method: 'POST' });
-  return handleResponse<DraftResponse>(response);
+export async function draftFromNudge(nudgeId: string, signal?: AbortSignal): Promise<DraftResponse> {
+  const response = await authedFetch(`${API_BASE}/nudges/${encodeURIComponent(nudgeId)}/draft`, { method: 'POST', signal });
+  const data = await handleResponse<DraftResponse & { reason?: string; message?: string }>(response);
+  return normalizeDraftResponse(data);
 }
 
 // GET /api/companion/today -- one-shot snapshot for popup today-at-a-glance.

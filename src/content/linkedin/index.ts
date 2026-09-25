@@ -29,6 +29,8 @@ import { bootstrapSentry } from '@/lib/observability';
 import { findOne, findAll } from '../selectors';
 import { attributeLinkedInHistory, readSelfName, LINKEDIN_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
 import { generateButtonState } from '../shared/generate-affordance';
+import { watchPrivacySettings } from '@/lib/privacy-settings';
+import { isConfirmedCommentPost } from './comment-capture';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -520,28 +522,37 @@ function injectMessagingPromptBar() {
 
   const triggerDraft = () => {
     const prompt = input.value.trim() || undefined;
+    // Bind the draft to THIS conversation's editor so it can only land there,
+    // never in a comment box the user clicked into while waiting (audit
+    // EXT-11). Read the recipient now: the bar is built once per page and the
+    // conversation can change under it.
+    const editor = queryFirst(SELECTORS.messageCompose) as HTMLElement | null;
+    const editorId = stampEditor(editor);
+    const liveRecipient = getConversationRecipient();
+    const liveProfile = getProfileContext();
+    const requestId = beginLinkedInRequest(input);
     setLinkedInBarsBusy(true);
     safeSendMessage({
       type: 'INLINE_DRAFT_REQUEST',
       payload: {
+        requestId,
+        editorId,
         platform: 'linkedin',
-        recipientName,
+        recipientName: liveRecipient,
         isDM: true,
         messageToReplyTo: getMessageHistory(),
         prompt,
-        isInMail,
-        profileHeadline: headline,
+        isInMail: liveProfile.isInMail,
+        profileHeadline: liveProfile.headline,
         originSurface: 'inline-bar',
         composeType: 'reply',
       },
-    }).catch(() => {});
-    input.value = '';
-    // Deliberately NOT resetting opacity/pointerEvents here. This ran straight
-    // after setLinkedInBarsBusy(true) and immediately undid it -- verified on
-    // real LinkedIn 4 Aug, where the label read "Drafting..." while
-    // pointerEvents was still 'auto', so the button looked live and stayed
-    // clickable through the whole request. setLinkedInBarsBusy(false) restores
-    // the button when the reply lands or the timeout fires.
+    }).then((ack) => {
+      if (ack === null) failLinkedInRequest(requestId, 'Could not reach Pranan. Reload LinkedIn and try again.');
+    }).catch(() => failLinkedInRequest(requestId, 'Could not reach Pranan. Try again.'));
+    // The prompt stays in the box until a draft actually lands, so a failed or
+    // timed-out request never loses what the user typed (audit EXT-30).
+    // setLinkedInBarsBusy owns the button state until the reply arrives.
   };
 
   input.addEventListener('keydown', (e) => {
@@ -714,9 +725,12 @@ function injectCommentPromptBars() {
       // Bind to THIS comment input so the draft can only land here even if
       // the user scrolls to another post mid-flight (audit HIGH).
       const editorId = stampEditor(commentInput as HTMLElement);
+      const requestId = beginLinkedInRequest(input);
+      setLinkedInBarsBusy(true);
       safeSendMessage({
         type: 'COMMENT_DRAFT_REQUEST',
         payload: {
+          requestId,
           platform: 'linkedin',
           postAuthor: live.postAuthor,
           postAuthorUrl: live.postAuthorUrl,
@@ -727,10 +741,10 @@ function injectCommentPromptBars() {
           originSurface: 'inline-bar',
           editorId,
         },
-      }).catch(() => {});
-      input.value = '';
-      // See the note on the messaging bar: resetting here undoes the busy
-      // state set a few lines above. setLinkedInBarsBusy owns the button now.
+      }).then((ack) => {
+        if (ack === null) failLinkedInRequest(requestId, 'Could not reach Pranan. Reload LinkedIn and try again.');
+      }).catch(() => failLinkedInRequest(requestId, 'Could not reach Pranan. Try again.'));
+      // The prompt is kept until the draft lands (audit EXT-30).
     };
 
     input.addEventListener('keydown', (e) => {
@@ -960,6 +974,9 @@ function detectActiveCompose() {
           selectedText: null,
           isInMail,
           profileHeadline: headline,
+          // Lets a side-panel insert bind to this editor too (audit EXT-11).
+          editorId: stampEditor(messageInput as HTMLElement),
+          originUrl: location.href,
         },
       }).catch(() => {});
 
@@ -1031,6 +1048,15 @@ function injectDraft(text: string): boolean {
   return true;
 }
 
+/** Insert into one specific, already-resolved editor. */
+function injectIntoEditor(input: HTMLElement, text: string): boolean {
+  if (!document.contains(input)) return false;
+  input.focus();
+  injectMultilineText(input, text, 'p');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+}
+
 /**
  * Inject a comment draft into the comment input closest to the user's active area.
  */
@@ -1078,42 +1104,79 @@ function injectCommentDraft(text: string, target?: HTMLElement | null): boolean 
 // Voice auto-capture (learn the user's real comment voice over time)
 // ---------------------------------------------------------------------------
 
-function readCommentText(fromEl: Element | null): string {
-  if (!fromEl) return '';
+// OFF BY DEFAULT (audit EXT-03). Only when the user has turned on "Learn my
+// voice from LinkedIn comments" in the popup, and only after LinkedIn has
+// actually posted the comment: pressing Enter or clicking a button is not
+// proof of a post (Enter often just starts a new line), so the capture waits
+// until the editor has been cleared and the same text shows up in the post's
+// comment list. The worker enforces the same switch.
+const privacy = watchPrivacySettings();
+const CAPTURE_CONFIRM_TIMEOUT_MS = 8_000;
+const CAPTURE_POLL_MS = 400;
+const commentCaptureInFlight = new WeakSet<Element>();
+
+/** The comment editor the event came from, and nothing else on the page. */
+function commentEditorFor(el: Element | null): HTMLElement | null {
+  if (!el) return null;
   const sel = SELECTORS.commentCompose.join(', ');
-  const box = (fromEl.closest('.comments-comment-box, .comments-comment-texteditor, form') || document)
-    .querySelector(sel) as HTMLElement | null;
-  return box ? (box.innerText || (box as HTMLInputElement).value || '').trim() : '';
+  const direct = el.closest(sel);
+  if (direct instanceof HTMLElement) return direct;
+  // A submit button sits beside its editor, inside the same comment form.
+  const form = el.closest('[data-testid="ui-core-tiptap-text-editor-wrapper"], .comments-comment-box, .comments-comment-texteditor, form');
+  const inForm = form?.querySelector(sel);
+  return inForm instanceof HTMLElement ? inForm : null;
 }
 
-function maybeCaptureComment(text: string): void {
-  const t = (text || '').trim();
+function editorText(editor: HTMLElement): string {
+  return (editor.innerText || (editor as unknown as HTMLInputElement).value || '').trim();
+}
+
+function maybeCaptureComment(editor: HTMLElement | null): void {
+  if (!editor || !privacy.current().linkedinVoiceCapture) return;
+  if (commentCaptureInFlight.has(editor)) return;
+  const t = editorText(editor);
   if (t.length < 25 || t.length > 600) return;              // skip trivial + walls
   const norm = normalizeComment(t);
   if (recentGeneratedComments.has(norm)) return;            // never learn from one of our own drafts
   if (capturedComments.has(norm)) return;                   // already sent this session
-  capturedComments.add(norm);
-  safeSendMessage({ type: 'CAPTURE_VOICE_EXEMPLAR', payload: { comment: t } }).catch(() => {});
+  const scope = findFeedPostWrapper(editor) || editor.closest('article, [data-urn], [data-id]') || document.body;
+  commentCaptureInFlight.add(editor);
+  const started = Date.now();
+  const poll = () => {
+    if (isConfirmedCommentPost({ editor, scope, text: t, editorText: editorText(editor) })) {
+      commentCaptureInFlight.delete(editor);
+      if (!privacy.current().linkedinVoiceCapture || capturedComments.has(norm)) return;
+      capturedComments.add(norm);
+      safeSendMessage({ type: 'CAPTURE_VOICE_EXEMPLAR', payload: { comment: t } }).catch(() => {});
+      return;
+    }
+    if (Date.now() - started > CAPTURE_CONFIRM_TIMEOUT_MS) {
+      commentCaptureInFlight.delete(editor);                // never posted: nothing is sent
+      return;
+    }
+    setTimeout(poll, CAPTURE_POLL_MS);
+  };
+  setTimeout(poll, CAPTURE_POLL_MS);
 }
 
-// Capture on submit-button click (capture phase so we read text before LinkedIn clears it).
+// Start watching on submit-button click (capture phase, before LinkedIn clears the box).
 document.addEventListener('click', (e) => {
   const target = e.target as Element | null;
   if (!target) return;
   const submitSel = SELECTORS.commentSubmitButton.join(', ');
   const btn = target.closest(submitSel);
   if (!btn) return;
-  maybeCaptureComment(readCommentText(btn));
+  maybeCaptureComment(commentEditorFor(btn));
 }, true);
 
-// Capture on Enter-to-submit inside a comment editor.
+// Start watching on Enter inside a comment editor. Only a confirmed post is captured.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' || e.shiftKey) return;
   const target = e.target as Element | null;
   if (!target) return;
   const sel = SELECTORS.commentCompose.join(', ');
   if (!target.matches(sel) && !target.closest(sel)) return;
-  maybeCaptureComment(readCommentText(target));
+  maybeCaptureComment(commentEditorFor(target));
 }, true);
 
 // ---------------------------------------------------------------------------
@@ -1177,7 +1240,11 @@ function setLinkedInBarsBusy(busy: boolean): void {
   if (busy) {
     liBusyTimer = setTimeout(() => {
       setLinkedInBarsBusy(false);
-      showLinkedInNotice('Pranan did not hear back. Try again.');
+      // Stop waiting for this request; a reply that arrives later is ignored.
+      const timedOut = pendingLinkedInRequest;
+      pendingLinkedInRequest = null;
+      if (timedOut) safeSendMessage({ type: 'CANCEL_INLINE_DRAFT', payload: { requestId: timedOut.requestId } }).catch(() => {});
+      showLinkedInNotice('Pranan did not hear back. Your instructions are kept. Try again.', timedOut?.input);
     }, LI_BUSY_TIMEOUT_MS);
   }
 }
@@ -1190,11 +1257,11 @@ function setLinkedInBarsBusy(busy: boolean): void {
  * is the minimum that makes a failure visible: put the reason where the prompt
  * was, and restore the placeholder afterwards.
  */
-function showLinkedInNotice(text: string): void {
+function showLinkedInNotice(text: string, preferred?: HTMLInputElement | null): void {
   const bar =
     document.querySelector(`[${PRANAN_LI_MSG_BAR_ATTR}]`) ||
     document.querySelector(`[${PRANAN_LI_COMMENT_BAR_ATTR}]`);
-  const input = bar?.querySelector('input') as HTMLInputElement | null;
+  const input = (preferred && document.contains(preferred) ? preferred : bar?.querySelector('input')) as HTMLInputElement | null;
   if (!input) return;
   const original = input.placeholder;
   input.placeholder = text.slice(0, 140);
@@ -1206,45 +1273,109 @@ function showLinkedInNotice(text: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// In-flight request tracking
+// ---------------------------------------------------------------------------
+
+/**
+ * The one draft request this page is waiting for. Replies for any other
+ * request (an older one, or one that already timed out) are ignored, so a
+ * late draft can never land in an editor the user has since typed in (audit
+ * EXT-16).
+ */
+let pendingLinkedInRequest: { requestId: string; input: HTMLInputElement } | null = null;
+
+function newLinkedInRequestId(): string {
+  try { return crypto.randomUUID(); } catch { return `li-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+}
+
+function beginLinkedInRequest(input: HTMLInputElement): string {
+  const requestId = newLinkedInRequestId();
+  pendingLinkedInRequest = { requestId, input };
+  return requestId;
+}
+
+/** A reply is current when it names the pending request, or names none (side panel). */
+function isCurrentLinkedInReply(requestId: unknown): boolean {
+  if (typeof requestId !== 'string' || !requestId) return true;
+  return pendingLinkedInRequest?.requestId === requestId;
+}
+
+/** The draft landed: now the prompt can go. */
+function completeLinkedInRequest(): void {
+  if (pendingLinkedInRequest) pendingLinkedInRequest.input.value = '';
+  pendingLinkedInRequest = null;
+}
+
+/** The draft did not land: keep the prompt and say why. */
+function failLinkedInRequest(requestId: string | null, message: string): void {
+  if (requestId && pendingLinkedInRequest?.requestId !== requestId) return;
+  const input = pendingLinkedInRequest?.input;
+  pendingLinkedInRequest = null;
+  setLinkedInBarsBusy(false);
+  showLinkedInNotice(message, input);
+}
+
+// ---------------------------------------------------------------------------
 // Message Listener
 // ---------------------------------------------------------------------------
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type === 'INSERT_DRAFT') {
+  const payload = (message.payload || {}) as { text?: string; draft?: string; editorId?: string; requestId?: string; originUrl?: string; message?: string };
+
+  if (message.type === 'INSERT_DRAFT' || message.type === 'INSERT_COMMENT_DRAFT') {
+    const draftText = payload.text || payload.draft || '';
+    if (!isCurrentLinkedInReply(payload.requestId)) {
+      sendResponse({ success: false, reason: 'request_expired' });
+      return false;
+    }
+    // The request came from a different page (the user navigated away).
+    if (payload.originUrl && payload.originUrl !== location.href) {
+      failLinkedInRequest(payload.requestId || null, 'You moved to another page, so Pranan did not insert the draft. Try again here.');
+      sendResponse({ success: false, reason: 'conversation_changed' });
+      return false;
+    }
     setLinkedInBarsBusy(false);
-    const success = injectDraft(message.payload.text || message.payload.draft);
+    // Editor binding (audit EXT-11): a bound draft lands in that editor or
+    // nowhere. It never falls back to "whatever compose is active", which is
+    // how a private message draft could end up in a public comment box.
+    if (payload.editorId) {
+      const boundEl = resolveEditor(payload.editorId);
+      if (!boundEl || !document.contains(boundEl)) {
+        failLinkedInRequest(payload.requestId || null, 'That editor closed, so Pranan did not insert the draft. Try again.');
+        sendResponse({ success: false, reason: 'editor_changed' });
+        return false;
+      }
+      const success = message.type === 'INSERT_COMMENT_DRAFT'
+        ? injectCommentDraft(draftText, boundEl)
+        : injectIntoEditor(boundEl, draftText);
+      if (success) completeLinkedInRequest();
+      else failLinkedInRequest(payload.requestId || null, 'Could not insert the draft. Try again.');
+      sendResponse({ success, reason: success ? undefined : 'inject_failed' });
+      return false;
+    }
+    // Unbound (older side-panel requests): keep the previous behaviour.
+    const success = message.type === 'INSERT_COMMENT_DRAFT'
+      ? injectCommentDraft(draftText)
+      : injectDraft(draftText);
+    if (success) completeLinkedInRequest();
     sendResponse({ success });
+    return false;
   }
 
   // The worker answers a failed or refused draft with DRAFT_SKIPPED. Gmail and
   // Slack both surface it; LinkedIn had no handler at all, so every failure on
-  // this surface was perfectly silent -- prompt cleared, button unchanged, no
-  // message. Measured on 1 Aug: pressed Generate in messaging, waited 27
-  // seconds, nothing whatsoever, with the API returning a good draft in 3.4s
-  // for the same payload. Whatever went wrong, the user could not have known.
+  // this surface was perfectly silent. Measured on 1 Aug: pressed Generate in
+  // messaging, waited 27 seconds, nothing whatsoever, with the API returning a
+  // good draft in 3.4s for the same payload.
   if (message.type === 'DRAFT_SKIPPED') {
-    setLinkedInBarsBusy(false);
-    showLinkedInNotice(message.payload?.message || 'Pranan could not draft this one. Try again.');
-    sendResponse({ ok: true });
-  }
-  if (message.type === 'INSERT_COMMENT_DRAFT') {
-    setLinkedInBarsBusy(false);
-    const draftText = message.payload.text || message.payload.draft;
-    const boundEditorId = message.payload.editorId as string | undefined;
-    if (boundEditorId) {
-      const boundEl = resolveEditor(boundEditorId);
-      if (!boundEl || !document.contains(boundEl)) {
-        sendResponse({ success: false, reason: 'editor_changed' });
-        return true;
-      }
-      const success = injectCommentDraft(draftText, boundEl);
-      sendResponse({ success, reason: success ? undefined : 'inject_failed' });
-      return;
+    if (isCurrentLinkedInReply(payload.requestId)) {
+      failLinkedInRequest(payload.requestId || null, payload.message || 'Pranan could not draft this one. Try again.');
     }
-    const success = injectCommentDraft(draftText);
-    sendResponse({ success });
+    sendResponse({ ok: true });
+    return false;
   }
-  return true;
+  // Not ours to answer. Returning true here left senders waiting (audit EXT-28).
+  return false;
 });
 
 // ---------------------------------------------------------------------------

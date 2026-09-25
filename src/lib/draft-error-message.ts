@@ -7,14 +7,42 @@
  * user should be told about ("wait a couple minutes") rather than left guessing.
  * The api-client throws an ApiError carrying `.status`, so we can branch on it.
  */
+import { appUrl } from './config';
+
+function billingLink(err: unknown): string {
+  const url = err && typeof err === 'object' && 'upgradeUrl' in err && typeof (err as { upgradeUrl: unknown }).upgradeUrl === 'string'
+    ? (err as { upgradeUrl: string }).upgradeUrl
+    : appUrl('/settings/billing');
+  return url.replace(/^https?:\/\//, '');
+}
+
 export function draftErrorMessage(err: unknown): string {
   const status =
     err && typeof err === 'object' && 'status' in err && typeof (err as { status: unknown }).status === 'number'
       ? (err as { status: number }).status
       : undefined;
+  const code =
+    err && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string'
+      ? (err as { code: string }).code
+      : undefined;
 
+  // The plan's monthly draft quota is used up. This used to fall through to
+  // "Try again", so users retried and never saw how to upgrade (XP-09).
+  if (status === 402) {
+    return `You have used this month's drafts on your plan. Upgrade at ${billingLink(err)} to keep drafting.`;
+  }
+  // Three different limits answer 429, and they need different advice (XP-31).
+  if (status === 429 && code === 'DAILY_BUDGET') {
+    return "You've reached today's AI usage limit. It resets at midnight UTC, or upgrade your plan for more.";
+  }
+  if (status === 429 && (code === 'AI_ERROR' || code === 'UPSTREAM_RATE_LIMITED')) {
+    return 'The AI service is busy right now. Try again in a minute.';
+  }
   if (status === 429) {
     return "You've hit the draft limit for now. Wait a couple of minutes and try again.";
+  }
+  if (status === 503 && code === 'AUTH_REFRESH_UNAVAILABLE') {
+    return 'Pranan could not refresh your session just now. You are still signed in. Try again in a moment.';
   }
   if (status === 401) {
     return 'Your Pranan session expired. Open app.pranan.ai to sign back in, then try again.';
