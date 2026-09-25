@@ -123,8 +123,13 @@ The extension does not request the `tabs` or `activeTab` permissions. It reads a
 ## URLs
 
 - Privacy policy: `https://pranan.ai/privacy` (section 7 covers the extension, including third-party voice processing)
+- Terms of service: `https://pranan.ai/terms`
 - Product website: `https://pranan.ai`
-- Support email: `privacy@pranan.ai`
+- Support email: `support@pranan.ai` (privacy requests go to `privacy@pranan.ai`)
+
+## Publisher
+
+Pranan and Pranan for Chrome are operated by INSIDEA, Inc., a Delaware corporation headquartered in Dover, Delaware, USA. Use INSIDEA, Inc. as the publisher name in the developer dashboard. Do not add any other company details to the listing.
 
 ## Publishing checklist
 
