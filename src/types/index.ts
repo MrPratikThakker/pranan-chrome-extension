@@ -175,6 +175,7 @@ export type MessageType =
   | 'SET_TIER_OVERRIDE'
   // v0.8.x voice auto-capture (opt-in)
   | 'CAPTURE_VOICE_EXEMPLAR'
+  | 'LEARN_PAGE'
   // Recorded voice from a content script, transcribed by the worker
   | 'TRANSCRIBE_AUDIO';
 

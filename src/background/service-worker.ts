@@ -22,6 +22,7 @@ import {
   setTierOverride,
   refreshAccessTokenWithOutcome,
   postVoiceExemplar,
+  postLearnPage,
   transcribeAudio,
   exchangeLoginNonce,
   setAuthExpiredHandler,
@@ -37,6 +38,8 @@ import { getPrivacySettings } from '@/lib/privacy-settings';
 import { beginCompanionLogin, consumePendingLogin, restorePendingLogin } from '@/lib/login-handoff';
 import { base64ToBlob, safeAudioMimeType, MAX_AUDIO_BASE64_LENGTH } from '@/lib/audio-transfer';
 import { isOwnContentScript, isTrustedPrivilegedSender, isValidTier } from './sender-trust';
+import { isLearnablePageUrl, syncLearnScript } from '@/lib/work-sites';
+import { MAX_PAGE_TEXT, MIN_PAGE_TEXT } from '@/content/learn/page-text';
 
 // ---------------------------------------------------------------------------
 // State (persisted via chrome.storage, rebuilt on service worker restart)
@@ -675,6 +678,25 @@ async function handleMessage(
       if (!captured || typeof captured !== 'string' || captured.length > 600) return { added: false };
       return postVoiceExemplar(captured);
     }
+    // --- "Remember this page" on a site the user allowed (Phase 3) ---
+    case 'LEARN_PAGE': {
+      // Only from this extension's own top-frame content script, on a page
+      // whose site the user granted in the popup. The address sent is the
+      // sender's, never one the page supplies.
+      const pageUrl = sender.url ?? sender.tab?.url;
+      if (sender.id !== chrome.runtime.id || !sender.tab || (sender.frameId ?? 0) !== 0 || !pageUrl) {
+        return { ok: false, reason: 'not_allowed' };
+      }
+      if (!isLearnablePageUrl(pageUrl)) return { ok: false, reason: 'blocked' };
+      const granted = await chrome.permissions.contains({ origins: [`${new URL(pageUrl).origin}/*`] }).catch(() => false);
+      if (!granted) return { ok: false, reason: 'not_allowed' };
+      const page = (message.payload || {}) as { title?: unknown; text?: unknown };
+      const text = typeof page.text === 'string' ? page.text.slice(0, MAX_PAGE_TEXT) : '';
+      if (text.trim().length < MIN_PAGE_TEXT) return { ok: false, reason: 'failed', error: 'There is not enough text on this page to learn from.' };
+      const title = typeof page.title === 'string' ? page.title.slice(0, 300) : '';
+      return postLearnPage({ url: pageUrl, title, text });
+    }
+
     case 'SET_TIER_OVERRIDE': {
       // The tier pill in Gmail's compose bar is the only sender. It used to be
       // rejected here as "untrusted", so the correction always failed silently
@@ -1028,7 +1050,13 @@ chrome.webNavigation?.onHistoryStateUpdated.addListener(
 // hardening 2026-06-09).
 chrome.runtime.onStartup.addListener(() => {
   void initAuth();
+  void syncLearnScript().catch(() => {});
 });
+
+// "Remember this page" runs only on the sites the user allowed: re-register
+// it whenever a site is added or removed (src/lib/work-sites.ts).
+chrome.permissions.onAdded.addListener(() => { void syncLearnScript().catch(() => {}); });
+chrome.permissions.onRemoved.addListener(() => { void syncLearnScript().catch(() => {}); });
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {
@@ -1054,6 +1082,9 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   await chrome.sidePanel.setOptions({
     enabled: true,
   });
+
+  // An update can change the learn script; re-register it on allowed sites.
+  await syncLearnScript().catch(() => {});
 });
 
 // Re-init auth on service worker startup. The worker wakes for every message

@@ -26,6 +26,7 @@ import { appUrl } from '@/lib/config';
 import { readAuthTokens, clearAuthTokens } from '@/lib/token-store';
 import { beginCompanionLogin } from '@/lib/login-handoff';
 import { getPrivacySettings, setPrivacySetting, DEFAULT_PRIVACY_SETTINGS, type PrivacySettings } from '@/lib/privacy-settings';
+import { LearningSites } from './LearningSites';
 
 
 bootstrapSentry('popup');
@@ -495,6 +496,9 @@ function Popup() {
               </span>
             </label>
           </div>
+
+          {/* Sites the user lets Pranan learn from, one at a time (Phase 3). */}
+          <LearningSites />
 
           {/* Disconnect: ends this extension's session (F-13, EXT-23). */}
           <button onClick={() => { void disconnect(); }} disabled={disconnecting} style={{

@@ -9,8 +9,12 @@ const contentScriptEntries = {
   'content/slack': resolve(__dirname, 'src/content/slack/index.ts'),
   'content/linkedin': resolve(__dirname, 'src/content/linkedin/index.ts'),
   // The unbuilt "universal" any-site script was removed (audit EXT-27). A new
-  // content script needs an entry here AND a manifest content_scripts entry.
+  // content script needs an entry here AND a manifest content_scripts entry,
+  // or, like content/learn, a runtime registration in the service worker.
   'content/pranan-app': resolve(__dirname, 'src/content/pranan-app/index.ts'),
+  // "Remember this page": registered at runtime only on sites the user
+  // allowed (src/lib/work-sites.ts syncLearnScript).
+  'content/learn': resolve(__dirname, 'src/content/learn/index.ts'),
 };
 
 /**
