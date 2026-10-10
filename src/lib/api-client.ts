@@ -661,6 +661,33 @@ export async function postVoiceExemplar(comment: string): Promise<{ added: boole
   }
 }
 
+export type LearnPageOutcome =
+  | { ok: true; suggested: number; sections: number }
+  | { ok: false; reason: 'signed_out' | 'blocked' | 'rate_limited' | 'budget' | 'failed' };
+
+/**
+ * "Remember this page" (src/lib/work-sites.ts): the visible text of one page
+ * the user chose, on a site they allowed. The app suggests what to remember
+ * for the Memory inbox; nothing is saved until the user approves it there.
+ */
+export async function postLearnPage(page: { url: string; title: string; text: string }): Promise<LearnPageOutcome> {
+  try {
+    const response = await authedFetch(`${API_BASE}/learn`, {
+      method: 'POST',
+      body: JSON.stringify(page),
+    });
+    if (response.status === 401) return { ok: false, reason: 'signed_out' };
+    if (response.status === 422) return { ok: false, reason: 'blocked' };
+    if (response.status === 429) return { ok: false, reason: 'rate_limited' };
+    if (!response.ok) return { ok: false, reason: 'failed' };
+    const data = (await response.json()) as { suggested?: number; sections?: number; budgetDenied?: boolean };
+    if (data.budgetDenied && !data.sections) return { ok: false, reason: 'budget' };
+    return { ok: true, suggested: Number(data.suggested) || 0, sections: Number(data.sections) || 0 };
+  } catch {
+    return { ok: false, reason: 'failed' };
+  }
+}
+
 export async function getReplyIntents(request: IntentsRequest): Promise<string[]> {
   try {
     const response = await authedFetch(`${API_BASE}/intents`, {

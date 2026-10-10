@@ -37,7 +37,7 @@ Use this file as the source of truth for the Chrome Web Store dashboard. The cop
 >
 > Pranan also supports contextual drafting in Slack (channels, DMs and threads) and LinkedIn (messages and post comments).
 >
-> Privacy: Pranan sends a conversation to Pranan only when you use a Pranan action, plus, when you open a compose, the recipient's address (and for replies, the thread) to show relationship context and reply suggestions. Background grammar checks while you type, and learning your voice from LinkedIn comments you post, are off by default and run only if you turn them on. Voice input uses Chrome's built-in speech recognition (processed by Google) where available; otherwise the clip is transcribed by OpenAI for Pranan and not stored.
+> Privacy: Pranan sends a conversation to Pranan only when you use a Pranan action, plus, when you open a compose, the recipient's address (and for replies, the thread) to show relationship context and reply suggestions. Background grammar checks while you type, and learning your voice from LinkedIn comments you post, are off by default and run only if you turn them on. You can also let Pranan learn from other work sites, one at a time: Chrome asks you to allow each site you add, and on those sites Pranan reads a page only when you press "Remember this page". What it finds waits in your Pranan Memory inbox and is saved only if you approve it. Voice input uses Chrome's built-in speech recognition (processed by Google) where available; otherwise the clip is transcribed by OpenAI for Pranan and not stored.
 >
 > Pranan is built for founders, executives, account managers, and teams that handle important relationships across many conversations.
 >
@@ -102,7 +102,7 @@ The existing icon is 128×128 PNG. Its visible artwork is contained inside the r
 
 **scripting**
 
-> Used for one purpose: re-injecting Pranan's own bundled Gmail script into a mail.google.com tab when an in-page navigation left it unloaded. It never injects remote code or runs on other sites.
+> Used for two purposes, both with Pranan's own bundled scripts and never remote code: re-injecting the Gmail script into a mail.google.com tab when an in-page navigation left it unloaded, and registering the "Remember this page" button on the sites the user has allowed (see optional host permissions below). It runs on no other sites.
 
 **Host permissions: mail.google.com, app.slack.com, www.linkedin.com**
 
@@ -112,7 +112,11 @@ The existing icon is 128×128 PNG. Its visible artwork is contained inside the r
 
 > Connects the extension to the user's Pranan account: sign-in handoff after the user clicks Connect, and Pranan's authenticated product services.
 
-The extension does not request the `tabs` or `activeTab` permissions. It reads a tab's address only on the four sites above, which the host permissions already cover.
+**Optional host permissions: https://\*/\* (granted one site at a time, only when the user adds it)**
+
+> Nothing is granted at install. In the Pranan popup, under "Sites Pranan can learn from", the user types a work site (for example notion.so) and Chrome shows its own prompt for that one site. On a granted site Pranan shows a "Remember this page" button; only when the user presses it does Pranan send that page's visible text to the user's Pranan account, which suggests decisions and facts for the user's Memory inbox, saved only if the user approves them. Mail, chat and sign-in sites cannot be added, login and payment pages are never read, and removing a site in the popup or in Chrome withdraws the access at once.
+
+The extension does not request the `tabs` or `activeTab` permissions. It reads a tab's address only on the four sites above, which the host permissions already cover, and on sites the user has added under the optional host permission.
 
 ## Limited Use disclosure
 

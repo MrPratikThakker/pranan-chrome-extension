@@ -33,6 +33,7 @@ jobs:
           test -f dist/content/slack.js
           test -f dist/content/linkedin.js
           test -f dist/content/pranan-app.js
+          test -f dist/content/learn.js
           test -f dist/icons/icon-128.png
           echo "✓ All required dist files present"
       - name: Upload dist artifact

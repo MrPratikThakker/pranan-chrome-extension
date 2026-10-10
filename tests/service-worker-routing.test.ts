@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
   setTierOverride: vi.fn(),
   refreshAccessTokenWithOutcome: vi.fn(),
   postVoiceExemplar: vi.fn(),
+  postLearnPage: vi.fn(),
   transcribeAudio: vi.fn(),
   exchangeLoginNonce: vi.fn(),
   setAuthExpiredHandler: vi.fn(),
@@ -29,6 +30,7 @@ let env: ReturnType<typeof installChromeStorage>;
 let onMessage: Listener;
 let onExternal: Listener;
 let tabMessages: Array<{ tabId: number; message: { type: string; payload: Record<string, unknown> } }>;
+let grantedOrigins: string[];
 
 const gmailTab = { id: 7, url: 'https://mail.google.com/mail/u/0/#inbox/abc' } as chrome.tabs.Tab;
 const gmailSender = { id: ID, tab: gmailTab, url: gmailTab.url } as chrome.runtime.MessageSender;
@@ -54,6 +56,7 @@ beforeEach(async () => {
   api.validateAuth.mockResolvedValue({ valid: true, userId: 'u1' });
   env = installChromeStorage();
   tabMessages = [];
+  grantedOrigins = [];
   const noopEvent = { addListener: vi.fn() };
   (globalThis as unknown as { chrome: unknown }).chrome = {
     storage: env.storage,
@@ -78,6 +81,23 @@ beforeEach(async () => {
     sidePanel: { open: vi.fn(async () => {}), setOptions: vi.fn(async () => {}) },
     commands: { onCommand: noopEvent },
     webNavigation: { onHistoryStateUpdated: noopEvent },
+    permissions: {
+      // Mirrors Chrome: a granted "https://*.notion.so/*" contains "https://www.notion.so/*".
+      contains: vi.fn(async ({ origins }: { origins: string[] }) => origins.every((o) => grantedOrigins.some((g) => {
+        const host = /^https:\/\/([^/]+)\/\*$/.exec(o)?.[1] ?? '';
+        const base = /^https:\/\/(?:\*\.)?([^/]+)\/\*$/.exec(g)?.[1] ?? '\u0000';
+        return host === base || host.endsWith(`.${base}`);
+      }))),
+      getAll: vi.fn(async () => ({ origins: grantedOrigins })),
+      onAdded: noopEvent,
+      onRemoved: noopEvent,
+    },
+    scripting: {
+      getRegisteredContentScripts: vi.fn(async () => []),
+      registerContentScripts: vi.fn(async () => {}),
+      updateContentScripts: vi.fn(async () => {}),
+      unregisterContentScripts: vi.fn(async () => {}),
+    },
   };
   await import('../src/background/service-worker');
   await flush();
@@ -139,6 +159,31 @@ describe('opt-in background sends (EXT-02, EXT-03)', () => {
     expect(api.postVoiceExemplar).not.toHaveBeenCalled();
     api.postVoiceExemplar.mockResolvedValue({ added: true });
     expect(await send({ type: 'CAPTURE_VOICE_EXEMPLAR', payload: { comment: 'A comment long enough to count as a sample.' } }, linkedinSender)).toEqual({ added: true });
+  });
+});
+
+describe('remember this page (Phase 3)', () => {
+  const notionTab = { id: 11, url: 'https://www.notion.so/acme/Plan?token=x' } as chrome.tabs.Tab;
+  const notionSender = { id: ID, tab: notionTab, url: notionTab.url, frameId: 0 } as chrome.runtime.MessageSender;
+  const text = 'We chose annual billing for Northwind and the relaunch ships in November.';
+
+  it('sends the page only from an allowed site, with the address the browser reports', async () => {
+    expect(await send({ type: 'LEARN_PAGE', payload: { url: 'https://evil.example/', title: 'Plan', text } }, notionSender)).toEqual({ ok: false, reason: 'not_allowed' });
+    expect(api.postLearnPage).not.toHaveBeenCalled();
+
+    grantedOrigins = ['https://*.notion.so/*'];
+    api.postLearnPage.mockResolvedValue({ ok: true, suggested: 2, sections: 1 });
+    expect(await send({ type: 'LEARN_PAGE', payload: { url: 'https://evil.example/', title: 'Plan', text } }, notionSender)).toEqual({ ok: true, suggested: 2, sections: 1 });
+    expect(api.postLearnPage).toHaveBeenCalledWith({ url: notionTab.url, title: 'Plan', text });
+  });
+
+  it('refuses frames, other extensions, blocked sites and empty pages', async () => {
+    grantedOrigins = ['https://*.notion.so/*'];
+    expect(await send({ type: 'LEARN_PAGE', payload: { title: 'x', text } }, { ...notionSender, frameId: 3 })).toEqual({ ok: false, reason: 'not_allowed' });
+    expect(await send({ type: 'LEARN_PAGE', payload: { title: 'x', text } }, { ...notionSender, id: 'other-ext' })).toEqual({ ok: false, reason: 'not_allowed' });
+    expect(await send({ type: 'LEARN_PAGE', payload: { title: 'x', text } }, gmailSender)).toEqual({ ok: false, reason: 'blocked' });
+    expect(await send({ type: 'LEARN_PAGE', payload: { title: 'x', text: 'too short' } }, notionSender)).toMatchObject({ ok: false, reason: 'failed' });
+    expect(api.postLearnPage).not.toHaveBeenCalled();
   });
 });
 

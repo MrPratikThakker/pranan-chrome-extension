@@ -17,6 +17,9 @@
     "https://www.linkedin.com/*",
     "https://app.pranan.ai/*"
   ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
