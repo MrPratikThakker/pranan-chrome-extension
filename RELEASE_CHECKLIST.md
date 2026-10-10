@@ -26,8 +26,9 @@ Expected:
 - `typecheck`: zero errors
 - `test`: all vitest suites pass
 - `build`: `dist/` contains `manifest.json`, `popup.html`, `sidepanel.html`,
-  background.js, content/{gmail,slack,linkedin,pranan-app}.js
-  (there is no universal any-site script; it was removed)
+  background.js, content/{gmail,slack,linkedin,pranan-app,learn}.js
+  (there is no universal any-site script; content/learn.js is registered at
+  runtime only on sites the user allows)
 - Built `manifest.json` version matches `package.json` version (the CI
   release workflow enforces this; doesn't hurt to eyeball)
 
