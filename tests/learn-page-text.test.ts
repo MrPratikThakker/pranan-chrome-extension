@@ -22,6 +22,8 @@ describe('pageText', () => {
     const text = pageText(d);
     expect(text).toContain('Northwind account plan');
     expect(text).toContain('We chose annual billing');
+    // Blocks stay separate lines, not "planWe chose".
+    expect(text).toMatch(/Northwind account plan\n+We chose/);
     expect(text).not.toContain('Pricing');
     expect(text).not.toContain('secret');
     expect(text).not.toContain('hidden note');
