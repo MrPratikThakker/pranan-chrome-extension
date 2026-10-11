@@ -63,7 +63,7 @@ interface Actions {
   // Context
   setPlatform: (platform: Platform) => void;
   setComposeContext: (ctx: ComposeContext | null) => void;
-  loadContactContext: (email?: string, name?: string, linkedinUrl?: string) => Promise<void>;
+  loadContactContext: (email?: string, name?: string, linkedinUrl?: string, mailboxEmail?: string) => Promise<void>;
 
   // Draft
   requestDraft: (request: DraftRequest) => Promise<void>;
@@ -242,12 +242,12 @@ export const useStore = create<AppState & Actions>((set, get) => ({
     }
   },
 
-  loadContactContext: async (email, name, linkedinUrl) => {
+  loadContactContext: async (email, name, linkedinUrl, mailboxEmail) => {
     if (!email && !name && !linkedinUrl) return;
     const version = ++contactRequestVersion;
     set({ isLoading: true, error: null, contactContext: null, contactContextLookup: { email, name, linkedinUrl } });
     try {
-      const context = await getContactContext({ email, name, linkedinUrl, mailboxEmail: get().composeContext?.mailboxEmail });
+      const context = await getContactContext({ email, name, linkedinUrl, mailboxEmail: mailboxEmail || get().composeContext?.mailboxEmail });
       if (version !== contactRequestVersion) return;
       set({ contactContext: context, isLoading: false });
     } catch (err) {
@@ -600,13 +600,16 @@ export const useStore = create<AppState & Actions>((set, get) => ({
           senderName?: string;
           subject?: string;
           messagePreview?: string;
+          mailboxEmail?: string;
         };
         // Load relationship context for the sender so the side panel
         // shows it even without a compose window open
         if (payload.senderEmail || payload.senderName) {
           get().loadContactContext(
             payload.senderEmail || undefined,
-            payload.senderName || undefined
+            payload.senderName || undefined,
+            undefined,
+            payload.mailboxEmail || undefined
           );
           // Switch to context view if we're on the empty state
           const current = get().viewMode;

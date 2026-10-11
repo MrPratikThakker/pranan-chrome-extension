@@ -27,7 +27,7 @@ Pranan's Chrome extension. It drafts replies in your voice inside Gmail, Slack a
 - LinkedIn (www.linkedin.com): messaging and post comments
 - Pranan app (app.pranan.ai): sign-in handoff only
 
-The extension does not run on any other site.
+It runs on another site only after you add that site under "Sites Pranan can learn from", and then only shows the "Remember this page" button there.
 
 ## Architecture
 

@@ -19,6 +19,20 @@ describe('siteFromInput', () => {
     }
   });
 
+  it('refuses other mail, chat and sign-in sites', () => {
+    for (const input of ['mail.yahoo.com', 'yahoo.com', 'proton.me', 'mail.proton.me', 'web.whatsapp.com', 'discord.com', 'teams.microsoft.com', 'login.microsoftonline.com', 'icloud.com']) {
+      expect(siteFromInput(input).ok, input).toBe(false);
+    }
+  });
+
+  it('refuses a suffix shared by many unrelated sites, but accepts a site under it', () => {
+    for (const input of ['co.uk', 'github.io', 'vercel.app', 'com.au']) {
+      expect(siteFromInput(input).ok, input).toBe(false);
+    }
+    expect(siteFromInput('acme.co.uk')).toEqual({ ok: true, site: { pattern: 'https://*.acme.co.uk/*', host: 'acme.co.uk' } });
+    expect(siteFromInput('acme.github.io').ok).toBe(true);
+  });
+
   it('refuses things that are not https websites', () => {
     for (const input of ['', 'http://example.com', 'localhost', '10.0.0.1', 'not a site', 'ftp://example.com', 'chrome://settings']) {
       expect(siteFromInput(input).ok, input).toBe(false);
@@ -65,7 +79,8 @@ describe('manifest and worker', () => {
     expect(handler).toContain('isLearnablePageUrl(pageUrl)');
     expect(handler).toContain('chrome.permissions.contains');
     // The address sent is the sender's, never one the page supplies.
-    expect(handler).toContain('postLearnPage({ url: pageUrl');
+    expect(handler).toContain('new URL(pageUrl)');
+    expect(handler).toContain('postLearnPage({ url: `${origin}${pathname}`');
   });
 
   it('follows the granted sites', () => {

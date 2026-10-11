@@ -632,7 +632,7 @@ function AppInner() {
                 {/* Keyboard shortcut hint */}
                 <div className="pt-2">
                   <p className="text-[10px] text-brand-text-3/40 text-center">
-                    Tip: Press <kbd className="text-[10px] bg-brand-surface-2 border border-brand-border rounded px-1 py-0.5 font-mono">Cmd+Shift+P</kbd> to toggle this panel
+                    Tip: Press <kbd className="text-[10px] bg-brand-surface-2 border border-brand-border rounded px-1 py-0.5 font-mono">{/Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl'}+Shift+P</kbd> to toggle this panel
                   </p>
                 </div>
               </div>

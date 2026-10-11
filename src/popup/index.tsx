@@ -327,7 +327,7 @@ function Popup() {
             Sign in to Pranan
           </p>
           <p style={{ fontSize: 11, color: 'rgba(10,10,11,0.4)', marginBottom: 12 }}>
-            Already have an account? Click below to reconnect.
+            New or returning, one click connects this browser to your Pranan account.
           </p>
           <button onClick={() => { void openLogin(); }} style={{
             width: '100%', padding: '8px 16px',
@@ -517,7 +517,7 @@ function Popup() {
         marginTop: 12, textAlign: 'center',
         fontSize: 9, color: 'rgba(10,10,11,0.2)',
       }}>
-        Ctrl+Shift+P to toggle side panel
+        {/Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl'}+Shift+P to toggle side panel
       </div>
     </div>
   );

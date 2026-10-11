@@ -1,6 +1,6 @@
 # Chrome Web Store listing: Pranan 0.8.70
 
-Use this file as the source of truth for the Chrome Web Store dashboard. The copy describes the current extension behavior and matches manifest version `0.8.68`. Update the version here in the same release commit as `package.json` and `public/manifest.json`. The screenshots and promo art in `store-assets/v0.8.67/` still match the shipped interface.
+Use this file as the source of truth for the Chrome Web Store dashboard. The copy describes the current extension behavior and matches manifest version `0.8.70`. Update the version here in the same release commit as `package.json` and `public/manifest.json`. The screenshots and promo art in `store-assets/v0.8.67/` still match the shipped interface.
 
 ## Product details
 
@@ -80,7 +80,7 @@ The existing icon is 128×128 PNG. Its visible artwork is contained inside the r
 
 ## Single-purpose statement
 
-> Pranan is a digital twin for email that helps users draft and improve context-aware messages in their own voice.
+> Pranan drafts and improves messages in the user's own voice, using the conversation in front of them and context the user chooses to give it.
 
 ## Permission justifications
 
@@ -96,10 +96,6 @@ The existing icon is 128×128 PNG. Its visible artwork is contained inside the r
 
 > Refreshes the user's Pranan sign-in about every 25 minutes so a long-open tab does not get signed out.
 
-**webNavigation**
-
-> Gmail changes views without reloading the page. Pranan listens for these in-page navigations on mail.google.com only, to check that its Gmail script is still running.
-
 **scripting**
 
 > Used for two purposes, both with Pranan's own bundled scripts and never remote code: re-injecting the Gmail script into a mail.google.com tab when an in-page navigation left it unloaded, and registering the "Remember this page" button on the sites the user has allowed (see optional host permissions below). It runs on no other sites.
@@ -114,12 +110,14 @@ The existing icon is 128×128 PNG. Its visible artwork is contained inside the r
 
 **Optional host permissions: https://\*/\* (granted one site at a time, only when the user adds it)**
 
-> Nothing is granted at install. In the Pranan popup, under "Sites Pranan can learn from", the user types a work site (for example notion.so) and Chrome shows its own prompt for that one site. On a granted site Pranan shows a "Remember this page" button; only when the user presses it does Pranan send that page's visible text to the user's Pranan account, which suggests decisions and facts for the user's Memory inbox, saved only if the user approves them. Mail, chat and sign-in sites cannot be added, login and payment pages are never read, and removing a site in the popup or in Chrome withdraws the access at once.
+> Nothing is granted at install. In the Pranan popup, under "Sites Pranan can learn from", the user types a work site (for example notion.so) and Chrome shows its own prompt for that one site. On a granted site Pranan shows a "Remember this page" button; only when the user presses it does Pranan send that page's address (without its query string), title and visible text to the user's Pranan account, which suggests decisions and facts for the user's Memory inbox, saved only if the user approves them. Gmail, Outlook, Slack, LinkedIn, the other mail, chat and sign-in sites on Pranan's block list, and Pranan itself cannot be added; the button is not offered on a page that has a password, card number or one-time-code field; and removing a site in the popup or in Chrome withdraws the access at once.
 
 The extension does not request the `tabs` or `activeTab` permissions. It reads a tab's address only on the four sites above, which the host permissions already cover, and on sites the user has added under the optional host permission.
 
 ## Limited Use disclosure
 
+> The use of information received from Pranan for Chrome adheres to the Chrome Web Store User Data Policy, including the Limited Use requirements.
+>
 > Pranan's use and transfer of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements.
 >
 > Pranan uses message, thread, and recipient context to provide user-requested drafting and relationship features. Features that send what the user is typing in the background are off by default and require the user to turn them on. Pranan does not sell Google user data, use it for advertising, or use it to train general-purpose AI models.
@@ -137,7 +135,7 @@ Pranan and Pranan for Chrome are operated by INSIDEA, Inc., a Delaware corporati
 
 ## Publishing checklist
 
-- [x] Manifest and package version are 0.8.68
+- [x] Manifest and package version are 0.8.70
 - [x] Minimum Chrome version is 116 (side panel open support)
 - [x] Store icon is present at 128×128
 - [x] Five current screenshots are prepared at 1280×800

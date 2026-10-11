@@ -605,8 +605,8 @@ async function handleMessage(
 
     // --- Phase 2: Contact popup ---
     case 'REQUEST_CONTACT_POPUP': {
-      const { email, name } = (message.payload as { email?: string; name?: string }) || {};
-      const ctx = await getCachedContactContext({ email, name });
+      const { email, name, mailboxEmail } = (message.payload as { email?: string; name?: string; mailboxEmail?: string }) || {};
+      const ctx = await getCachedContactContext({ email, name, mailboxEmail });
       if (!ctx) return { data: null };
       return { data: contactToPopupData(ctx, name || email || 'Unknown') };
     }
@@ -694,7 +694,9 @@ async function handleMessage(
       const text = typeof page.text === 'string' ? page.text.slice(0, MAX_PAGE_TEXT) : '';
       if (text.trim().length < MIN_PAGE_TEXT) return { ok: false, reason: 'failed', error: 'There is not enough text on this page to learn from.' };
       const title = typeof page.title === 'string' ? page.title.slice(0, 300) : '';
-      return postLearnPage({ url: pageUrl, title, text });
+      // Origin and path only: a query string or fragment can carry tokens.
+      const { origin, pathname } = new URL(pageUrl);
+      return postLearnPage({ url: `${origin}${pathname}`, title, text });
     }
 
     case 'SET_TIER_OVERRIDE': {
@@ -992,9 +994,15 @@ chrome.runtime.onMessageExternal.addListener(
       // Lets app.pranan.ai detect the extension (onboarding extension slide
       // and the /home pairing card, audit 2026-07-17). `authenticated` lets
       // the app offer "Connect" when the extension is installed but not
-      // signed in (XP-15). Synchronous response.
-      sendResponse({ ok: true, version: chrome.runtime.getManifest().version, authenticated: !!cachedAuth?.valid });
-      return false;
+      // signed in (XP-15). A worker that just woke has not read its stored
+      // session yet, so read it before answering; otherwise a connected
+      // user is told to connect again.
+      void initAuth({ allowCached: true })
+        .catch(() => false)
+        .then(() => {
+          sendResponse({ ok: true, version: chrome.runtime.getManifest().version, authenticated: !!cachedAuth?.valid });
+        });
+      return true;
     }
 
     if (type === 'AUTH_TOKEN') {
@@ -1014,31 +1022,38 @@ chrome.runtime.onMessageExternal.addListener(
 );
 
 // ---------------------------------------------------------------------------
-// SPA Re-injection (webNavigation)
-// Gmail is an SPA -- content scripts only run once on initial load.
-// When the user navigates within Gmail (inbox -> thread -> compose),
-// the URL changes via History API but no new page load fires.
-// We use webNavigation.onHistoryStateUpdated to re-inject when needed.
+// Gmail re-injection
+// Gmail is an SPA -- content scripts only run once on initial load, and a
+// tab that was open before an install or update has no live script.
+// When a Gmail tab changes address we ping it and inject the script if
+// nothing answers. tabs.onUpdated reports the address for Gmail through the
+// host permission, so this needs no webNavigation permission (which shows
+// "Read your browsing history" at install).
 // ---------------------------------------------------------------------------
 
-chrome.webNavigation?.onHistoryStateUpdated.addListener(
-  (details) => {
-    if (details.frameId !== 0) return; // Only top frame
-    // Re-inject the content script by sending a ping; if it fails, inject programmatically
-    chrome.tabs.sendMessage(details.tabId, { type: 'PING' }, (response) => {
-      if (chrome.runtime.lastError || !response) {
-        // Content script not running -- re-inject
-        chrome.scripting?.executeScript({
-          target: { tabId: details.tabId },
-          files: ['content/gmail.js'],
-        }).catch(() => {
-          // May fail if page isn't ready yet -- that's OK
-        });
-      }
-    });
-  },
-  { url: [{ hostContains: 'mail.google.com' }] }
-);
+function isGmailUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname === 'mail.google.com';
+  } catch {
+    return false;
+  }
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!changeInfo.url || !isGmailUrl(changeInfo.url)) return;
+  // Re-inject the content script by sending a ping; if it fails, inject programmatically
+  chrome.tabs.sendMessage(tabId, { type: 'PING' }, (response) => {
+    if (chrome.runtime.lastError || !response) {
+      // Content script not running -- re-inject
+      chrome.scripting?.executeScript({
+        target: { tabId },
+        files: ['content/gmail.js'],
+      }).catch(() => {
+        // May fail if page isn't ready yet -- that's OK
+      });
+    }
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Service Worker Lifecycle

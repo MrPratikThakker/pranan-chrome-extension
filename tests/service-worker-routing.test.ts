@@ -80,7 +80,6 @@ beforeEach(async () => {
     },
     sidePanel: { open: vi.fn(async () => {}), setOptions: vi.fn(async () => {}) },
     commands: { onCommand: noopEvent },
-    webNavigation: { onHistoryStateUpdated: noopEvent },
     permissions: {
       // Mirrors Chrome: a granted "https://*.notion.so/*" contains "https://www.notion.so/*".
       contains: vi.fn(async ({ origins }: { origins: string[] }) => origins.every((o) => grantedOrigins.some((g) => {
@@ -174,7 +173,8 @@ describe('remember this page (Phase 3)', () => {
     grantedOrigins = ['https://*.notion.so/*'];
     api.postLearnPage.mockResolvedValue({ ok: true, suggested: 2, sections: 1 });
     expect(await send({ type: 'LEARN_PAGE', payload: { url: 'https://evil.example/', title: 'Plan', text } }, notionSender)).toEqual({ ok: true, suggested: 2, sections: 1 });
-    expect(api.postLearnPage).toHaveBeenCalledWith({ url: notionTab.url, title: 'Plan', text });
+    // The query string is dropped: it can carry tokens.
+    expect(api.postLearnPage).toHaveBeenCalledWith({ url: 'https://www.notion.so/acme/Plan', title: 'Plan', text });
   });
 
   it('refuses frames, other extensions, blocked sites and empty pages', async () => {
