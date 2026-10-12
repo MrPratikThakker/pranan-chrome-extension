@@ -23,7 +23,7 @@ import type { RelationshipPopupData } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
 import type { InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
-import { findAll, findOne, SELECTORS } from '../selectors';
+import { findAll, findGmailSendButton, findOne, SELECTORS } from '../selectors';
 import { bottomOffsetAboveSendRow, bottomOffsetForChips, correctedBottomOffset, shouldHideBar, isSendReachable, placementObscuresCompose } from '@/lib/compose-layout';
 import { resolveLiveCompose, isOrphanedComposeBar } from '@/lib/live-compose';
 import { planComposeTitleRescue, needsForcedPositioning, correctForcedTop } from '@/lib/compose-title-rescue';
@@ -462,7 +462,7 @@ function positionComposeBar(bar: HTMLElement, getCompose: () => Element) {
     if (!document.contains(bar)) return true; // detached: stop observing
     retireIfOrphaned();
 
-    const sendButton = findOne<HTMLElement>('gmail.sendButton', SELECTORS.gmail.sendButton, getCompose());
+    const sendButton = findGmailSendButton(getCompose());
     const sendRow = (sendButton?.closest('.btC')
       || sendButton?.closest('.aoP')
       || sendButton?.closest('tr')
@@ -1330,7 +1330,7 @@ function injectPromptBarLegacy(composeContainer: Element, composeWindow: Element
 function injectFloatingIcon(composeWindow: Element, recipientEmail: string | null): HTMLElement | null {
   // Find Gmail's send toolbar (.btC) — the bottom row with Send + Aa + emoji + attach.
   // Place the Pranan icon RIGHT AFTER the Send button, where Voila / Loom inject.
-  const sendButton = findOne<HTMLElement>('gmail.sendButton', SELECTORS.gmail.sendButton, composeWindow);
+  const sendButton = findGmailSendButton(composeWindow);
   const toolbar = sendButton?.closest('.btC, .aoP, .gU') as HTMLElement | null;
   if (!sendButton || !toolbar) {
     console.log('[Pranan] send toolbar not found; falling back to compose body');
@@ -1468,7 +1468,7 @@ function injectAutomaticComposeRail(composeWindow: Element, anchorHost: HTMLElem
   const editableBody = composeWindow.querySelector<HTMLElement>(
     '[contenteditable="true"][role="textbox"], [g_editable="true"], [contenteditable="true"]'
   );
-  const sendButton = findOne<HTMLElement>('gmail.sendButton', SELECTORS.gmail.sendButton, composeWindow);
+  const sendButton = findGmailSendButton(composeWindow);
   const toolbarRow = sendButton?.closest('.btC') as HTMLElement | null;
   const footer = (toolbarRow?.closest('.aDj, .aDh') || sendButton?.closest('.aDj, .aDh')) as HTMLElement | null;
   const insertionParent = footer?.parentElement;

@@ -160,11 +160,26 @@ export const SELECTORS = {
       'input[aria-label*="recipients"]',
       'input[name="to"]',
     ],
-    /** Send button. */
+    /**
+     * Send button, by English text. FALLBACK ONLY: every entry matches the
+     * word "Send", so none of them can match when Gmail's display language is
+     * not English. Call findGmailSendButton(), which tries the structural
+     * match below first and only then falls back to this chain.
+     */
     sendButton: [
       '.T-I.J-J5-Ji[data-tooltip*="Send"]',
       '[role="button"][data-tooltip-shortcut*="Send"]',
       'div[role="button"][aria-label*="Send"]',
+    ],
+    /**
+     * Send button, by structure, with no text in it. In the compose toolbar
+     * row (.btC) Gmail wraps Send and its "more send options" arrow in one
+     * group (.dC); Send is the group's direct child with role="button" and the
+     * arrow is the one that opens a menu (aria-haspopup). Used through
+     * findGmailSendButton(), which also requires the match to be unique.
+     */
+    sendButtonStructural: [
+      '.btC .dC > [role="button"]',
     ],
     /** Thread view container. */
     threadView: [
@@ -386,3 +401,75 @@ export const SELECTORS = {
 
 
 
+
+// ---------------------------------------------------------------------------
+// Gmail Send button
+// ---------------------------------------------------------------------------
+
+/** True for a control that opens a menu, such as Gmail's send-options arrow. */
+function opensMenu(el: Element): boolean {
+  const popup = el.getAttribute('aria-haspopup');
+  return popup !== null && popup !== 'false';
+}
+
+/**
+ * Find Gmail's compose Send button without depending on Gmail's language.
+ *
+ * Pranan never presses Send. The button is only an anchor: the toolbar icon,
+ * the compose prompt and the "never cover Send" layout rule are all placed
+ * relative to it. Every selector used to match the English word "Send", so in
+ * a Gmail set to any other language none of that could find its anchor.
+ *
+ * Order:
+ *
+ *  1. Structure. Inside `root`, the direct role="button" children of a send
+ *     group (.dC) in a compose toolbar row (.btC), minus any that open a menu.
+ *     Accepted only when exactly ONE element is left. A wrong anchor is worse
+ *     than none, so two candidates (two composes under one root, or a layout
+ *     with an extra send-style button) count as no structural match.
+ *  2. English text, the previous behaviour, unchanged. Reported as a fallback
+ *     so we can see when Gmail's structure has moved.
+ *
+ * The tooltip's keyboard hint ("Ctrl-Enter") is deliberately not used: key
+ * names in it follow the display language too.
+ *
+ * @param root Scope, normally one compose window. Defaults to document.
+ */
+export function findGmailSendButton(root: ParentNode = document): HTMLElement | null {
+  let candidates: HTMLElement[] = [];
+  try {
+    candidates = Array.from(
+      root.querySelectorAll<HTMLElement>(SELECTORS.gmail.sendButtonStructural.join(', ')),
+    ).filter((el) => !opensMenu(el));
+  } catch {
+    candidates = [];
+  }
+  if (candidates.length === 1) return candidates[0];
+
+  const byText = findOneQuiet<HTMLElement>(SELECTORS.gmail.sendButton, root);
+  if (byText) {
+    report('fallback_used', 'gmail.sendButton', {
+      structural_candidates: candidates.length,
+      fallback: 'english_text',
+    });
+    return byText;
+  }
+  report('chain_broken', 'gmail.sendButton', {
+    structural_candidates: candidates.length,
+    chain: [...SELECTORS.gmail.sendButtonStructural, ...SELECTORS.gmail.sendButton],
+  });
+  return null;
+}
+
+/** First match in a chain, with no telemetry of its own. */
+function findOneQuiet<T extends Element>(chain: SelectorChain, root: ParentNode): T | null {
+  for (const sel of chain) {
+    try {
+      const el = root.querySelector<T>(sel);
+      if (el) return el;
+    } catch {
+      // Invalid selector: try the next.
+    }
+  }
+  return null;
+}
