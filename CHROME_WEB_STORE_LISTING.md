@@ -1,4 +1,4 @@
-# Chrome Web Store listing: Pranan 0.8.70
+# Chrome Web Store listing: Pranan 0.8.71
 
 Use this file as the source of truth for the Chrome Web Store dashboard. The copy describes the current extension behavior and matches manifest version `0.8.70`. Update the version here in the same release commit as `package.json` and `public/manifest.json`. The screenshots and promo art in `store-assets/v0.8.67/` still match the shipped interface.
 
@@ -135,7 +135,7 @@ Pranan and Pranan for Chrome are operated by INSIDEA, Inc., a Delaware corporati
 
 ## Publishing checklist
 
-- [x] Manifest and package version are 0.8.70
+- [x] Manifest and package version are 0.8.71
 - [x] Minimum Chrome version is 116 (side panel open support)
 - [x] Store icon is present at 128×128
 - [x] Five current screenshots are prepared at 1280×800
