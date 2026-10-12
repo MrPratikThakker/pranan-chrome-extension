@@ -7,20 +7,57 @@
  * user should be told about ("wait a couple minutes") rather than left guessing.
  * The api-client throws an ApiError carrying `.status`, so we can branch on it.
  */
-import { appUrl } from './config';
+import { appOwnedUrl, appUrl } from './config';
+
+/** Where the user upgrades: the server's link when it is on the app, else billing. */
+function billingUrl(err: unknown): string {
+  const supplied = err && typeof err === 'object' && 'upgradeUrl' in err ? (err as { upgradeUrl: unknown }).upgradeUrl : undefined;
+  return appOwnedUrl(supplied) || appUrl('/settings/billing');
+}
 
 function billingLink(err: unknown): string {
-  const url = err && typeof err === 'object' && 'upgradeUrl' in err && typeof (err as { upgradeUrl: unknown }).upgradeUrl === 'string'
-    ? (err as { upgradeUrl: string }).upgradeUrl
-    : appUrl('/settings/billing');
-  return url.replace(/^https?:\/\//, '');
+  return billingUrl(err).replace(/^https?:\/\//, '');
+}
+
+function statusOf(err: unknown): number | undefined {
+  return err && typeof err === 'object' && 'status' in err && typeof (err as { status: unknown }).status === 'number'
+    ? (err as { status: number }).status
+    : undefined;
+}
+
+/**
+ * The one thing the user can do about a failed draft, for surfaces that can
+ * show a real control. `message` is the copy to show beside the control; it
+ * leaves out the address the control already carries.
+ *
+ * draftErrorMessage() stays the complete plain-text version (address spelled
+ * out) for surfaces that can only show text.
+ */
+export interface DraftErrorAction {
+  kind: 'upgrade';
+  /** Text on the button or link. */
+  label: string;
+  /** Opens in a new tab. Always on the Pranan app. */
+  url: string;
+  message: string;
+}
+
+export function draftErrorAction(err: unknown): DraftErrorAction | null {
+  // The plan's monthly draft quota is used up (XP-09). The address used to be
+  // plain text in the error, which Gmail does not make clickable.
+  if (statusOf(err) === 402) {
+    return {
+      kind: 'upgrade',
+      label: 'Upgrade plan',
+      url: billingUrl(err),
+      message: "You have used this month's drafts on your plan. Upgrade to keep drafting.",
+    };
+  }
+  return null;
 }
 
 export function draftErrorMessage(err: unknown): string {
-  const status =
-    err && typeof err === 'object' && 'status' in err && typeof (err as { status: unknown }).status === 'number'
-      ? (err as { status: number }).status
-      : undefined;
+  const status = statusOf(err);
   const code =
     err && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string'
       ? (err as { code: string }).code

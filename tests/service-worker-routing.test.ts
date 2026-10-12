@@ -104,6 +104,28 @@ beforeEach(async () => {
 
 afterEach(() => { vi.useRealTimers(); });
 
+describe('draft failures carry their next step as data', () => {
+  it('sends an upgrade link with a 402, alongside the plain-text reason', async () => {
+    api.generateDraft.mockRejectedValue(Object.assign(new Error('Monthly draft limit reached.'), { status: 402, upgradeUrl: 'https://app.pranan.ai/settings/billing' }));
+    await send({ type: 'INLINE_DRAFT_REQUEST', payload: { originSurface: 'compose-toolbar', platform: 'gmail', requestId: 'r402', editorId: 'e1', userPrompt: 'reply' } }, gmailSender);
+    await flush();
+    expect(tabMessages).toHaveLength(1);
+    const { type, payload } = tabMessages[0].message;
+    expect(type).toBe('DRAFT_SKIPPED');
+    expect(payload.requestId).toBe('r402');
+    expect(payload.message).toMatch(/app\.pranan\.ai\/settings\/billing/);
+    expect(payload.action).toMatchObject({ kind: 'upgrade', label: 'Upgrade plan', url: 'https://app.pranan.ai/settings/billing' });
+  });
+
+  it('sends no action when there is nothing to open', async () => {
+    api.generateDraft.mockRejectedValue(Object.assign(new Error('busy'), { status: 503 }));
+    await send({ type: 'INLINE_DRAFT_REQUEST', payload: { originSurface: 'compose-toolbar', platform: 'gmail', requestId: 'r503', editorId: 'e1', userPrompt: 'reply' } }, gmailSender);
+    await flush();
+    expect(tabMessages[0].message.type).toBe('DRAFT_SKIPPED');
+    expect(tabMessages[0].message.payload).not.toHaveProperty('action');
+  });
+});
+
 describe('draft routing (EXT-01, EXT-16)', () => {
   it('the Gmail compose popover drafts in the worker and inserts with its correlation ids', async () => {
     api.generateDraft.mockResolvedValue({ draft: 'Happy to decline.', confidence: 1, voiceMatch: 1, alternativeTones: [] });

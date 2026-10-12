@@ -41,6 +41,7 @@ import { createRecordedSpeechInput } from '@/lib/recorded-speech-input';
 // must not call the API itself (audit EXT-07, EXT-10).
 import { transcribeViaWorker } from '@/lib/audio-transfer';
 import { claimContentScriptInstance } from '../shared/instance-guard';
+import { createNoticeActionLink, readNoticeAction, type NoticeAction } from '../shared/notice-action';
 
 // Audit EXT-21: stand down if a live copy of this script already runs here.
 // Every top-level listener below is gated on this.
@@ -804,7 +805,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
 
   // Transient amber notice below the bar. Central place so no failure path
   // (skip, empty response, timeout) can leave the bar as a silent no-op.
-  const showInlineNotice = (text: string) => {
+  const showInlineNotice = (text: string, action?: NoticeAction | null) => {
     let notice = bar.parentElement?.querySelector('[data-pranan-skip-notice]') as HTMLElement | null;
     if (!notice) {
       notice = document.createElement('div');
@@ -816,12 +817,20 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
     notice.setAttribute('aria-live', 'polite');
     notice.textContent = text;
     notice.style.display = 'block';
+    // A notice with a next step carries it as a real link, and stays up long
+    // enough to be used.
+    if (action) {
+      const row = document.createElement('div');
+      row.style.cssText = 'margin-top:8px;';
+      row.append(createNoticeActionLink(action));
+      notice.append(row);
+    }
     input.style.borderColor = '#fbbf24';
     if (skipNoticeTimer) clearTimeout(skipNoticeTimer);
     skipNoticeTimer = setTimeout(() => {
       if (notice) notice.style.display = 'none';
       input.style.borderColor = '#e5e7eb';
-    }, 9000);
+    }, action ? 30000 : 9000);
   };
 
   const cancelBtn = document.createElement('button');
@@ -1010,7 +1019,7 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   // generation completes. We reset our loading state.
   // v0.8.1 — also listen for DRAFT_SKIPPED so the bar doesn't hang when the
   // backend refuses to draft (cold prospect, automated sender, etc.).
-  const insertDraftListener = (msg: { type?: string; payload?: { message?: string; requestId?: string; editorId?: string } }) => {
+  const insertDraftListener = (msg: { type?: string; payload?: { message?: string; requestId?: string; editorId?: string; action?: unknown } }) => {
     if (!activeRequest || msg.payload?.requestId !== activeRequest || msg.payload?.editorId !== activeEditor) return;
     if (msg.type === 'INSERT_DRAFT' || msg.type === 'DRAFT_SKIPPED') {
       if (resetTimer) clearTimeout(resetTimer);
@@ -1018,7 +1027,10 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       composeTransactions.cancel(activeRequest);
       activeRequest = null;
       setLoading(false);
-      if (msg.type === 'DRAFT_SKIPPED') showInlineNotice(msg.payload.message || 'Drafting stopped. Your instructions are available to retry.');
+      if (msg.type === 'DRAFT_SKIPPED') {
+        const action = readNoticeAction(msg.payload.action);
+        showInlineNotice(action?.message || msg.payload.message || 'Drafting stopped. Your instructions are available to retry.', action);
+      }
     }
   };
   chrome.runtime.onMessage.addListener(insertDraftListener);
@@ -1825,9 +1837,17 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
   let voiceStarting = false;
   let activeVoice: 'speech' | 'recording' | 'transcribing' | null = null;
 
-  const showStatus = (message: string, error = false) => {
+  const showStatus = (message: string, error = false, action?: NoticeAction | null) => {
     status.textContent = message;
     status.style.color = error ? '#b45309' : '#64748b';
+    // A failure with a next step (upgrade at the draft limit) carries it as a
+    // real link, not as an address to retype.
+    if (action) {
+      const row = document.createElement('div');
+      row.style.cssText = 'margin-top:8px;';
+      row.append(createNoticeActionLink(action));
+      status.append(row);
+    }
   };
 
   const setVoiceIdle = () => {
@@ -1876,7 +1896,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
     voiceStarting = false;
   });
 
-  const finishPopover = (message?: string) => {
+  const finishPopover = (message?: string, action?: NoticeAction | null) => {
     submitting = false;
     if (popoverRequest) composeTransactions.cancel(popoverRequest);
     popoverRequest = null;
@@ -1884,11 +1904,14 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
     requestTimer = null;
     generateBtn.disabled = false;
     generateBtn.textContent = 'Try again';
-    if (message) showStatus(message, true);
+    if (message) showStatus(message, true, action);
   };
-  const popoverResult = (message: { type: string; payload?: { requestId?: string; message?: string } }) => {
+  const popoverResult = (message: { type: string; payload?: { requestId?: string; message?: string; action?: unknown } }) => {
     if (!popoverRequest || message.payload?.requestId !== popoverRequest) return;
-    if (message.type === 'DRAFT_SKIPPED') finishPopover(message.payload.message || 'Drafting failed. Your instructions are preserved.');
+    if (message.type === 'DRAFT_SKIPPED') {
+      const action = readNoticeAction(message.payload.action);
+      finishPopover(action?.message || message.payload.message || 'Drafting failed. Your instructions are preserved.', action);
+    }
     else if (message.type === 'INSERT_DRAFT') {
       popoverRequest = null;
       const railInput = composeWindow.querySelector<HTMLElement>(`[${PRANAN_COMPOSE_RAIL_ATTR}]`)?.shadowRoot?.querySelector<HTMLInputElement>('input');

@@ -28,7 +28,7 @@ import {
   setAuthExpiredHandler,
   type DraftRequest,
 } from '@/lib/api-client';
-import { draftErrorMessage } from '@/lib/draft-error-message';
+import { draftErrorAction, draftErrorMessage } from '@/lib/draft-error-message';
 import type { ExtensionMessage, Platform, AuthResponse, ContactContext } from '@/types';
 import { bootstrapSentry } from '@/lib/observability';
 import { APP_ORIGIN } from '@/lib/config';
@@ -850,7 +850,11 @@ function runDirectDraft(args: {
         && !(controller.signal.reason instanceof DOMException && controller.signal.reason.name === 'TimeoutError');
       if (cancelled) return;
       const reason = controller.signal.aborted ? controller.signal.reason : err;
-      reply({ type: 'DRAFT_SKIPPED', payload: { ...correlation, reason: 'error', message: draftErrorMessage(reason) } });
+      // `message` is the complete plain-text reason. `action`, when there is
+      // one (upgrade at the draft limit), lets a surface that can show a real
+      // control offer it instead of an address the user has to retype.
+      const action = draftErrorAction(reason);
+      reply({ type: 'DRAFT_SKIPPED', payload: { ...correlation, reason: 'error', message: draftErrorMessage(reason), ...(action ? { action } : {}) } });
     } finally {
       clearTimeout(deadline);
       if (inlineRequests.get(requestKey) === controller) inlineRequests.delete(requestKey);
