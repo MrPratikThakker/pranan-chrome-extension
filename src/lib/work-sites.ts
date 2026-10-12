@@ -10,8 +10,9 @@
  * the app turns into Memory inbox suggestions saved only on approval.
  *
  * Removing a site revokes Chrome's permission and unregisters the button
- * there. Mail, chat and sign-in sites, and Pranan itself, can never be added;
- * the app refuses them too.
+ * there. The mail, chat and sign-in sites listed below, and Pranan itself,
+ * can never be added; the app refuses them too (keep BLOCKED_HOSTS in
+ * pranan-app src/lib/web-learn.ts the same).
  */
 
 /** Hosts that can never be added, and that a wildcard must not cover. */
@@ -24,6 +25,29 @@ export const BLOCKED_SITE_HOSTS: readonly string[] = [
   'pranan.ai',
   'outlook.office.com',
   'outlook.live.com',
+  'mail.yahoo.com',
+  'proton.me',
+  'icloud.com',
+  'web.whatsapp.com',
+  'web.telegram.org',
+  'messenger.com',
+  'discord.com',
+  'teams.microsoft.com',
+  'login.microsoftonline.com',
+  'login.live.com',
+  'appleid.apple.com',
+];
+
+/**
+ * Suffixes shared by many unrelated sites. A pattern for one of these
+ * ("https://*.co.uk/*") would cover every site under it, so they are refused.
+ */
+export const SHARED_SUFFIXES: readonly string[] = [
+  'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.in', 'net.in', 'org.in',
+  'co.nz', 'co.za', 'co.jp', 'com.br', 'com.mx', 'com.sg', 'com.hk', 'com.cn', 'com.tr', 'co.kr',
+  'github.io', 'gitlab.io', 'pages.dev', 'workers.dev', 'vercel.app', 'netlify.app', 'web.app',
+  'firebaseapp.com', 'herokuapp.com', 'appspot.com', 'azurewebsites.net', 'cloudfront.net',
+  'amazonaws.com', 'blogspot.com', 'wordpress.com', 'substack.com', 'notion.site', 'webflow.io',
 ];
 
 /** Origins the manifest always holds; never shown or removed as learning sites. */
@@ -65,6 +89,9 @@ export function siteFromInput(input: string): SiteInputResult {
   host = host.replace(/^www\./, '').replace(/\.$/, '');
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) || /^[\d.]+$/.test(host)) {
     return { ok: false, reason: 'That does not look like a website address.' };
+  }
+  if (SHARED_SUFFIXES.includes(host)) {
+    return { ok: false, reason: `${host} covers many unrelated sites. Add the exact site, for example acme.${host}.` };
   }
   const blocked = BLOCKED_SITE_HOSTS.find((b) => b === host || b.endsWith(`.${host}`) || host.endsWith(`.${b}`));
   if (blocked) return { ok: false, reason: `Pranan does not read ${host}. Mail, chat and sign-in sites stay out of bounds.` };

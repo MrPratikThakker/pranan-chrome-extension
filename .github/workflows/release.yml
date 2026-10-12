@@ -101,8 +101,14 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci --prefer-offline --no-audit --no-fund
+      - run: npm run typecheck
       - run: npm test -- --run
+      # Without a DSN the store build reports no errors at all, so a Gmail
+      # layout change that breaks the reply prompt would go unseen.
       - run: npm run build
+        env:
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_APP_VERSION: ${{ env.RELEASE_TAG }}
       - name: Zip dist
         run: cd dist && zip -r ../pranan-companion-${{ env.RELEASE_TAG }}.zip .
 

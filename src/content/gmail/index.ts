@@ -2026,7 +2026,7 @@ function showComposeRelationshipPopup(composeWindow: Element, recipientEmail: st
   // Request context from background
   safeSendMessage({
     type: 'REQUEST_CONTACT_POPUP',
-    payload: { email: recipientEmail },
+    payload: { email: recipientEmail, mailboxEmail: extractSelfEmail(document.title) || undefined },
   }).then((response: unknown) => {
     // The worker answers { data }, exactly as it does for Slack and LinkedIn.
     // Reading the reply itself as the popup data meant contactName was always
@@ -2377,6 +2377,7 @@ function scanThreadViews() {
           type: 'THREAD_OPENED',
           payload: {
             platform: 'gmail',
+            mailboxEmail: extractSelfEmail(document.title) || undefined,
             senderEmail,
             senderName,
             subject: extractThreadSubject(thread),
@@ -2707,6 +2708,7 @@ if (IS_PRIMARY_INSTANCE) chrome.runtime.onMessage.addListener((message, _sender,
         hasCompose: true,
         payload: {
           platform: 'gmail',
+          mailboxEmail: extractSelfEmail(document.title) || undefined,
           recipientEmail: primaryRecipient,
           recipientName: primaryName,
           threadId: null,

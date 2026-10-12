@@ -21,9 +21,14 @@ describe('manifest permissions', () => {
   });
 
   it('still requests every permission the code relies on', () => {
-    for (const permission of ['storage', 'sidePanel', 'alarms', 'webNavigation', 'scripting']) {
+    for (const permission of ['storage', 'sidePanel', 'alarms', 'scripting']) {
       expect(manifest.permissions).toContain(permission);
     }
+  });
+
+  it('does not request webNavigation, which shows a browsing-history warning at install', () => {
+    expect(manifest.permissions).not.toContain('webNavigation');
+    expect(readFileSync('src/background/service-worker.ts', 'utf8')).not.toMatch(/chrome\.webNavigation/);
   });
 });
 
