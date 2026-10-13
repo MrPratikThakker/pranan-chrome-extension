@@ -32,7 +32,7 @@ describe('createNoticeActionLink', () => {
   const action = readNoticeAction(draftErrorAction({ status: 402 }))!;
 
   it('is a real link to billing that opens in a new tab', () => {
-    const link = createNoticeActionLink(action);
+    const link = createNoticeActionLink(action) as HTMLAnchorElement;
     expect(link.tagName).toBe('A');
     expect(link.href).toBe('https://app.pranan.ai/settings/billing');
     expect(link.target).toBe('_blank');

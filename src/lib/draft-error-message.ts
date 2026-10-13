@@ -33,14 +33,28 @@ function statusOf(err: unknown): number | undefined {
  * draftErrorMessage() stays the complete plain-text version (address spelled
  * out) for surfaces that can only show text.
  */
-export interface DraftErrorAction {
-  kind: 'upgrade';
-  /** Text on the button or link. */
-  label: string;
-  /** Opens in a new tab. Always on the Pranan app. */
-  url: string;
-  message: string;
-}
+export type DraftErrorAction =
+  | {
+      kind: 'upgrade';
+      /** Text on the button or link. */
+      label: string;
+      /** Opens in a new tab. Always on the Pranan app. */
+      url: string;
+      message: string;
+    }
+  | {
+      /**
+       * The session is over. There is no address to open: the surface starts
+       * the extension's own sign-in handoff (BEGIN_COMPANION_LOGIN), because
+       * signing in to the app in a tab the extension did not open does not
+       * sign the extension in (audit EXT-09).
+       */
+      kind: 'sign_in';
+      label: string;
+      message: string;
+    };
+
+export const SIGN_IN_LABEL = 'Sign in to Pranan';
 
 export function draftErrorAction(err: unknown): DraftErrorAction | null {
   // The plan's monthly draft quota is used up (XP-09). The address used to be
@@ -51,6 +65,13 @@ export function draftErrorAction(err: unknown): DraftErrorAction | null {
       label: 'Upgrade plan',
       url: billingUrl(err),
       message: "You have used this month's drafts on your plan. Upgrade to keep drafting.",
+    };
+  }
+  if (statusOf(err) === 401) {
+    return {
+      kind: 'sign_in',
+      label: SIGN_IN_LABEL,
+      message: 'You are signed out of Pranan. Sign in to keep drafting. Your text has not changed.',
     };
   }
   return null;
@@ -82,7 +103,9 @@ export function draftErrorMessage(err: unknown): string {
     return 'Pranan could not refresh your session just now. You are still signed in. Try again in a moment.';
   }
   if (status === 401) {
-    return 'Your Pranan session expired. Open app.pranan.ai to sign back in, then try again.';
+    // Text-only surfaces. It used to say "Open app.pranan.ai to sign back in",
+    // which does not work: the extension only accepts a sign-in it started.
+    return 'Your Pranan session expired. Click the Pranan icon in the Chrome toolbar to sign back in, then try again.';
   }
   if (status === 409) return 'This Gmail mailbox differs from your Pranan account. Switch to the matching mailbox or sign into Pranan with this account.';
   if (status === 503) {

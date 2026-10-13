@@ -42,6 +42,10 @@ import { createRecordedSpeechInput } from '@/lib/recorded-speech-input';
 import { transcribeViaWorker } from '@/lib/audio-transfer';
 import { claimContentScriptInstance } from '../shared/instance-guard';
 import { createNoticeActionLink, readNoticeAction, type NoticeAction } from '../shared/notice-action';
+import {
+  bindAuthState, isSignedOut, setAuthState, startAuthStateSync, wireSignInButton,
+  SIGN_IN_LABEL, SIGNED_OUT_MESSAGE,
+} from '../shared/auth-state';
 
 // Audit EXT-21: stand down if a live copy of this script already runs here.
 // Every top-level listener below is gated on this.
@@ -57,6 +61,11 @@ try { document.documentElement.setAttribute('data-pranan-injected', chrome.runti
 // ---------------------------------------------------------------------------
 
 if (IS_PRIMARY_INSTANCE) bootstrapSentry('content-gmail');
+
+// Signed out is a state of the Gmail UI, not an error after the fact. Every
+// Pranan control below reads it and swaps to a "Sign in to Pranan" button, and
+// swaps back when the worker reports the sign-in finished (no reload needed).
+if (IS_PRIMARY_INSTANCE) startAuthStateSync();
 
 // Reference to the active inline bar's Generate trigger, so the popup's
 // "Quick Draft" action (TRIGGER_INLINE_DRAFT) can fire the same flow.
@@ -913,6 +922,10 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
   });
   const triggerGenerate = () => {
     if (activeRequest) return;
+    if (isSignedOut()) {
+      showInlineNotice(SIGNED_OUT_MESSAGE, { kind: 'sign_in', label: SIGN_IN_LABEL, message: SIGNED_OUT_MESSAGE });
+      return;
+    }
     if (activeVoice === 'recording' || activeVoice === 'transcribing') {
       if (activeVoice === 'recording') recordedSpeech.stop();
       showInlineNotice('Finish voice transcription before generating. Your draft is unchanged.');
@@ -1029,6 +1042,9 @@ function injectPromptBarV6(composeContainer: Element, composeWindow: Element, re
       setLoading(false);
       if (msg.type === 'DRAFT_SKIPPED') {
         const action = readNoticeAction(msg.payload.action);
+        // A 401 mid-session: every Pranan control on the page becomes the
+        // sign-in state, not only this notice.
+        if (action?.kind === 'sign_in') setAuthState('signed_out');
         showInlineNotice(action?.message || msg.payload.message || 'Drafting stopped. Your instructions are available to retry.', action);
       }
     }
@@ -1458,10 +1474,18 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
     </button>
   `;
 
-  shadow.querySelector('.pranan-icon-btn')!.addEventListener('click', (e) => {
+  const iconButton = shadow.querySelector<HTMLButtonElement>('.pranan-icon-btn')!;
+  iconButton.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
     openComposePopover(host, composeWindow);
+  });
+  // Signed out, the icon opens the same card, which then holds the sign-in
+  // button. Say so in the tooltip and to screen readers.
+  bindAuthState(host, () => {
+    const label = isSignedOut() ? SIGN_IN_LABEL : 'Draft with Pranan';
+    iconButton.title = label;
+    iconButton.setAttribute('aria-label', label);
   });
 }
 
@@ -1541,6 +1565,12 @@ function injectAutomaticComposeRail(composeWindow: Element, anchorHost: HTMLElem
       .go:hover { color:#fff; background:#5b21b6; }
       .dismiss { width:22px; color:#9aa0a6; }
       svg { pointer-events:none; }
+      [hidden] { display:none !important; }
+      .signin-text { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      button.signin { width:auto; height:26px; padding:0 10px; color:#fff; background:#6d28d9; font:inherit; font-size:12px; font-weight:600; white-space:nowrap; }
+      button.signin:hover { color:#fff; background:#5b21b6; }
+      button.signin:disabled { opacity:.7; cursor:default; }
+      .rail[data-theme="dark"] button.signin { color:#fff; background:#7c3aed; }
       @media (prefers-color-scheme: dark) {
         .rail { background:#292a2d; border-color:#4b5563; color:#f3f4f6; }
         input { color:#f3f4f6; }
@@ -1561,6 +1591,8 @@ function injectAutomaticComposeRail(composeWindow: Element, anchorHost: HTMLElem
         <circle cx="60" cy="60" r="33" stroke="currentColor" stroke-width="9"/><circle cx="60" cy="60" r="17" fill="currentColor"/>
       </svg>
       <input aria-label="Describe this email to Pranan" autocomplete="off" />
+      <span class="signin-text" role="status" hidden></span>
+      <button class="signin" type="button" hidden>${SIGN_IN_LABEL}</button>
       <button class="voice" type="button" aria-label="Draft with voice" title="Draft with voice">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
@@ -1622,6 +1654,27 @@ function injectAutomaticComposeRail(composeWindow: Element, anchorHost: HTMLElem
   });
   editableBody.addEventListener('input', refreshPrompt);
   insertionParent.insertBefore(host, footer);
+
+  // Signed out: the rail keeps its place and its mark, and offers one thing,
+  // the sign-in button. It becomes the prompt again as soon as sign-in lands.
+  const signInText = shadow.querySelector<HTMLElement>('.signin-text')!;
+  const signInButton = shadow.querySelector<HTMLButtonElement>('button.signin')!;
+  const voiceButton = shadow.querySelector<HTMLElement>('.voice')!;
+  const goButton = shadow.querySelector<HTMLElement>('.go')!;
+  wireSignInButton(signInButton, signInText, {
+    opened: 'Finish signing in on the new tab.',
+    failed: 'Could not open sign-in. Use the Pranan icon in the Chrome toolbar.',
+  });
+  bindAuthState(host, () => {
+    const signedOut = isSignedOut();
+    input.hidden = signedOut;
+    voiceButton.hidden = signedOut;
+    goButton.hidden = signedOut;
+    signInText.hidden = !signedOut;
+    signInButton.hidden = !signedOut;
+    if (signedOut) signInText.textContent = 'Sign in to draft replies in your voice.';
+    rail.setAttribute('data-pranan-auth', signedOut ? 'signed-out' : 'ready');
+  });
   const themeObserver = new MutationObserver(() => {
     if (!host.isConnected) { themeObserver.disconnect(); return; }
     syncTheme();
@@ -1760,7 +1813,11 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
     </div>
-    <div style="padding:0 12px 10px;">
+    <div data-pranan-signin hidden style="padding:2px 13px 14px;">
+      <p data-pranan-signin-text role="status" aria-live="polite" style="margin:0 0 11px;font-size:13px;line-height:1.45;color:inherit;"></p>
+      <button data-pranan-signin-button type="button" style="height:32px;padding:0 13px;border:0;border-radius:8px;background:#6d28d9;color:#fff;font-weight:600;white-space:nowrap;">${SIGN_IN_LABEL}</button>
+    </div>
+    <div data-pranan-prompt-section style="padding:0 12px 10px;">
       <div data-pranan-prompt-wrap style="border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;transition:border-color .15s,box-shadow .15s;">
         <textarea data-pranan-prompt aria-label="Instructions for Pranan" placeholder="${initialDraft.trim() ? 'How should Pranan improve this draft?' : messageToReplyTo ? 'Add guidance, or draft from this thread' : 'What should this email say?'}" style="display:block;box-sizing:border-box;width:100%;min-height:70px;max-height:150px;padding:10px 11px 6px;border:0;outline:0;resize:vertical;color:#1f2937;background:transparent;font:13px/1.45 inherit;"></textarea>
         <div style="min-height:38px;padding:3px 6px 5px 9px;display:flex;align-items:center;gap:6px;">
@@ -1789,6 +1846,26 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
   const status = popover.querySelector<HTMLElement>('[data-pranan-status]')!;
   const suggestions = popover.querySelector<HTMLElement>('[data-pranan-suggestions]')!;
   if (options.initialPrompt) promptEl.value = options.initialPrompt;
+
+  // Signed out, the card shows one thing: why, and the sign-in button. The
+  // prompt is hidden rather than removed, so anything already typed is still
+  // there when sign-in finishes and the card returns to normal.
+  const promptSection = popover.querySelector<HTMLElement>('[data-pranan-prompt-section]')!;
+  const signInSection = popover.querySelector<HTMLElement>('[data-pranan-signin]')!;
+  const signInText = popover.querySelector<HTMLElement>('[data-pranan-signin-text]')!;
+  const signInButton = popover.querySelector<HTMLButtonElement>('[data-pranan-signin-button]')!;
+  wireSignInButton(signInButton, signInText);
+  let shownSignedOut = false;
+  const stopAuthBinding = bindAuthState(popover, () => {
+    const signedOut = isSignedOut();
+    promptSection.hidden = signedOut;
+    status.hidden = signedOut;
+    suggestions.style.display = signedOut ? 'none' : 'flex';
+    signInSection.hidden = !signedOut;
+    if (signedOut) signInText.textContent = SIGNED_OUT_MESSAGE;
+    else if (shownSignedOut && popover.isConnected) promptEl.focus();
+    shownSignedOut = signedOut;
+  });
 
   promptEl.addEventListener('focus', () => {
     promptWrap.style.borderColor = '#a78bfa';
@@ -1910,6 +1987,17 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
     if (!popoverRequest || message.payload?.requestId !== popoverRequest) return;
     if (message.type === 'DRAFT_SKIPPED') {
       const action = readNoticeAction(message.payload.action);
+      if (action?.kind === 'sign_in') {
+        // A 401 mid-session leads to the same signed-out state as opening the
+        // card while signed out, with the reason this request stopped.
+        finishPopover();
+        // What the card says once sign-in has finished and the prompt is back.
+        showStatus('Your instructions are still here. Try again when you are ready.');
+        setAuthState('signed_out');
+        signInText.textContent = action.message;
+        signInButton.focus();
+        return;
+      }
       finishPopover(action?.message || message.payload.message || 'Drafting failed. Your instructions are preserved.', action);
     }
     else if (message.type === 'INSERT_DRAFT') {
@@ -1933,12 +2021,14 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
     chrome.runtime.onMessage.removeListener(popoverResult);
     window.removeEventListener('pranan:editor-changed', popoverChanged);
     document.removeEventListener('keydown', escListener); document.removeEventListener('mousedown', outsideClick);
+    stopAuthBinding();
     popoverCleanup.disconnect();
   });
   popoverCleanup.observe(document.body, { childList: true, subtree: true });
   let submitting = false;
   const submitFreeformPrompt = async () => {
       if (submitting) return;
+      if (isSignedOut()) { signInButton.focus(); return; }
       if (!editableBody) { showStatus('Open a message body before drafting.', true); return; }
       const currentDraft = readGmailComposeText(editableBody);
       let text = promptEl.value.trim();
@@ -1996,7 +2086,7 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
     }
   });
 
-  if (messageToReplyTo) {
+  if (messageToReplyTo && !isSignedOut()) {
     safeSendMessage({
       type: 'GET_REPLY_INTENTS',
       payload: {
@@ -2019,7 +2109,8 @@ function openComposePopover(anchorHost: HTMLElement, capturedCompose?: Element, 
   }
 
   requestAnimationFrame(() => {
-    if (options.startVoice) voiceBtn.click();
+    if (isSignedOut()) signInButton.focus();
+    else if (options.startVoice) voiceBtn.click();
     else if (options.autoSubmit) generateBtn.click();
     else promptEl.focus();
   });
@@ -2327,9 +2418,44 @@ function injectThreadPromptBar(threadContainer: Element) {
     }
   });
 
+  // Signed out: the bar says so and offers the sign-in button in place of a
+  // prompt that could only end in an error.
+  const signInText = document.createElement('span');
+  signInText.setAttribute('role', 'status');
+  signInText.style.cssText = 'flex:1;min-width:0;font-size:13px;color:#475569;font-family:inherit;display:none;';
+  const signInBtn = document.createElement('button');
+  signInBtn.textContent = SIGN_IN_LABEL;
+  signInBtn.style.cssText = `
+    background: linear-gradient(135deg, #6d28d9, #a78bfa);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+    flex: none;
+    display: none;
+  `;
+  wireSignInButton(signInBtn, signInText);
+
   bar.appendChild(icon);
   bar.appendChild(input);
   bar.appendChild(generateBtn);
+  bar.appendChild(signInText);
+  bar.appendChild(signInBtn);
+
+  bindAuthState(bar, () => {
+    const signedOut = isSignedOut();
+    input.style.display = signedOut ? 'none' : '';
+    generateBtn.style.display = signedOut ? 'none' : '';
+    signInText.style.display = signedOut ? '' : 'none';
+    signInBtn.style.display = signedOut ? '' : 'none';
+    if (signedOut) signInText.textContent = 'Sign in to draft replies in your voice.';
+    bar.style.cursor = signedOut ? 'default' : 'text';
+  });
 
   // Insert before the reply buttons row
   replyButtonsRow.parentElement?.insertBefore(bar, replyButtonsRow);

@@ -33,7 +33,7 @@ import type { ExtensionMessage, Platform, AuthResponse, ContactContext } from '@
 import { bootstrapSentry } from '@/lib/observability';
 import { APP_ORIGIN } from '@/lib/config';
 import { usesDirectWorkerPath } from './inline-draft-routing';
-import { clearAuthTokens, writeAuthTokens, restrictTokenStorageToTrustedContexts } from '@/lib/token-store';
+import { clearAuthTokens, readAuthTokens, writeAuthTokens, restrictTokenStorageToTrustedContexts } from '@/lib/token-store';
 import { getPrivacySettings } from '@/lib/privacy-settings';
 import { beginCompanionLogin, consumePendingLogin, restorePendingLogin } from '@/lib/login-handoff';
 import { base64ToBlob, safeAudioMimeType, MAX_AUDIO_BASE64_LENGTH } from '@/lib/audio-transfer';
@@ -134,11 +134,63 @@ async function initAuth(options: { allowCached?: boolean } = {}): Promise<boolea
   }
 }
 
-/** Reset every piece of worker auth state and tell the side panel. */
+/** Reset every piece of worker auth state and tell the side panel and Gmail. */
 async function markSignedOut(): Promise<void> {
   cachedAuth = null;
   await invalidateAuthCache();
   broadcastToSidePanel({ type: 'AUTH_STATUS', payload: { valid: false } });
+  broadcastAuthStateToGmail(false);
+}
+
+const GMAIL_ORIGIN = 'https://mail.google.com';
+
+/**
+ * Tell every open Gmail tab whether the user is signed in to Pranan.
+ *
+ * Content scripts cannot read the tokens (audit EXT-10), so until now Gmail
+ * had no idea: a signed-out person saw the full Pranan control and only met a
+ * plain-text error after pressing Generate. The Gmail script asks once when it
+ * loads (GET_AUTH_STATE); this keeps it current afterwards, so the control
+ * flips to "Sign in to Pranan" on sign-out and back on sign-in without the
+ * tab being reloaded.
+ *
+ * Only a boolean crosses over, never a token or a user id. tabs.query with a
+ * URL pattern needs no "tabs" permission here because the extension holds the
+ * host permission for Gmail.
+ */
+function broadcastAuthStateToGmail(signedIn: boolean): void {
+  try {
+    void chrome.tabs.query({ url: `${GMAIL_ORIGIN}/*` })
+      .then((tabs) => {
+        for (const tab of tabs) {
+          if (tab.id == null) continue;
+          chrome.tabs.sendMessage(tab.id, { type: 'AUTH_STATE_CHANGED', payload: { signedIn } })
+            .catch(() => { /* no live content script in that tab */ });
+        }
+      })
+      .catch(() => { /* tabs unavailable */ });
+  } catch { /* tabs unavailable */ }
+}
+
+/**
+ * true: signed in. false: known to be signed out. null: could not tell (the
+ * check failed while a session is stored), so callers must not show a
+ * signed-out state on the strength of it.
+ */
+async function knownSignedIn(): Promise<boolean | null> {
+  if (await initAuth({ allowCached: true })) return true;
+  // The server answered and said no.
+  if (cachedAuth && !cachedAuth.valid && !(cachedAuth as { transient?: boolean }).transient) return false;
+  // Otherwise the check threw or was transient. A rejected session has had its
+  // tokens cleared by then; if tokens are still stored, the failure was the
+  // network or the server, not the session. With nothing stored there is no
+  // session to keep, which is also what the popup shows (audit EXT-22).
+  try {
+    const tokens = await readAuthTokens();
+    return tokens.authToken || tokens.refreshToken ? null : false;
+  } catch {
+    return null;
+  }
 }
 
 // A 401 seen by the worker's own API calls lands here (audit EXT-24).
@@ -317,9 +369,30 @@ async function handleMessage(
             type: 'AUTH_STATUS',
             payload: { valid: true, user: cachedAuth },
           });
+          broadcastAuthStateToGmail(true);
         }
       } catch { /* validation hiccup; leave state unchanged */ }
       return { ok: true };
+    }
+
+    // A content script asking whether to show its normal control or the
+    // sign-in button. Answers with a boolean (or null for "cannot tell") and
+    // nothing else.
+    case 'GET_AUTH_STATE':
+      return { signedIn: await knownSignedIn() };
+
+    // The "Sign in to Pranan" button in Gmail. A content script cannot open
+    // the sign-in itself: the pending login it needs lives in trusted storage
+    // (audit EXT-09). This starts the same handoff as the popup's "Continue to
+    // Pranan" and the side panel's "Connect to Pranan", and nothing else.
+    case 'BEGIN_COMPANION_LOGIN': {
+      if (!isOwnContentScript(sender, GMAIL_ORIGIN) && !isTrustedPrivilegedSender(sender)) return { ok: false };
+      try {
+        await beginCompanionLogin();
+        return { ok: true };
+      } catch {
+        return { ok: false };
+      }
     }
 
     case 'AUTH_EXPIRED': {
@@ -974,6 +1047,7 @@ async function acceptWebAuthHandoff(input: {
   if (cachedAuth?.valid) {
     scheduleTokenRefresh();
     broadcastToSidePanel({ type: 'AUTH_STATUS', payload: { valid: true, user: cachedAuth } });
+    broadcastAuthStateToGmail(true);
     return { ok: true };
   }
   await clearAuthTokens();

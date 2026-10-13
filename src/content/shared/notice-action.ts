@@ -12,14 +12,24 @@
  */
 
 import { appOwnedUrl } from '@/lib/config';
+import { SIGN_IN_LABEL, SIGNED_OUT_MESSAGE, wireSignInButton } from './auth-state';
 
-export interface NoticeAction {
+export interface UpgradeNoticeAction {
   kind: 'upgrade';
   label: string;
   url: string;
   /** Copy to show beside the control. */
   message: string;
 }
+
+/** The session is over. Rendered as a button that starts the sign-in handoff. */
+export interface SignInNoticeAction {
+  kind: 'sign_in';
+  label: string;
+  message: string;
+}
+
+export type NoticeAction = UpgradeNoticeAction | SignInNoticeAction;
 
 /**
  * Validate an action that arrived in a message. Returns null for anything that
@@ -29,11 +39,16 @@ export interface NoticeAction {
 export function readNoticeAction(value: unknown): NoticeAction | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
+  const message = typeof raw.message === 'string' ? raw.message : '';
+  if (raw.kind === 'sign_in') {
+    // No address and no label from the message: the button always starts the
+    // extension's own sign-in and always says so.
+    return { kind: 'sign_in', label: SIGN_IN_LABEL, message: message || SIGNED_OUT_MESSAGE };
+  }
   if (raw.kind !== 'upgrade') return null;
   const url = appOwnedUrl(raw.url);
   if (!url) return null;
   const label = typeof raw.label === 'string' && raw.label.trim() ? raw.label.trim() : 'Upgrade plan';
-  const message = typeof raw.message === 'string' ? raw.message : '';
   return { kind: 'upgrade', label, url, message };
 }
 
@@ -46,8 +61,19 @@ export const NOTICE_ACTION_STYLE = [
   'white-space:nowrap', 'cursor:pointer',
 ].join(';');
 
-/** Build the link for a validated action. Opens the app in a new tab. */
-export function createNoticeActionLink(action: NoticeAction, cssText: string = NOTICE_ACTION_STYLE): HTMLAnchorElement {
+/**
+ * Build the control for a validated action: a link that opens the app in a new
+ * tab, or, when the session is over, a button that starts sign-in.
+ */
+export function createNoticeActionLink(action: NoticeAction, cssText: string = NOTICE_ACTION_STYLE): HTMLAnchorElement | HTMLButtonElement {
+  if (action.kind === 'sign_in') {
+    const button = document.createElement('button');
+    button.setAttribute('data-pranan-notice-action', action.kind);
+    button.textContent = action.label;
+    button.style.cssText = cssText;
+    wireSignInButton(button);
+    return button;
+  }
   const link = document.createElement('a');
   link.setAttribute('data-pranan-notice-action', action.kind);
   link.textContent = action.label;
