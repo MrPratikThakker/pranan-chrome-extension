@@ -104,6 +104,28 @@ beforeEach(async () => {
 
 afterEach(() => { vi.useRealTimers(); });
 
+describe('draft failures carry their next step as data', () => {
+  it('sends an upgrade link with a 402, alongside the plain-text reason', async () => {
+    api.generateDraft.mockRejectedValue(Object.assign(new Error('Monthly draft limit reached.'), { status: 402, upgradeUrl: 'https://app.pranan.ai/settings/billing' }));
+    await send({ type: 'INLINE_DRAFT_REQUEST', payload: { originSurface: 'compose-toolbar', platform: 'gmail', requestId: 'r402', editorId: 'e1', userPrompt: 'reply' } }, gmailSender);
+    await flush();
+    expect(tabMessages).toHaveLength(1);
+    const { type, payload } = tabMessages[0].message;
+    expect(type).toBe('DRAFT_SKIPPED');
+    expect(payload.requestId).toBe('r402');
+    expect(payload.message).toMatch(/app\.pranan\.ai\/settings\/billing/);
+    expect(payload.action).toMatchObject({ kind: 'upgrade', label: 'Upgrade plan', url: 'https://app.pranan.ai/settings/billing' });
+  });
+
+  it('sends no action when there is nothing to open', async () => {
+    api.generateDraft.mockRejectedValue(Object.assign(new Error('busy'), { status: 503 }));
+    await send({ type: 'INLINE_DRAFT_REQUEST', payload: { originSurface: 'compose-toolbar', platform: 'gmail', requestId: 'r503', editorId: 'e1', userPrompt: 'reply' } }, gmailSender);
+    await flush();
+    expect(tabMessages[0].message.type).toBe('DRAFT_SKIPPED');
+    expect(tabMessages[0].message.payload).not.toHaveProperty('action');
+  });
+});
+
 describe('draft routing (EXT-01, EXT-16)', () => {
   it('the Gmail compose popover drafts in the worker and inserts with its correlation ids', async () => {
     api.generateDraft.mockResolvedValue({ draft: 'Happy to decline.', confidence: 1, voiceMatch: 1, alternativeTones: [] });
@@ -242,6 +264,84 @@ describe('sign-in handoff (EXT-09, EXT-19)', () => {
     expect(await sendExternal({ type: 'AUTH_TOKEN', token: 'a1' })).toEqual({ error: 'Refresh token required' });
     expect(await sendExternal({ type: 'SOMETHING_ELSE' })).toEqual({ error: 'Unknown message type' });
     expect(await sendExternal({ type: 'AUTH_TOKEN', token: 'a1', refreshToken: 'r1' })).toEqual({ ok: true });
+  });
+});
+
+describe('signed-out state for Gmail', () => {
+  const queryMock = () => (globalThis as unknown as { chrome: { tabs: { query: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn> } } }).chrome.tabs;
+  const authBroadcasts = () => tabMessages.filter((m) => m.message.type === 'AUTH_STATE_CHANGED');
+
+  it('answers a content script with a boolean and nothing else', async () => {
+    expect(await send({ type: 'GET_AUTH_STATE' }, gmailSender)).toEqual({ signedIn: true });
+  });
+
+  it('says signed out when the server says the session is not valid', async () => {
+    await send({ type: 'DISCONNECT' }, panelSender);
+    api.validateAuth.mockResolvedValue({ valid: false });
+    expect(await send({ type: 'GET_AUTH_STATE' }, gmailSender)).toEqual({ signedIn: false });
+  });
+
+  it('says signed out when the check fails and no session is stored', async () => {
+    await send({ type: 'DISCONNECT' }, panelSender);
+    api.validateAuth.mockRejectedValue(Object.assign(new Error('Session expired. Please reconnect.'), { status: 401 }));
+    expect(await send({ type: 'GET_AUTH_STATE' }, gmailSender)).toEqual({ signedIn: false });
+  });
+
+  it('says it cannot tell when the check fails while a session is stored', async () => {
+    await send({ type: 'DISCONNECT' }, panelSender);
+    env.session.data.authToken = 'a1';
+    env.session.data.refreshToken = 'r1';
+    api.validateAuth.mockRejectedValue(Object.assign(new Error('boom'), { status: 500 }));
+    expect(await send({ type: 'GET_AUTH_STATE' }, gmailSender)).toEqual({ signedIn: null });
+  });
+
+  it('starts the same sign-in handoff as the popup when Gmail asks', async () => {
+    expect(await send({ type: 'BEGIN_COMPANION_LOGIN' }, gmailSender)).toEqual({ ok: true });
+    const pending = env.session.data.pendingCompanionLogin as { state: string; startedAt: number };
+    expect(pending.state).toMatch(/^[a-f0-9]{32}$/);
+    expect(queryMock().create).toHaveBeenCalledWith({ url: `https://app.pranan.ai/login?source=companion&ext_state=${pending.state}` });
+    // And that pending login is what lets the handoff through.
+    expect(await send({ type: 'AUTH_TOKEN_FROM_WEB', token: 'a1', refreshToken: 'r1', state: pending.state }, appSender)).toEqual({ ok: true });
+  });
+
+  it('does not start a sign-in for another site or a sender without a tab', async () => {
+    expect(await send({ type: 'BEGIN_COMPANION_LOGIN' }, linkedinSender)).toEqual({ ok: false });
+    expect(await send({ type: 'BEGIN_COMPANION_LOGIN' }, { id: 'other-extension', tab: gmailTab, url: gmailTab.url } as chrome.runtime.MessageSender)).toEqual({ ok: false });
+    expect(env.session.data.pendingCompanionLogin).toBeUndefined();
+    expect(queryMock().create).not.toHaveBeenCalled();
+  });
+
+  it('tells open Gmail tabs when the user signs out', async () => {
+    queryMock().query.mockResolvedValue([gmailTab]);
+    await send({ type: 'DISCONNECT' }, panelSender);
+    await flush();
+    expect(queryMock().query).toHaveBeenCalledWith({ url: 'https://mail.google.com/*' });
+    expect(authBroadcasts()).toEqual([{ tabId: 7, message: { type: 'AUTH_STATE_CHANGED', payload: { signedIn: false } } }]);
+  });
+
+  it('tells open Gmail tabs when sign-in completes, so Gmail needs no reload', async () => {
+    queryMock().query.mockResolvedValue([gmailTab]);
+    env.session.data.pendingCompanionLogin = { state: 's1', startedAt: Date.now() };
+    expect(await send({ type: 'AUTH_TOKEN_FROM_WEB', token: 'a1', refreshToken: 'r1' }, appSender)).toEqual({ ok: true });
+    await flush();
+    expect(authBroadcasts().at(-1)).toEqual({ tabId: 7, message: { type: 'AUTH_STATE_CHANGED', payload: { signedIn: true } } });
+  });
+
+  it('sends only a boolean to Gmail, never a token or a user id', async () => {
+    queryMock().query.mockResolvedValue([gmailTab]);
+    env.session.data.pendingCompanionLogin = { state: 's1', startedAt: Date.now() };
+    await send({ type: 'AUTH_TOKEN_FROM_WEB', token: 'secret-access', refreshToken: 'secret-refresh' }, appSender);
+    await flush();
+    const wire = JSON.stringify(authBroadcasts());
+    expect(wire).not.toMatch(/secret-access|secret-refresh|u1/);
+  });
+
+  it('a 401 on a draft carries the sign-in action', async () => {
+    api.generateDraft.mockRejectedValue(Object.assign(new Error('Session expired. Please reconnect.'), { status: 401, code: 'UNAUTHORIZED' }));
+    await send({ type: 'INLINE_DRAFT_REQUEST', payload: { originSurface: 'compose-toolbar', platform: 'gmail', requestId: 'r401', editorId: 'e1', userPrompt: 'reply' } }, gmailSender);
+    await flush();
+    const skipped = tabMessages.find((m) => m.message.type === 'DRAFT_SKIPPED')!;
+    expect(skipped.message.payload).toMatchObject({ requestId: 'r401', action: { kind: 'sign_in', label: 'Sign in to Pranan' } });
   });
 });
 

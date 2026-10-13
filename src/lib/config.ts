@@ -31,3 +31,18 @@ export function apiUrl(path: string): string {
   if (!path.startsWith('/')) path = '/' + path;
   return `${API_BASE}${path}`;
 }
+
+/**
+ * The given URL, normalised, when it points at the Pranan web app, else null.
+ * Anything Pranan opens from Gmail, Slack or LinkedIn goes through this, so a
+ * link can only ever lead to the app this build talks to.
+ */
+export function appOwnedUrl(url: unknown): string | null {
+  if (typeof url !== 'string' || !url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.origin === new URL(APP_ORIGIN).origin ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}

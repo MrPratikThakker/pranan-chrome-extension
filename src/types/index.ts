@@ -145,6 +145,10 @@ export type MessageType =
   | 'AUTH_EXPIRED'
   | 'REFRESH_TOKEN'
   | 'AUTH_RECOVERED'
+  // Signed-in state for content scripts, which cannot read the tokens
+  | 'GET_AUTH_STATE'
+  | 'AUTH_STATE_CHANGED'
+  | 'BEGIN_COMPANION_LOGIN'
   // Phase 1: Inline compose buttons
   | 'INLINE_DRAFT_REQUEST'
   | 'CANCEL_INLINE_DRAFT'

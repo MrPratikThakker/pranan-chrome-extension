@@ -7,20 +7,78 @@
  * user should be told about ("wait a couple minutes") rather than left guessing.
  * The api-client throws an ApiError carrying `.status`, so we can branch on it.
  */
-import { appUrl } from './config';
+import { appOwnedUrl, appUrl } from './config';
+
+/** Where the user upgrades: the server's link when it is on the app, else billing. */
+function billingUrl(err: unknown): string {
+  const supplied = err && typeof err === 'object' && 'upgradeUrl' in err ? (err as { upgradeUrl: unknown }).upgradeUrl : undefined;
+  return appOwnedUrl(supplied) || appUrl('/settings/billing');
+}
 
 function billingLink(err: unknown): string {
-  const url = err && typeof err === 'object' && 'upgradeUrl' in err && typeof (err as { upgradeUrl: unknown }).upgradeUrl === 'string'
-    ? (err as { upgradeUrl: string }).upgradeUrl
-    : appUrl('/settings/billing');
-  return url.replace(/^https?:\/\//, '');
+  return billingUrl(err).replace(/^https?:\/\//, '');
+}
+
+function statusOf(err: unknown): number | undefined {
+  return err && typeof err === 'object' && 'status' in err && typeof (err as { status: unknown }).status === 'number'
+    ? (err as { status: number }).status
+    : undefined;
+}
+
+/**
+ * The one thing the user can do about a failed draft, for surfaces that can
+ * show a real control. `message` is the copy to show beside the control; it
+ * leaves out the address the control already carries.
+ *
+ * draftErrorMessage() stays the complete plain-text version (address spelled
+ * out) for surfaces that can only show text.
+ */
+export type DraftErrorAction =
+  | {
+      kind: 'upgrade';
+      /** Text on the button or link. */
+      label: string;
+      /** Opens in a new tab. Always on the Pranan app. */
+      url: string;
+      message: string;
+    }
+  | {
+      /**
+       * The session is over. There is no address to open: the surface starts
+       * the extension's own sign-in handoff (BEGIN_COMPANION_LOGIN), because
+       * signing in to the app in a tab the extension did not open does not
+       * sign the extension in (audit EXT-09).
+       */
+      kind: 'sign_in';
+      label: string;
+      message: string;
+    };
+
+export const SIGN_IN_LABEL = 'Sign in to Pranan';
+
+export function draftErrorAction(err: unknown): DraftErrorAction | null {
+  // The plan's monthly draft quota is used up (XP-09). The address used to be
+  // plain text in the error, which Gmail does not make clickable.
+  if (statusOf(err) === 402) {
+    return {
+      kind: 'upgrade',
+      label: 'Upgrade plan',
+      url: billingUrl(err),
+      message: "You have used this month's drafts on your plan. Upgrade to keep drafting.",
+    };
+  }
+  if (statusOf(err) === 401) {
+    return {
+      kind: 'sign_in',
+      label: SIGN_IN_LABEL,
+      message: 'You are signed out of Pranan. Sign in to keep drafting. Your text has not changed.',
+    };
+  }
+  return null;
 }
 
 export function draftErrorMessage(err: unknown): string {
-  const status =
-    err && typeof err === 'object' && 'status' in err && typeof (err as { status: unknown }).status === 'number'
-      ? (err as { status: number }).status
-      : undefined;
+  const status = statusOf(err);
   const code =
     err && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string'
       ? (err as { code: string }).code
@@ -45,7 +103,9 @@ export function draftErrorMessage(err: unknown): string {
     return 'Pranan could not refresh your session just now. You are still signed in. Try again in a moment.';
   }
   if (status === 401) {
-    return 'Your Pranan session expired. Open app.pranan.ai to sign back in, then try again.';
+    // Text-only surfaces. It used to say "Open app.pranan.ai to sign back in",
+    // which does not work: the extension only accepts a sign-in it started.
+    return 'Your Pranan session expired. Click the Pranan icon in the Chrome toolbar to sign back in, then try again.';
   }
   if (status === 409) return 'This Gmail mailbox differs from your Pranan account. Switch to the matching mailbox or sign into Pranan with this account.';
   if (status === 503) {
