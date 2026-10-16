@@ -17,8 +17,8 @@
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { safeSendMessage } from '@/lib/runtime';
 import { slackContextKey, slackBarIsStale } from './context-key';
-import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
-import type { RelationshipPopupData } from '../shared/relationship-popup';
+import { showRelationshipPopup, dismissRelationshipPopup, createContactChip } from '../shared/relationship-popup';
+import type { RelationshipPopupData, RelationshipPopupOptions } from '../shared/relationship-popup';
 import { createSuggestionMonitor, type InlineSuggestion } from '../shared/inline-suggestions';
 import { injectMultilineText } from '@/lib/safe-dom';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
@@ -430,6 +430,15 @@ function injectSlackPromptBar() {
   });
 
   bar.appendChild(icon);
+  // In a DM, who it is with, as a small chip. The relationship card opens
+  // from here on click instead of popping up by itself.
+  if (isDM && recipientName) {
+    const contactChip = createContactChip((anchor, data, options) => renderPopup(data, anchor, options));
+    bar.appendChild(contactChip.el);
+    loadContactContext(recipientName).then((data) => {
+      if (bar.isConnected) contactChip.setContact(data);
+    });
+  }
   bar.appendChild(input);
   bar.appendChild(generateBtn);
   bar.appendChild(close);
@@ -586,36 +595,26 @@ function injectComposeButtons() {
 // Phase 2: Relationship Popup
 // ---------------------------------------------------------------------------
 
-function showComposeRelationshipPopup() {
-  if (!isDirectMessage()) return;
-
-  const recipientName = getDMRecipient();
-  if (!recipientName) return;
-
+function loadContactContext(recipientName: string): Promise<RelationshipPopupData | null> {
   // Check cache first
   const cached = popupCache.get(recipientName);
-  if (cached) {
-    renderPopup(cached);
-    return;
-  }
+  if (cached) return Promise.resolve(cached);
 
   // Request contact data from service worker
-  safeSendMessage<{ data?: RelationshipPopupData }>({
+  return safeSendMessage<{ data?: RelationshipPopupData }>({
     type: 'REQUEST_CONTACT_POPUP',
     payload: { name: recipientName, platform: 'slack' },
   }).then((response) => {
     if (response?.data) {
       popupCache.set(recipientName, response.data);
-      renderPopup(response.data);
+      return response.data;
     }
-  }).catch(() => {});
+    return null;
+  }).catch(() => null);
 }
 
-function renderPopup(data: RelationshipPopupData) {
-  const header = findOne('slack.dmHeader', REGISTRY.slack.dmHeader);
-  if (!header) return;
-
-  showRelationshipPopup(header, data,
+function renderPopup(data: RelationshipPopupData, anchor: HTMLElement, options: RelationshipPopupOptions) {
+  showRelationshipPopup(anchor, data,
     // Draft click
     () => {
       const threadContext = getThreadContext();
@@ -635,7 +634,8 @@ function renderPopup(data: RelationshipPopupData) {
     // View full click
     () => {
       safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
-    }
+    },
+    options,
   );
 }
 
@@ -718,10 +718,8 @@ function checkForActiveCompose(requireFocus = true) {
       },
     }).catch(() => {});
 
-    // Phase 2: Show popup for DMs
-    if (isDM) {
-      setTimeout(showComposeRelationshipPopup, 600);
-    }
+    // Phase 2: the relationship card no longer opens by itself. In a DM the
+    // prompt bar carries a contact chip that opens it on click.
 
     // Phase 3: Attach suggestion monitor
     setTimeout(attachSuggestionMonitor, 1000);
@@ -952,7 +950,11 @@ function init() {
     const target = e.target as Element;
     if (target.matches?.(SELECTORS.messageInput) || target.closest?.(SELECTORS.messageInput)) {
       setTimeout(() => {
-        if (!isInputFocused() && document.hasFocus()) {
+        // Focus that moved into the Pranan bar (its input, Generate, the
+        // contact chip) is still part of composing; keep the bar.
+        const active = document.activeElement;
+        const inPranan = !!active?.closest?.(`[${PRANAN_SLACK_BAR_ATTR}], [data-pranan-popup]`);
+        if (!isInputFocused() && !inPranan && document.hasFocus()) {
           // Cleanup Phase 1-3 elements + prompt bar
           const input = findOne<HTMLElement>('slack.messageInput', REGISTRY.slack.messageInput);
           if (input?.parentElement) {

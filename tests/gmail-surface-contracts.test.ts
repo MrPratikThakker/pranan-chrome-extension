@@ -16,9 +16,18 @@ describe('Gmail content script', () => {
   });
 
   it('reads the relationship popup data from the worker\'s { data } reply (EXT-05)', () => {
-    const popup = gmail.slice(gmail.indexOf('function showComposeRelationshipPopup'), gmail.indexOf('function renderRelationshipPopup'));
+    const popup = gmail.slice(gmail.indexOf('function loadContactContext'), gmail.indexOf('function renderRelationshipPopup'));
     expect(popup).toContain('?.data ?? null');
     expect(popup).not.toContain('response as RelationshipPopupData');
+  });
+
+  it('never opens the relationship card by itself; only the rail chip opens it', () => {
+    expect(gmail).not.toContain('showComposeRelationshipPopup');
+    const opens = gmail.match(/renderRelationshipPopup\(/g) || [];
+    // The definition plus the one call from the contact chip in the rail.
+    expect(opens.length).toBe(2);
+    const rail = gmail.slice(gmail.indexOf('function injectAutomaticComposeRail'), gmail.indexOf('function composeUsesDarkTheme'));
+    expect(rail).toContain('createContactChip((anchor, data, options) => renderRelationshipPopup(composeWindow, data, anchor, options))');
   });
 
   it('gates every top-level listener on being the only live copy (EXT-21)', () => {

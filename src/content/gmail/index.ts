@@ -18,8 +18,8 @@ import { compactPromptBar } from '../shared/compact-prompt-bar';
 import { safeSendMessage } from '@/lib/runtime';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
 import { stampEditor, resolveEditor } from '../shared/editor-binding';
-import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
-import type { RelationshipPopupData } from '../shared/relationship-popup';
+import { showRelationshipPopup, dismissRelationshipPopup, createContactChip } from '../shared/relationship-popup';
+import type { RelationshipPopupData, RelationshipPopupOptions, ContactChip } from '../shared/relationship-popup';
 import { createSuggestionMonitor } from '../shared/inline-suggestions';
 import type { InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
@@ -90,6 +90,8 @@ let activeComposeObservers: Map<Element, MutationObserver> = new Map();
 let lastDetectedRecipientPerCompose: Map<Element, string | null> = new Map();
 let activeSuggestionCleanups: Map<Element, () => void> = new Map();
 let contactContextCache: Map<string, RelationshipPopupData> = new Map();
+/** The contact chip inside each compose's Pranan rail. */
+const composeContactChips = new WeakMap<Element, ContactChip>();
 
 // ---------------------------------------------------------------------------
 // Compose Detection
@@ -1563,11 +1565,17 @@ function injectAutomaticComposeRail(composeWindow: Element, anchorHost: HTMLElem
 
   const input = shadow.querySelector<HTMLInputElement>('input')!;
   const rail = shadow.querySelector<HTMLElement>('.rail')!;
+  // Who this email is to, as a small chip. The relationship card opens from
+  // here on click instead of popping over the message by itself.
+  const contactChip = createContactChip((anchor, data, options) => renderRelationshipPopup(composeWindow, data, anchor, options));
+  rail.insertBefore(contactChip.el, input);
+  composeContactChips.set(composeWindow, contactChip);
   const syncTheme = () => {
     const isDark = composeUsesDarkTheme(composeWindow);
     const theme = isDark ? 'dark' : 'light';
     host.setAttribute('data-theme', theme);
     rail.setAttribute('data-theme', theme);
+    contactChip.setTheme(theme);
     rail.style.backgroundColor = isDark ? '#292a2d' : '#ffffff';
     rail.style.borderColor = isDark ? '#4b5563' : '#e3e6ea';
     rail.style.color = isDark ? '#f3f4f6' : '#3c4043';
@@ -1610,6 +1618,7 @@ function injectAutomaticComposeRail(composeWindow: Element, anchorHost: HTMLElem
   });
   editableBody.addEventListener('input', refreshPrompt);
   insertionParent.insertBefore(host, footer);
+  refreshContactChip(composeWindow);
   const themeObserver = new MutationObserver(() => {
     if (!host.isConnected) { themeObserver.disconnect(); return; }
     syncTheme();
@@ -2015,16 +2024,32 @@ function escapeAttr(s: string): string {
 // Phase 2: Relationship Popup
 // ---------------------------------------------------------------------------
 
-function showComposeRelationshipPopup(composeWindow: Element, recipientEmail: string) {
-  // Check cache first
-  const cached = contactContextCache.get(recipientEmail);
-  if (cached) {
-    renderRelationshipPopup(composeWindow, cached);
+/**
+ * Fill the compose's contact chip for its current first recipient. Never opens
+ * the card: that only happens when the user clicks the chip.
+ */
+function refreshContactChip(composeWindow: Element) {
+  const chip = composeContactChips.get(composeWindow);
+  if (!chip) return;
+  const recipientEmail = lastDetectedRecipientPerCompose.get(composeWindow) ?? extractRecipients(composeWindow)[0] ?? null;
+  if (!recipientEmail) {
+    chip.setContact(null);
     return;
   }
+  loadContactContext(recipientEmail).then((data) => {
+    // The recipient may have changed while this was loading.
+    const current = lastDetectedRecipientPerCompose.get(composeWindow) ?? extractRecipients(composeWindow)[0] ?? null;
+    if (current === recipientEmail) chip.setContact(data);
+  });
+}
+
+function loadContactContext(recipientEmail: string): Promise<RelationshipPopupData | null> {
+  // Check cache first
+  const cached = contactContextCache.get(recipientEmail);
+  if (cached) return Promise.resolve(cached);
 
   // Request context from background
-  safeSendMessage({
+  return safeSendMessage({
     type: 'REQUEST_CONTACT_POPUP',
     payload: { email: recipientEmail, mailboxEmail: extractSelfEmail(document.title) || undefined },
   }).then((response: unknown) => {
@@ -2034,18 +2059,20 @@ function showComposeRelationshipPopup(composeWindow: Element, recipientEmail: st
     const data = (response as { data?: RelationshipPopupData | null } | null)?.data ?? null;
     if (data && data.contactName) {
       contactContextCache.set(recipientEmail, data);
-      renderRelationshipPopup(composeWindow, data);
+      return data;
     }
-  }).catch(() => {});
+    return null;
+  }).catch(() => null);
 }
 
-function renderRelationshipPopup(composeWindow: Element, data: RelationshipPopupData) {
-  // Find the To field as anchor
-  const toField = findOne('gmail.toFieldContainer', SELECTORS.gmail.toFieldContainer, composeWindow);
-  if (!toField) return;
-
+function renderRelationshipPopup(
+  composeWindow: Element,
+  data: RelationshipPopupData,
+  anchor: HTMLElement,
+  options: RelationshipPopupOptions,
+) {
   showRelationshipPopup(
-    toField,
+    anchor,
     data,
     () => {
       // Draft click -- trigger draft generation
@@ -2065,7 +2092,8 @@ function renderRelationshipPopup(composeWindow: Element, data: RelationshipPopup
       // View full -- open side panel
       safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
       dismissRelationshipPopup();
-    }
+    },
+    options,
   );
 }
 
@@ -2443,10 +2471,8 @@ function onComposeDetected(composeWindow: Element) {
   // Small delay to ensure Gmail has fully rendered the compose toolbar
   setTimeout(() => injectComposeButtons(composeWindow), 300);
 
-  // Phase 2: Show relationship popup if we have a recipient
-  if (primaryRecipient) {
-    setTimeout(() => showComposeRelationshipPopup(composeWindow, primaryRecipient), 600);
-  }
+  // Phase 2: the relationship card no longer opens by itself. The rail
+  // injected above carries a contact chip that opens it on click.
 
   // Phase 3: Attach suggestion monitor
   setTimeout(() => attachSuggestionMonitor(composeWindow), 1000);
@@ -2467,8 +2493,8 @@ function onComposeDetected(composeWindow: Element) {
         },
       }).catch(() => {});
 
-      // Re-show relationship popup for new recipient
-      if (newPrimary) showComposeRelationshipPopup(composeWindow, newPrimary);
+      // Point the contact chip at the new recipient (does not open the card).
+      refreshContactChip(composeWindow);
     }
 
     // Re-inject buttons if Gmail re-rendered the toolbar
