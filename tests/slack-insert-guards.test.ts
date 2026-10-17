@@ -50,6 +50,12 @@ afterEach(() => { vi.useRealTimers(); });
 const input = () => document.querySelector<HTMLElement>('[data-qa="message_input"] [contenteditable="true"]')!;
 
 describe('Slack insert guards', () => {
+  // The prompt bar appears once the user is in the message box (audit 17 Oct 2026).
+  beforeEach(async () => {
+    input().focus();
+    await vi.advanceTimersByTimeAsync(600);
+  });
+
   it('refuses a draft generated for a different conversation', () => {
     const { response } = deliver({ type: 'INSERT_DRAFT', payload: { text: 'Draft for channel A', originUrl: 'https://app.slack.com/client/T1/C999' } });
     expect(response).toMatchObject({ success: false, reason: 'conversation_changed' });

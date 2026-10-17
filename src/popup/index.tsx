@@ -27,6 +27,7 @@ import { readAuthTokens, clearAuthTokens } from '@/lib/token-store';
 import { beginCompanionLogin } from '@/lib/login-handoff';
 import { getPrivacySettings, setPrivacySetting, DEFAULT_PRIVACY_SETTINGS, type PrivacySettings } from '@/lib/privacy-settings';
 import { LearningSites } from './LearningSites';
+import { PageBars } from './PageBars';
 
 
 bootstrapSentry('popup');
@@ -496,6 +497,9 @@ function Popup() {
               </span>
             </label>
           </div>
+
+          {/* Prompt bars the user closed with their x, and can turn back on. */}
+          <PageBars />
 
           {/* Sites the user lets Pranan learn from, one at a time (Phase 3). */}
           <LearningSites />

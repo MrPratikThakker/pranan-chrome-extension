@@ -41,10 +41,18 @@ import { createRecordedSpeechInput } from '@/lib/recorded-speech-input';
 // must not call the API itself (audit EXT-07, EXT-10).
 import { transcribeViaWorker } from '@/lib/audio-transfer';
 import { claimContentScriptInstance } from '../shared/instance-guard';
+import { watchHiddenPageBars, dismissPageBar, type PageBar } from '@/lib/page-bar-prefs';
 
 // Audit EXT-21: stand down if a live copy of this script already runs here.
 // Every top-level listener below is gated on this.
 const IS_PRIMARY_INSTANCE = claimContentScriptInstance('gmail');
+
+// Bars the user closed for good with their x (lib/page-bar-prefs). A hide made
+// in the popup or another tab takes the bars off this page at once.
+const pageBars = watchHiddenPageBars((hidden: readonly PageBar[]) => {
+  if (hidden.includes('gmailThread')) document.querySelectorAll(`[${PRANAN_THREAD_BAR_ATTR}]`).forEach(el => el.remove());
+  if (hidden.includes('gmailCompose')) document.querySelectorAll(`[${PRANAN_COMPOSE_RAIL_ATTR}]`).forEach(el => el.remove());
+});
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
 // on this page" without knowing surface-specific attribute names
@@ -1464,6 +1472,8 @@ function mountPrananToolbarButton(host: HTMLElement, composeWindow: Element, rec
  * footer, so Send and the message body remain reachable at every window size.
  */
 function injectAutomaticComposeRail(composeWindow: Element, anchorHost: HTMLElement) {
+  // "In every email" from the x below; the toolbar icon stays either way.
+  if (pageBars.isHidden('gmailCompose')) return;
   if (composeWindow.hasAttribute(PRANAN_COMPOSE_RAIL_DISMISSED_ATTR)) return;
   if (composeWindow.querySelector(`[${PRANAN_COMPOSE_RAIL_ATTR}]`)) return;
 
@@ -1530,6 +1540,15 @@ function injectAutomaticComposeRail(composeWindow: Element, anchorHost: HTMLElem
       .go { color:#fff; background:#6d28d9; }
       .go:hover { color:#fff; background:#5b21b6; }
       .dismiss { width:22px; color:#9aa0a6; }
+      .rail[hidden] { display: none; }
+      .choice { height: 34px; display: flex; align-items: center; gap: 4px; padding: 0 5px 0 11px; border: 1px solid #e3e6ea; border-radius: 10px; background: #fff; color: #3c4043; font: 13px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .choice[hidden] { display: none; }
+      .choice span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .choice .opt { width: auto; padding: 0 9px; color: #5b21b6; font: 500 12px/1 inherit; white-space: nowrap; }
+      .choice .opt.cancel { color: #5f6368; }
+      .choice[data-theme="dark"] { background:#292a2d; border-color:#4b5563; color:#f3f4f6; }
+      .choice[data-theme="dark"] .opt { color:#c4b5fd; }
+      .choice[data-theme="dark"] .opt.cancel { color:#cbd5e1; }
       svg { pointer-events:none; }
       @media (prefers-color-scheme: dark) {
         .rail { background:#292a2d; border-color:#4b5563; color:#f3f4f6; }
@@ -1557,9 +1576,15 @@ function injectAutomaticComposeRail(composeWindow: Element, anchorHost: HTMLElem
       <button class="go" type="button" aria-label="Draft with Pranan" title="Draft with Pranan">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <button class="dismiss" type="button" aria-label="Hide Pranan prompt" title="Hide for this email">
+      <button class="dismiss" type="button" aria-label="Hide Pranan bar" title="Hide Pranan bar">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
+    </div>
+    <div class="choice" role="group" aria-label="Hide the Pranan bar" hidden>
+      <span>Hide the Pranan bar</span>
+      <button class="opt" type="button" data-scope="email">For this email</button>
+      <button class="opt" type="button" data-scope="all">In every email</button>
+      <button class="opt cancel" type="button">Cancel</button>
     </div>
   `;
 
@@ -1575,6 +1600,7 @@ function injectAutomaticComposeRail(composeWindow: Element, anchorHost: HTMLElem
     const theme = isDark ? 'dark' : 'light';
     host.setAttribute('data-theme', theme);
     rail.setAttribute('data-theme', theme);
+    shadow.querySelector('.choice')?.setAttribute('data-theme', theme);
     contactChip.setTheme(theme);
     rail.style.backgroundColor = isDark ? '#292a2d' : '#ffffff';
     rail.style.borderColor = isDark ? '#4b5563' : '#e3e6ea';
@@ -1611,9 +1637,25 @@ function injectAutomaticComposeRail(composeWindow: Element, anchorHost: HTMLElem
   });
   shadow.querySelector('.go')!.addEventListener('click', submit);
   shadow.querySelector('.voice')!.addEventListener('click', () => openExpanded({ startVoice: true }));
-  shadow.querySelector('.dismiss')!.addEventListener('click', () => {
+  // The x used to hide the bar for this email only, so every new email had it
+  // again (audit 17 Oct 2026). Now it asks: this email, or every email.
+  const choice = shadow.querySelector<HTMLElement>('.choice')!;
+  const showChoice = (open: boolean) => {
+    rail.hidden = open;
+    choice.hidden = !open;
+    if (open) choice.querySelector<HTMLElement>('.opt')?.focus();
+    else (shadow.querySelector('.dismiss') as HTMLElement | null)?.focus();
+  };
+  shadow.querySelector('.dismiss')!.addEventListener('click', () => showChoice(true));
+  choice.querySelector('.cancel')!.addEventListener('click', () => showChoice(false));
+  choice.addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.stopPropagation(); showChoice(false); } });
+  choice.querySelector('[data-scope="email"]')!.addEventListener('click', () => {
     composeWindow.setAttribute(PRANAN_COMPOSE_RAIL_DISMISSED_ATTR, 'true');
     host.remove();
+    anchorHost.shadowRoot?.querySelector<HTMLElement>('button')?.focus();
+  });
+  choice.querySelector('[data-scope="all"]')!.addEventListener('click', () => {
+    dismissPageBar('gmailCompose', host, pageBars);
     anchorHost.shadowRoot?.querySelector<HTMLElement>('button')?.focus();
   });
   editableBody.addEventListener('input', refreshPrompt);
@@ -2179,6 +2221,8 @@ function extractLatestMessageText(threadContainer: Element): string | null {
 }
 
 function injectThreadPromptBar(threadContainer: Element) {
+  // Closed for good with its x; the popup turns it back on.
+  if (pageBars.isHidden('gmailThread')) return;
   // Don't inject twice
   if (threadContainer.querySelector(`[${PRANAN_THREAD_BAR_ATTR}]`)) return;
   if (!isVisibleInjectionTarget(threadContainer)) return;
@@ -2332,9 +2376,35 @@ function injectThreadPromptBar(threadContainer: Element) {
     }
   });
 
+  // It used to have no close button at all, on every email (audit 17 Oct
+  // 2026). The x hides it under every email until the popup turns it back on.
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.setAttribute('aria-label', 'Hide under emails');
+  close.title = 'Hide under emails';
+  close.style.cssText = `
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    color: #94a3b8;
+    font-size: 15px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+  `;
+  close.innerHTML = '&times;';
+  close.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dismissPageBar('gmailThread', bar, pageBars);
+  });
+
   bar.appendChild(icon);
   bar.appendChild(input);
   bar.appendChild(generateBtn);
+  bar.appendChild(close);
 
   // Insert before the reply buttons row
   replyButtonsRow.parentElement?.insertBefore(bar, replyButtonsRow);
@@ -2842,6 +2912,8 @@ function waitForGmailReady(): Promise<void> {
 // Start observing once Gmail's SPA is ready
 async function init() {
   await waitForGmailReady();
+  // Know which bars are hidden before drawing any, so a hidden bar never flashes.
+  await pageBars.ready.catch(() => {});
 
   rootObserver.observe(document.body, {
     childList: true,

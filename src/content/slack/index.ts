@@ -28,6 +28,7 @@ import { attributeSlackThread, readSelfName, findSenderFor, SLACK_SELF_NAME_SELE
 import { conversationKindFromUrl } from '@/lib/slack-conversation';
 import { slackContextLabel } from '@/lib/slack-context-label';
 import { generateButtonState } from '../shared/generate-affordance';
+import { watchHiddenPageBars, dismissPageBar, type PageBar } from '@/lib/page-bar-prefs';
 import { keepNewestChars } from '@/lib/thread-context';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
@@ -224,7 +225,15 @@ function getRecentChannelMessages(): string | null {
 // Slack Prompt Bar (Gmail thread-bar style)
 // ---------------------------------------------------------------------------
 
+// Bars the user closed for good with their x (lib/page-bar-prefs). A hide made
+// in the popup or another tab takes the bar off this page at once.
+const pageBars = watchHiddenPageBars((hidden: readonly PageBar[]) => {
+  if (hidden.includes('slack')) removeSlackPromptBar();
+});
+
 function injectSlackPromptBar() {
+  // Closed for good with its x; the popup turns it back on.
+  if (pageBars.isHidden('slack')) return;
   // Find the compose container to inject below
   const composeContainer = findOne('slack.composeContainer', REGISTRY.slack.composeContainer);
   if (!composeContainer) return;
@@ -249,6 +258,10 @@ function injectSlackPromptBar() {
     if (!slackBarIsStale(existingBar.getAttribute('data-pranan-ctx'), ctxKey)) return;
     removeSlackPromptBar();
   }
+  // Only once the user is in the message box. It used to appear as soon as
+  // Slack loaded and in every conversation opened (audit 17 Oct 2026). Slack
+  // often focuses the box itself when a conversation opens.
+  if (!isInputFocused() && !composeContainer.contains(document.activeElement)) return;
 
   const bar = document.createElement('div');
   bar.setAttribute(PRANAN_SLACK_BAR_ATTR, 'true');
@@ -355,10 +368,13 @@ function injectSlackPromptBar() {
     align-items: center;
   `;
   close.innerHTML = '&times;';
-  close.title = 'Dismiss';
+  close.type = 'button';
+  close.title = 'Hide in Slack';
+  close.setAttribute('aria-label', 'Hide in Slack');
+  // The x used to last only until the next click into the message box.
   close.addEventListener('click', (e) => {
     e.stopPropagation();
-    bar.remove();
+    dismissPageBar('slack', bar, pageBars);
   });
 
   const triggerDraft = () => {
@@ -973,10 +989,13 @@ function init() {
   });
 
   // Initial check: detect if a message input already exists on page load
-  // Use staggered checks because Slack renders asynchronously
-  setTimeout(() => checkForActiveCompose(false), 500);
-  setTimeout(() => checkForActiveCompose(false), 1500);
-  setTimeout(() => checkForActiveCompose(false), 3000);
+  // Use staggered checks because Slack renders asynchronously. Wait for the
+  // hidden-bar list first so a hidden bar never flashes.
+  void pageBars.ready.catch(() => {}).then(() => {
+    setTimeout(() => checkForActiveCompose(false), 500);
+    setTimeout(() => checkForActiveCompose(false), 1500);
+    setTimeout(() => checkForActiveCompose(false), 3000);
+  });
 
   // Periodic fallback: check every 3 seconds for new inputs that MutationObserver may miss
   // (e.g., when Slack replaces its virtual DOM tree without standard mutations)

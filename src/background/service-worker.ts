@@ -38,6 +38,7 @@ import { getPrivacySettings } from '@/lib/privacy-settings';
 import { beginCompanionLogin, consumePendingLogin, restorePendingLogin } from '@/lib/login-handoff';
 import { base64ToBlob, safeAudioMimeType, MAX_AUDIO_BASE64_LENGTH } from '@/lib/audio-transfer';
 import { isOwnContentScript, isTrustedPrivilegedSender, isValidTier } from './sender-trust';
+import { showSignedOutBadge, clearSignedOutBadge } from './signed-out-badge';
 import { hideKeyForHost, hideLearnButtonOn, isLearnablePageUrl, learningSiteForHost, listLearningSites, syncLearnScript } from '@/lib/work-sites';
 import { MAX_PAGE_TEXT, MIN_PAGE_TEXT } from '@/content/learn/page-text';
 
@@ -108,7 +109,11 @@ async function invalidateAuthCache(): Promise<void> {
 async function deduplicatedValidateAuth(): Promise<AuthResponse> {
   if (pendingValidation) return pendingValidation;
   pendingValidation = validateAuth()
-    .then(async (auth) => { await writeAuthCache(auth); return auth; })
+    .then(async (auth) => {
+      await writeAuthCache(auth);
+      if (auth.valid) void clearSignedOutBadge();
+      return auth;
+    })
     .finally(() => {
       pendingValidation = null;
     });
@@ -142,7 +147,7 @@ async function markSignedOut(): Promise<void> {
 }
 
 // A 401 seen by the worker's own API calls lands here (audit EXT-24).
-setAuthExpiredHandler(() => { void markSignedOut(); });
+setAuthExpiredHandler(() => { void markSignedOut(); void showSignedOutBadge(); });
 
 function ensureRefreshAlarm() {
   try {
@@ -171,6 +176,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     } else {
       await clearAuthTokens();
       await markSignedOut();
+      await showSignedOutBadge();
     }
   } catch {
     // Transient failure (network blip, server waking, laptop resuming). Do NOT
@@ -329,12 +335,9 @@ async function handleMessage(
       if (!isTrustedPrivilegedSender(sender)) return { ok: false };
       await clearAuthTokens();
       await markSignedOut();
-      try {
-        if (chrome.action && 'openPopup' in chrome.action) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (chrome.action as any).openPopup();
-        }
-      } catch { /* pass — openPopup unavailable on some platforms */ }
+      // This used to open the toolbar popup by itself over the page. A badge
+      // on the icon says the same thing without covering anything.
+      await showSignedOutBadge();
       return { ok: true };
     }
 
