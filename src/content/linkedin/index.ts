@@ -30,6 +30,7 @@ import { findOne, findAll } from '../selectors';
 import { attributeLinkedInHistory, readSelfName, LINKEDIN_SELF_NAME_SELECTORS } from '../shared/thread-attribution';
 import { generateButtonState } from '../shared/generate-affordance';
 import { watchPrivacySettings } from '@/lib/privacy-settings';
+import { watchHiddenPageBars, dismissPageBar, type PageBar } from '@/lib/page-bar-prefs';
 import { isConfirmedCommentPost } from './comment-capture';
 
 // Smoke-test marker: lets external QA assert "Pranan content script booted
@@ -422,10 +423,39 @@ function getCommentPostContext(commentInput: Element): {
 // Messaging Prompt Bar (Gmail thread-bar style)
 // ---------------------------------------------------------------------------
 
+// Bars the user closed for good with their x (lib/page-bar-prefs). A hide made
+// in the popup or another tab takes the bars off this page at once.
+const pageBars = watchHiddenPageBars((hidden: readonly PageBar[]) => {
+  if (hidden.includes('linkedinMessage')) document.querySelectorAll(`[${PRANAN_LI_MSG_BAR_ATTR}]`).forEach(el => el.remove());
+  if (hidden.includes('linkedinComment')) removeCommentBars();
+});
+
+function removeCommentBars() {
+  document.querySelectorAll(`[${PRANAN_LI_COMMENT_BAR_ATTR}]`).forEach(el => el.remove());
+  document.querySelectorAll('[data-pranan-bar-injected]').forEach(el => el.removeAttribute('data-pranan-bar-injected'));
+}
+
+/** The editor that has focus, if it matches one of these selectors. */
+function focusedEditor(selectors: readonly string[]): Element | null {
+  const active = document.activeElement;
+  if (!active || active === document.body) return null;
+  for (const selector of selectors) {
+    const match = active.matches(selector) ? active : active.closest(selector);
+    if (match) return match;
+  }
+  return null;
+}
+
 function injectMessagingPromptBar() {
+  // Closed for good with its x; the popup turns it back on.
+  if (pageBars.isHidden('linkedinMessage')) return;
   // Find the messaging form container
   const msgForm = queryFirst(SELECTORS.messageFormContainer);
   if (!msgForm) return;
+  // Only once the user is in the message box, not as soon as one exists.
+  // LinkedIn often focuses the box itself when a conversation opens.
+  const focused = focusedEditor(SELECTORS.messageCompose);
+  if (!focused && !msgForm.contains(document.activeElement)) return;
 
   // Don't inject twice
   if (document.querySelector(`[${PRANAN_LI_MSG_BAR_ATTR}]`)) return;
@@ -514,10 +544,12 @@ function injectMessagingPromptBar() {
     color: #94a3b8; font-size: 14px; line-height: 1; display: flex; align-items: center;
   `;
   close.innerHTML = '&times;';
-  close.title = 'Dismiss';
+  close.type = 'button';
+  close.title = 'Hide in LinkedIn messages';
+  close.setAttribute('aria-label', 'Hide in LinkedIn messages');
   close.addEventListener('click', (e) => {
     e.stopPropagation();
-    bar.remove();
+    dismissPageBar('linkedinMessage', bar, pageBars);
   });
 
   const triggerDraft = () => {
@@ -594,7 +626,12 @@ function injectMessagingPromptBar() {
 // ---------------------------------------------------------------------------
 
 function injectCommentPromptBars() {
-  const commentInputs = queryAll(SELECTORS.commentCompose).filter(isLinkedInCommentCandidate);
+  // Closed for good with its x; the popup turns it back on.
+  if (pageBars.isHidden('linkedinComment')) return;
+  // Only the comment box the user is typing in gets a bar. It used to be every
+  // comment box on the page (audit 17 Oct 2026). Bars already shown stay put.
+  const focused = focusedEditor(SELECTORS.commentCompose);
+  const commentInputs = focused && isLinkedInCommentCandidate(focused) ? [focused] : [];
 
   for (const commentInput of commentInputs) {
     // Resolve the stable form container FIRST. Do NOT blacklist the
@@ -701,11 +738,16 @@ function injectCommentPromptBars() {
       color: #94a3b8; font-size: 14px; line-height: 1; display: flex; align-items: center;
     `;
     close.innerHTML = '&times;';
-    close.title = 'Dismiss';
+    close.type = 'button';
+    close.title = 'Hide on LinkedIn comments';
+    close.setAttribute('aria-label', 'Hide on LinkedIn comments');
     close.addEventListener('click', (e) => {
       e.stopPropagation();
-      bar.remove();
-      commentForm.removeAttribute('data-pranan-bar-injected');
+      // The x used to remove the bar and clear its marker, so the next page
+      // change put it straight back. Now it is saved, and every comment bar
+      // on the page goes with it.
+      dismissPageBar('linkedinComment', bar, pageBars);
+      removeCommentBars();
     });
 
     const triggerCommentDraft = () => {
@@ -1469,6 +1511,9 @@ function init() {
 
     if (isCompose) {
       detectActiveCompose();
+      if (SELECTORS.messageCompose.some(s => target.matches(s) || target.closest(s))) {
+        setTimeout(() => { injectMessagingPromptBar(); refreshMessagingChip(); }, 100);
+      }
     }
     if (isComment) {
       // Set active compose type to 'comment' so getComposeContent works
@@ -1492,8 +1537,8 @@ function init() {
     }, 300);
   });
 
-  // Initial check
-  detectActiveCompose();
+  // Initial check, once the hidden bars are known so a hidden bar never flashes.
+  void pageBars.ready.catch(() => {}).then(() => detectActiveCompose());
 }
 
 if (document.readyState === 'loading') {

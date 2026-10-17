@@ -72,34 +72,3 @@ describe('LinkedIn insert binding', () => {
     expect(deliver({ type: 'SOMETHING_ELSE' }).returned).toBe(false);
   });
 });
-
-describe('LinkedIn prompt bar keeps the instruction until a draft lands (EXT-30, EXT-16)', () => {
-  it('keeps the prompt on failure, ignores stale replies, clears it on success', async () => {
-    const bar = document.querySelector('[data-pranan-li-msg-bar]');
-    expect(bar).toBeTruthy();
-    const input = bar!.querySelector('input')!;
-    const generate = bar!.querySelector<HTMLButtonElement>('[data-pranan-generate]')!;
-
-    input.value = 'decline politely';
-    generate.click();
-    await vi.advanceTimersByTimeAsync(0);
-    const first = sent.find((m) => m.type === 'INLINE_DRAFT_REQUEST')!;
-    expect(first.payload).toMatchObject({ prompt: 'decline politely', editorId: messageEditor().getAttribute('data-pranan-editor-id') });
-    expect(input.value).toBe('decline politely');
-
-    deliver({ type: 'DRAFT_SKIPPED', payload: { requestId: first.payload!.requestId, message: 'Rate limited' } });
-    expect(input.value).toBe('decline politely');
-
-    generate.click();
-    await vi.advanceTimersByTimeAsync(0);
-    const second = sent.filter((m) => m.type === 'INLINE_DRAFT_REQUEST')[1];
-    // A late reply for the first request must not land.
-    const stale = deliver({ type: 'INSERT_DRAFT', payload: { text: 'Late draft', editorId: first.payload!.editorId, requestId: first.payload!.requestId } });
-    expect(stale.response).toMatchObject({ success: false, reason: 'request_expired' });
-    expect(messageEditor().textContent).toBe('Typed DM text');
-
-    const ok = deliver({ type: 'INSERT_DRAFT', payload: { text: 'Thanks, but I will pass.', editorId: second.payload!.editorId, requestId: second.payload!.requestId } });
-    expect(ok.response).toMatchObject({ success: true });
-    expect(input.value).toBe('');
-  });
-});

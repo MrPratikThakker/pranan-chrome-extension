@@ -178,3 +178,28 @@ The relationship card no longer opens by itself, and "Remember this page" is a s
 - Keyboard: Tab to the tab. It opens on focus, and both buttons are reachable.
 - Click "Hide on this site" on a subdomain page (for example acme.notion.so). Open another page on the same added site (another notion.so page). The tab stays hidden. Reload; it is still hidden.
 - In the popup, the site shows "tab hidden" with "Show button". Click it, reload the page, and the tab is back. Removing the site also clears the hidden setting.
+
+## Next release: prompt bars that stay closed (2026-10-17)
+
+Each Pranan prompt bar now has an x that is remembered, the Slack and LinkedIn bars wait until you click into the box, and an expired sign-in shows "!" on the toolbar icon instead of opening the popup. Check on the installed candidate.
+
+### Gmail
+- Open an email. The "Reply to ... with Pranan" bar under it now has an x. Click it: a note says it is hidden and how to bring it back. Open other emails and reload Gmail: no bar under any email.
+- Open a reply or a new message. The x on the Pranan bar above Send asks "For this email", "In every email" or "Cancel". Escape also cancels.
+- "For this email": the bar goes; the next email has it again. "In every email": the bar goes from every compose, including after a reload. The small Pranan icon beside Send stays in both cases and still opens the Pranan panel.
+- With an open compose maximised and floating, the choice row fits on one line and nothing covers Send.
+
+### Slack
+- Load Slack and do not click anything. No Pranan bar under the message box. (Slack often focuses the box by itself when a channel opens; if it does, the bar appears then. That is expected.)
+- Click into the message box: the bar appears. Click its x: a note says it is hidden in Slack. Click into the box again, switch channels, and reload: no bar.
+
+### LinkedIn
+- Feed: no Pranan bar above any comment box until you click into one. Then only that box gets a bar.
+- Click that bar's x. Scroll the feed for a while, open more comment boxes, reload: no comment bar anywhere.
+- Messages: the bar appears once you are in the message box. Its x hides it in every conversation, including after a reload.
+
+### Popup "On pages"
+- The popup lists the five bars with a tick each. Bars you closed are unticked. Tick one: it shows again on the next email or the next click into a message box. Untick one: it disappears from open pages at once.
+
+### Expired sign-in
+- With the side panel open, let the session expire (or sign out on the web app and wait for the panel's next request). The popup must not open by itself. The Pranan toolbar icon shows "!" and its tooltip says you are signed out. Sign in again: the "!" goes.
