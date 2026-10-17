@@ -53,6 +53,14 @@ describe('contact chip', () => {
     expect(isPopupActive()).toBe(false);
   });
 
+  it('stays hidden for someone Pranan has no history with', () => {
+    const chip = mountChip();
+    chip.setContact({ ...gatha, contactName: 'new.person@example.com', tier: 'unknown' });
+    expect(chip.el.style.display).toBe('none');
+    chipButton(chip.el).click();
+    expect(isPopupActive()).toBe(false);
+  });
+
   it('shows first name and tier, and opens the card only on click', () => {
     const chip = mountChip();
     chip.setContact(gatha);

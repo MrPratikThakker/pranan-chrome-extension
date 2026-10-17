@@ -408,7 +408,7 @@ export function isPopupAnchoredTo(anchor: Element): boolean {
 export interface ContactChip {
   /** The element to place in the Pranan bar. Hidden until a contact is set. */
   el: HTMLElement;
-  /** Show this contact, or hide the chip with null. Closes its card if the contact changed. */
+  /** Show this contact, or hide the chip with null or an unknown contact. Closes its card if the contact changed. */
   setContact(data: RelationshipPopupData | null): void;
   setTheme(theme: 'light' | 'dark'): void;
 }
@@ -499,7 +499,10 @@ export function createContactChip(
     setContact(data) {
       const changed = (data?.contactEmail ?? data?.contactName ?? null) !== (contact?.contactEmail ?? contact?.contactName ?? null);
       if (changed && isPopupAnchoredTo(host)) dismissRelationshipPopup();
-      contact = data && data.contactName ? data : null;
+      // Nothing to show for someone Pranan has no history with: the app answers
+      // tier "unknown" for them, often with the address as the name. Keep the
+      // bar clean instead of showing a "New Contact" chip (Pratik, 17 Oct 2026).
+      contact = data && data.contactName && data.tier !== 'unknown' ? data : null;
       if (!contact) {
         host.style.display = 'none';
         return;

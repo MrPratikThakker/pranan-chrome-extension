@@ -159,3 +159,22 @@ the page looks like. That is what this document is for.
 - Open Reply options and suggestions. Check relationship correction and side-panel actions, wrapped suggestions, and Escape focus return. Select an intent and verify the correct reply editor and preserved signature.
 - Resize/pop out/maximize/restore compose. When space is constrained, the existing compact fallback must remain usable and no Pranan controls may cover the editor or Send.
 - Local `/qa/inline.html` passed desktop, 320/420 px compose and 390 px viewport checks. Installed candidate and browser zoom checks remain required before release.
+
+## Next release: quieter overlays (PR #108, 2026-10-17)
+
+The relationship card no longer opens by itself, and "Remember this page" is a small edge tab. Check both on the installed candidate.
+
+### Contact chip (Gmail, Slack, LinkedIn)
+- Gmail: open a reply to someone Pranan knows. No card may appear on its own, including after you add or change a recipient. The Pranan bar shows a chip with their initial, first name and tier.
+- Click the chip. The card opens above the bar and does not cover Send. A second click, Escape, or a click anywhere else closes it. Typing focus stays in the message.
+- Change the first recipient. The chip follows the new person, and an open card closes.
+- Write to someone Pranan has never seen. No chip, and no card.
+- Slack DM and LinkedIn message: the same chip and the same behaviour. Clicking into the Slack Pranan bar must not make the bar disappear. On LinkedIn, switch conversations with the bar open; the chip must follow.
+- Scroll the Gmail thread with the card open. The card stays on its chip or closes; it never floats away on its own.
+
+### "Remember this page" tab (a site added under "Sites Pranan can learn from")
+- On any page of an added site, only the faded Pranan mark shows, halfway down the right edge. Nothing sits in the bottom-right corner over the site's own chat or cookie buttons.
+- Hover the mark. It opens to "Remember this page" with "Hide on this site" on the far left, and the mark stays under the pointer. Click the mark: the page is sent and a note appears, then fades after about 6 seconds.
+- Keyboard: Tab to the tab. It opens on focus, and both buttons are reachable.
+- Click "Hide on this site" on a subdomain page (for example acme.notion.so). Open another page on the same added site (another notion.so page). The tab stays hidden. Reload; it is still hidden.
+- In the popup, the site shows "tab hidden" with "Show button". Click it, reload the page, and the tab is back. Removing the site also clears the hidden setting.
