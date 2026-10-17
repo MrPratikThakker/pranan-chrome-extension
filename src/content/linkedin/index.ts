@@ -22,8 +22,8 @@ import { stampEditor, resolveEditor } from '../shared/editor-binding';
 import { LINKEDIN_POST_EDITOR, isLinkedInCommentCandidate, findLinkedInPostButton } from './editor-kind';
 import { parseLinkedInPostText, pickAuthorProfileUrl } from './post-parse';
 import { injectInlineButton, removeInjectedButtons, hasInjectedButton } from '../shared/inject-button';
-import { showRelationshipPopup, dismissRelationshipPopup } from '../shared/relationship-popup';
-import type { RelationshipPopupData } from '../shared/relationship-popup';
+import { showRelationshipPopup, dismissRelationshipPopup, createContactChip } from '../shared/relationship-popup';
+import type { RelationshipPopupData, RelationshipPopupOptions, ContactChip } from '../shared/relationship-popup';
 import { createSuggestionMonitor, type InlineSuggestion } from '../shared/inline-suggestions';
 import { bootstrapSentry } from '@/lib/observability';
 import { findOne, findAll } from '../selectors';
@@ -575,9 +575,15 @@ function injectMessagingPromptBar() {
   });
 
   bar.appendChild(icon);
+  // Who the conversation is with, as a small chip. The relationship card
+  // opens from here on click instead of popping up by itself.
+  const contactChip = createContactChip((anchor, data, options) => renderPopup(data, anchor, options));
+  bar.appendChild(contactChip.el);
+  messagingChip = { chip: contactChip, bar };
   bar.appendChild(input);
   bar.appendChild(generateBtn);
   bar.appendChild(close);
+  refreshMessagingChip();
 
   // Insert before the message form
   msgForm.parentElement?.insertBefore(bar, msgForm);
@@ -860,35 +866,46 @@ function injectComposeButtons() {
 // Phase 2: Relationship Popup
 // ---------------------------------------------------------------------------
 
-function showComposeRelationshipPopup() {
-  if (activeComposeType !== 'message') return;
+/** The contact chip in the open messaging bar, if any. */
+let messagingChip: { chip: ContactChip; bar: HTMLElement } | null = null;
 
-  const recipientName = getConversationRecipient();
-  if (!recipientName) return;
-
-  // Check cache first
-  const cached = popupCache.get(recipientName);
-  if (cached) {
-    renderPopup(cached);
+/**
+ * Point the messaging bar's chip at the person in the conversation. The bar
+ * outlives a switch to another conversation, so this also runs on every
+ * recipient change. Never opens the card.
+ */
+function refreshMessagingChip() {
+  const entry = messagingChip;
+  if (!entry || !entry.bar.isConnected) return;
+  const recipientName = activeComposeType === 'message' ? getConversationRecipient() : null;
+  if (!recipientName) {
+    entry.chip.setContact(null);
     return;
   }
+  loadContactContext(recipientName).then((data) => {
+    if (entry.bar.isConnected && getConversationRecipient() === recipientName) entry.chip.setContact(data);
+  });
+}
 
-  safeSendMessage<{ data?: RelationshipPopupData }>({
+function loadContactContext(recipientName: string): Promise<RelationshipPopupData | null> {
+  // Check cache first
+  const cached = popupCache.get(recipientName);
+  if (cached) return Promise.resolve(cached);
+
+  return safeSendMessage<{ data?: RelationshipPopupData }>({
     type: 'REQUEST_CONTACT_POPUP',
     payload: { name: recipientName, platform: 'linkedin' },
   }).then((response) => {
     if (response?.data) {
       popupCache.set(recipientName, response.data);
-      renderPopup(response.data);
+      return response.data;
     }
-  }).catch(() => {});
+    return null;
+  }).catch(() => null);
 }
 
-function renderPopup(data: RelationshipPopupData) {
-  const header = queryFirst(SELECTORS.profileName) || queryFirst(SELECTORS.conversationHeader);
-  if (!header) return;
-
-  showRelationshipPopup(header, data,
+function renderPopup(data: RelationshipPopupData, anchor: HTMLElement, options: RelationshipPopupOptions) {
+  showRelationshipPopup(anchor, data,
     // Draft click
     () => {
       setLinkedInBarsBusy(true);
@@ -905,7 +922,8 @@ function renderPopup(data: RelationshipPopupData) {
     // View full click
     () => {
       safeSendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {});
-    }
+    },
+    options,
   );
 }
 
@@ -984,8 +1002,9 @@ function detectActiveCompose() {
       setTimeout(injectComposeButtons, 300);
       setTimeout(injectMessagingPromptBar, 400);
 
-      // Phase 2: Show popup
-      setTimeout(showComposeRelationshipPopup, 600);
+      // Phase 2: the relationship card no longer opens by itself. Point the
+      // messaging bar's contact chip at this person; the card opens on click.
+      setTimeout(refreshMessagingChip, 600);
 
       // Phase 3: Attach suggestion monitor
       setTimeout(attachSuggestionMonitor, 1000);

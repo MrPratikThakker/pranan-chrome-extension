@@ -176,6 +176,7 @@ export type MessageType =
   // v0.8.x voice auto-capture (opt-in)
   | 'CAPTURE_VOICE_EXEMPLAR'
   | 'LEARN_PAGE'
+  | 'HIDE_LEARN_BUTTON'
   // Recorded voice from a content script, transcribed by the worker
   | 'TRANSCRIBE_AUDIO';
 

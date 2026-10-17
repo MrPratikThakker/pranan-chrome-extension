@@ -91,8 +91,11 @@ describe('manifest and worker', () => {
   it('reads nothing until the user clicks, and never in frames or on login pages', () => {
     const top = learn.slice(learn.lastIndexOf('if (window.top === window'));
     expect(top).toContain('looksLikeLoginPage()');
-    expect(top).toContain('mount()');
+    expect(top).toContain('start()');
     expect(top).not.toContain('pageText(');
+    const start = learn.slice(learn.indexOf('async function start'), learn.lastIndexOf('if (window.top === window'));
+    expect(start).toContain('mount()');
+    expect(start).not.toContain('pageText(');
     expect(learn).toMatch(/go\.addEventListener\('click'[\s\S]*pageText\(\)/);
   });
 });
