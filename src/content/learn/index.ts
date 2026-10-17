@@ -11,7 +11,8 @@
  * over the site's own chat or cookie buttons, and its x only lasted until the
  * next page (Pratik, 16 Oct 2026). Now it is the Pranan mark, faded, halfway
  * down the right edge; it opens on hover or focus, and "Hide on this site" is
- * remembered until the user turns it back on in the popup.
+ * remembered for the whole site the user added, until they turn it back on in
+ * the popup.
  */
 import { claimContentScriptInstance } from '../shared/instance-guard';
 import { looksLikeLoginPage, MIN_PAGE_TEXT, pageText } from './page-text';
@@ -95,9 +96,17 @@ function mount(): void {
     noteTimer = setTimeout(() => { note.hidden = true; wrap.classList.remove('noted'); }, NOTE_MS);
   };
 
-  hide.addEventListener('click', () => {
+  hide.addEventListener('click', async () => {
     host.remove();
-    hideLearnButtonOn(location.hostname).catch(() => {});
+    // The worker saves the whole site the user added (notion.so for
+    // acme.notion.so). If it cannot be reached, keep at least this page's host.
+    let reply: { ok?: boolean } | undefined;
+    try {
+      reply = await chrome.runtime.sendMessage({ type: 'HIDE_LEARN_BUTTON' });
+    } catch {
+      reply = undefined;
+    }
+    if (!reply?.ok) await hideLearnButtonOn(location.hostname).catch(() => {});
   });
   go.addEventListener('click', async () => {
     if (looksLikeLoginPage()) { show('Pranan does not read sign-in or payment pages.'); return; }

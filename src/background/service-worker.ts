@@ -38,7 +38,7 @@ import { getPrivacySettings } from '@/lib/privacy-settings';
 import { beginCompanionLogin, consumePendingLogin, restorePendingLogin } from '@/lib/login-handoff';
 import { base64ToBlob, safeAudioMimeType, MAX_AUDIO_BASE64_LENGTH } from '@/lib/audio-transfer';
 import { isOwnContentScript, isTrustedPrivilegedSender, isValidTier } from './sender-trust';
-import { isLearnablePageUrl, syncLearnScript } from '@/lib/work-sites';
+import { hideKeyForHost, hideLearnButtonOn, isLearnablePageUrl, learningSiteForHost, listLearningSites, syncLearnScript } from '@/lib/work-sites';
 import { MAX_PAGE_TEXT, MIN_PAGE_TEXT } from '@/content/learn/page-text';
 
 // ---------------------------------------------------------------------------
@@ -697,6 +697,19 @@ async function handleMessage(
       // Origin and path only: a query string or fragment can carry tokens.
       const { origin, pathname } = new URL(pageUrl);
       return postLearnPage({ url: `${origin}${pathname}`, title, text });
+    }
+
+    case 'HIDE_LEARN_BUTTON': {
+      // "Hide on this site" from the learn tab. The page script cannot see the
+      // user's site list, so the site is worked out here from the sender's own
+      // address and saved, covering every page under it.
+      const pageUrl = sender.url ?? sender.tab?.url;
+      if (sender.id !== chrome.runtime.id || !sender.tab || (sender.frameId ?? 0) !== 0 || !pageUrl) return { ok: false };
+      const pageHost = new URL(pageUrl).hostname;
+      const site = learningSiteForHost(pageHost, await listLearningSites().catch(() => []));
+      const key = site ? site.host : hideKeyForHost(pageHost);
+      await hideLearnButtonOn(key);
+      return { ok: true, hidden: key };
     }
 
     case 'SET_TIER_OVERRIDE': {

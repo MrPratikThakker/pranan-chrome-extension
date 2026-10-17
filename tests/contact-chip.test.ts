@@ -120,3 +120,17 @@ describe('Slack content script', () => {
     expect(bar).toContain('createContactChip((anchor, data, options) => renderPopup(data, anchor, options))');
   });
 });
+
+describe('LinkedIn content script', () => {
+  const linkedin = stripComments(readFileSync('src/content/linkedin/index.ts', 'utf8'));
+
+  it('never opens the relationship card by itself; only the message bar chip opens it', () => {
+    expect(linkedin).not.toContain('showComposeRelationshipPopup');
+    expect(linkedin).not.toMatch(/setTimeout\([^)]*Popup/);
+    const bar = linkedin.slice(linkedin.indexOf('function injectMessagingPromptBar'), linkedin.indexOf('function injectCommentPromptBars'));
+    expect(bar).toContain('createContactChip((anchor, data, options) => renderPopup(data, anchor, options))');
+    // The bar outlives a switch of conversation, so the chip is refreshed on recipient change.
+    const detect = linkedin.slice(linkedin.indexOf('function detectActiveCompose'));
+    expect(detect).toContain('setTimeout(refreshMessagingChip, 600)');
+  });
+});

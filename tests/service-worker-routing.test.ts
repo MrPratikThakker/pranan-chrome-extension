@@ -185,6 +185,15 @@ describe('remember this page (Phase 3)', () => {
     expect(await send({ type: 'LEARN_PAGE', payload: { title: 'x', text: 'too short' } }, notionSender)).toMatchObject({ ok: false, reason: 'failed' });
     expect(api.postLearnPage).not.toHaveBeenCalled();
   });
+
+  it('hides the tab for the whole site the user added, from the sender\'s own address', async () => {
+    grantedOrigins = ['https://*.notion.so/*'];
+    const acme = { ...notionSender, url: 'https://acme.notion.so/q4-plan' };
+    expect(await send({ type: 'HIDE_LEARN_BUTTON' }, acme)).toEqual({ ok: true, hidden: 'notion.so' });
+    expect(await env.storage.local.get('pranan.learnButtonHiddenHosts')).toEqual({ 'pranan.learnButtonHiddenHosts': ['notion.so'] });
+    expect(await send({ type: 'HIDE_LEARN_BUTTON' }, { ...acme, frameId: 2 })).toEqual({ ok: false });
+    expect(await send({ type: 'HIDE_LEARN_BUTTON' }, { ...acme, id: 'other-ext' })).toEqual({ ok: false });
+  });
 });
 
 describe('tier correction from Gmail (EXT-17, XP-12)', () => {

@@ -9,6 +9,7 @@ import {
   hiddenHostsForSite,
   hideKeyForHost,
   isLearnButtonHidden,
+  learningSiteForHost,
 } from '@/lib/work-sites';
 
 describe('hide memory', () => {
@@ -26,6 +27,15 @@ describe('hide memory', () => {
     expect(isLearnButtonHidden('notacme.notion.so', hidden)).toBe(false);
   });
 
+  it('maps a page to the site the user added, most specific first', () => {
+    const notion = { pattern: 'https://*.notion.so/*', host: 'notion.so' };
+    const acme = { pattern: 'https://*.acme.notion.so/*', host: 'acme.notion.so' };
+    expect(learningSiteForHost('www.notion.so', [notion])).toEqual(notion);
+    expect(learningSiteForHost('team.notion.so', [notion, acme])).toEqual(notion);
+    expect(learningSiteForHost('docs.acme.notion.so', [notion, acme])).toEqual(acme);
+    expect(learningSiteForHost('notion.so.evil.com', [notion])).toBeNull();
+  });
+
   it('finds the hidden hosts that belong to a learning site', () => {
     const site = { pattern: 'https://*.notion.so/*', host: 'notion.so' };
     expect(hiddenHostsForSite(site, ['acme.notion.so', 'notion.so', 'notion.so.evil.com', 'figma.com'])).toEqual(['acme.notion.so', 'notion.so']);
@@ -36,7 +46,12 @@ type Store = Record<string, unknown>;
 
 function fakeChrome(store: Store, reply: unknown = { ok: true, suggested: 2 }) {
   return {
-    runtime: { id: 'test', sendMessage: vi.fn(async () => reply) },
+    runtime: {
+      id: 'test',
+      // No worker in this test: HIDE_LEARN_BUTTON goes unanswered, so the tab
+      // falls back to saving this page's own host.
+      sendMessage: vi.fn(async (msg: { type: string }) => (msg.type === 'HIDE_LEARN_BUTTON' ? undefined : reply)),
+    },
     storage: {
       local: {
         get: vi.fn(async (key: string) => (key in store ? { [key]: store[key] } : {})),

@@ -162,7 +162,8 @@ export async function syncLearnScript(): Promise<string[]> {
 //
 // The button used to come back on every page load after the user closed it.
 // Now its "Hide on this site" is kept in chrome.storage.local as a list of
-// page hosts ("acme.notion.so"), and the popup's site list can bring it back.
+// hosts: the learning site the page belongs to ("notion.so"), or the page's
+// own host when no site matches. The popup's site list can bring it back.
 // ---------------------------------------------------------------------------
 
 export const HIDDEN_LEARN_SITES_KEY = 'pranan.learnButtonHiddenHosts';
@@ -181,6 +182,17 @@ export function isLearnButtonHidden(hostname: string, hidden: readonly string[])
 /** Pure: the hidden hosts that belong to a learning site, e.g. notion.so covers acme.notion.so. */
 export function hiddenHostsForSite(site: SiteChoice, hidden: readonly string[]): string[] {
   return hidden.filter((h) => h === site.host || h.endsWith(`.${site.host}`));
+}
+
+/**
+ * Pure: the learning site a page belongs to, so "Hide on this site" on
+ * acme.notion.so hides the tab on every notion.so page the user added. The
+ * most specific match wins when sites overlap.
+ */
+export function learningSiteForHost(hostname: string, sites: readonly SiteChoice[]): SiteChoice | null {
+  const host = hideKeyForHost(hostname);
+  const matches = sites.filter((s) => host === s.host || host.endsWith(`.${s.host}`));
+  return matches.sort((a, b) => b.host.length - a.host.length)[0] ?? null;
 }
 
 function readHidden(value: unknown): string[] {
